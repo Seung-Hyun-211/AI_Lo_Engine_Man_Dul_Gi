@@ -125,7 +125,7 @@ sampler.Evaluate(model.skeleton, model.animations[0], timeSeconds, skin);
 | `ModelImporter` — 머티리얼 | ✅ 이름·컬러 추출. `pbr.base_color` 없으면 `fbx.diffuse_color` 폴백 |
 | `ModelImporter` — 애니메이션 bake | ✅ 컴파일. **애니메이션 있는 FBX 로 미검증** (Unity-chan 모델 FBX 엔 클립 없음 — 별도 파일) |
 | `AnimationSampler` (CPU 포즈 평가, loop) | ✅ 컴파일. 실데이터 미검증, 블렌딩 미구현 |
-| `ModelMeshPass3D` — **정적** 렌더 (바인드 포즈, 스키닝 없음) | ✅ FBX 를 시작 시 로드해 immutable VB/IB 생성, MeshPass3D 조명으로 그림. `main.cpp` 에서 `AddRenderPass`. 데모에서 Unity-chan 표시. 스키닝은 다음 |
+| `ModelMeshPass3D` — **정적** 렌더 (바인드 포즈, 스키닝 없음) + **텍스처** | ✅ FBX 를 시작 시 로드해 immutable VB/IB 생성. `import::LoadTga`(uncompressed TGA 24/32bpp) 로 디퓨즈 텍스처 로드 → SRV + linear-wrap 샘플러, 셰이더에서 샘플(V flip + alpha cutout). 머티리얼→파일은 FBX ref basename `.tga` 우선, 없으면 이름 테이블(Unity-chan: body→body_01.tga 등). `main.cpp` 에서 `AddRenderPass`. 스키닝은 다음 |
 | `SkinnedMeshPass3D` (GPU 스키닝) | ❌ 설계만 (§5.2) — `ModelMeshPass3D` 에 본 팔레트 + 스킨 셰이더 추가하는 형태 |
 | 상태 머신 / 블렌딩 / 루트 모션 | ❌ 설계만 (§5.3) |
 

@@ -21,6 +21,7 @@
     <ClCompile Include="src\game\Simulation.cpp" />
     <ClCompile Include="src\game\SnapshotBuilder.cpp" />
     <ClCompile Include="src\import\ModelImporter.cpp" />
+    <ClCompile Include="src\import\TgaImage.cpp" />
     <ClCompile Include="src\platform\Win32Window.cpp" />
     <ClCompile Include="src\physics\p2d\CollisionWorld2D.cpp" />
     <ClCompile Include="src\physics\p3d\CollisionWorld3D.cpp" />
@@ -44,6 +45,7 @@
     <ClInclude Include="src\game\SnapshotBuilder.h" />
     <ClInclude Include="src\import\Model.h" />
     <ClInclude Include="src\import\ModelImporter.h" />
+    <ClInclude Include="src\import\TgaImage.h" />
     <ClInclude Include="src\input\InputState.h" />
     <ClInclude Include="src\math\Math.h" />
     <ClInclude Include="src\math\Math2D.h" />
