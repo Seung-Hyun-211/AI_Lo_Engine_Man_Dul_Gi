@@ -29,6 +29,7 @@ src/
     Dx11Renderer.*         렌더 스레드. device/swapchain/depth 단독 소유. 패스 목록 실행
     r2d/Sprite2D.h, QuadPass2D.*   [2D] 스크린 공간 Quad, 깊이 off, straight-alpha
     r3d/Scene3D.h, MeshPass3D.*    [3D] 깊이 테스트, 원근 카메라, directional light, 내장 큐브·평면
+    r3d/ModelMeshPass3D.*          [3D] 시작 시 FBX 로드 → 정적 렌더(바인드 포즈; 스키닝·텍스처 아직)
   physics/                 core + p2d/p3d 모듈  → docs/collider-design.md
     Collision.h            ColliderId / CollisionLayer / Contact
     p2d/Collider2D.h, CollisionWorld2D.*   [2D] Box·Circle, N² 겹침 탐지

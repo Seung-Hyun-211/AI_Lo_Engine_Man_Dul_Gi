@@ -48,7 +48,11 @@ namespace engine::render
     {
         std::scoped_lock lock(m_mutex);
         if (m_running) throw std::logic_error("AddRenderPass must be called before Start()");
-        if (pass) m_passes.push_back(std::move(pass));
+        if (!pass) return;
+        // Keep the trailing 2D overlay pass last so the UI stays on top; new
+        // passes slot in just before it.
+        if (m_passes.empty()) m_passes.push_back(std::move(pass));
+        else m_passes.insert(m_passes.end() - 1, std::move(pass));
     }
 
     void Dx11Renderer::Start(HWND window, std::uint32_t width, std::uint32_t height)

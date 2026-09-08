@@ -39,10 +39,20 @@ namespace engine::render
         math::Vec3 lightDirection{ 0.3f, -1.0f, 0.4f };
     };
 
+    // One instance of the model that ModelMeshPass3D loaded at startup. Drawn as
+    // static geometry (bind pose) with the same directional light as MeshDraw.
+    // Skinning comes later - see docs/model-animation-research.md.
+    struct ModelDraw
+    {
+        math::Mat4 world{ math::Mat4::Identity() };
+        math::Color tint{ 1.0f, 1.0f, 1.0f, 1.0f };
+    };
+
     // The 3D half of a RenderSnapshot.
     struct Scene3D
     {
         CameraView camera{};
         std::vector<MeshDraw> meshDraws;
+        std::vector<ModelDraw> modelDraws;
     };
 }

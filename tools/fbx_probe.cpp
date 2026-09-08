@@ -26,7 +26,7 @@ int main(int argc, char** argv)
     std::printf("OK  meshes=%zu  materials=%zu  bones=%zu  clips=%zu\n",
         model.meshes.size(), model.materials.size(), model.skeleton.bones.size(), model.animations.size());
 
-    std::size_t totalVerts = 0, totalIndices = 0;
+    std::size_t totalVerts = 0, totalIndices = 0, vertsWithUV = 0;
     int skinnedMeshes = 0;
     double minPos[3] = { 1e30, 1e30, 1e30 }, maxPos[3] = { -1e30, -1e30, -1e30 };
     std::size_t badWeightSum = 0, badBoneIndex = 0;
@@ -44,6 +44,7 @@ int main(int argc, char** argv)
         {
             const float p[3] = { v.position.x, v.position.y, v.position.z };
             for (int k = 0; k < 3; ++k) { if (p[k] < minPos[k]) minPos[k] = p[k]; if (p[k] > maxPos[k]) maxPos[k] = p[k]; }
+            if (v.uv.x != 0.0f || v.uv.y != 0.0f) ++vertsWithUV;
             if (mesh.skinned)
             {
                 float sum = 0.0f;
@@ -56,7 +57,8 @@ int main(int argc, char** argv)
             }
         }
     }
-    std::printf("  totals: verts=%zu  tris=%zu  skinnedMeshes=%d\n", totalVerts, totalIndices / 3, skinnedMeshes);
+    std::printf("  totals: verts=%zu  tris=%zu  skinnedMeshes=%d  vertsWithNonZeroUV=%zu\n",
+        totalVerts, totalIndices / 3, skinnedMeshes, vertsWithUV);
     std::printf("  bounds: x[%.2f, %.2f]  y[%.2f, %.2f]  z[%.2f, %.2f]\n",
         minPos[0], maxPos[0], minPos[1], maxPos[1], minPos[2], maxPos[2]);
     std::printf("  skin sanity: vertices with weight-sum != 1 (+/-0.01) = %zu, out-of-range bone index = %zu\n",

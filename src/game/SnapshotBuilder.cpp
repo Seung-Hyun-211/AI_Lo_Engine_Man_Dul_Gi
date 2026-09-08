@@ -22,19 +22,28 @@ namespace engine::game
                 ? static_cast<float>(viewportWidth) / static_cast<float>(viewportHeight)
                 : 1.0f;
 
-            const float angle = elapsed * 0.5f;   // slow orbit around the origin
-            const math::Vec3 eye{ std::sin(angle) * 6.0f, 3.5f, -std::cos(angle) * 6.0f };
-            const math::Vec3 target{ 0.0f, 0.5f, 0.0f };
+            const float angle = elapsed * 0.4f;   // slow orbit, framed on the model at the origin
+            const math::Vec3 eye{ std::sin(angle) * 3.6f, 1.7f, -std::cos(angle) * 3.6f };
+            const math::Vec3 target{ 0.0f, 0.9f, 0.0f };
 
             render::CameraView camera{};
             camera.view = math::LookAtLH(eye, target, { 0.0f, 1.0f, 0.0f });
-            camera.projection = math::PerspectiveFovLH(kPi / 3.0f, aspect, 0.1f, 100.0f);
+            camera.projection = math::PerspectiveFovLH(kPi / 3.0f, aspect, 0.05f, 100.0f);
             camera.lightDirection = { 0.4f, -1.0f, 0.35f };
             return camera;
         }
 
+        // The cube/collision demo lives off to the side so the FBX model has the
+        // centre of the frame.
+        constexpr math::Vec3 kDemoOffset{ 2.5f, 0.0f, 1.5f };
+
         void BuildScene3D(render::Scene3D& scene, const Simulation& simulation)
         {
+            // FBX model (loaded by ModelMeshPass3D), slowly turning at the origin.
+            render::ModelDraw model{};
+            model.world = math::RotationY(simulation.ElapsedTime() * 0.3f);
+            scene.modelDraws.push_back(model);
+
             render::MeshDraw ground{};
             ground.mesh = render::MeshId::Plane;
             ground.world = math::Scaling({ 14.0f, 1.0f, 14.0f });
@@ -45,7 +54,7 @@ namespace engine::game
             render::MeshDraw hero{};
             hero.mesh = render::MeshId::Cube;
             hero.world = math::RotationX(spin * 0.6f) * math::RotationY(spin)
-                       * math::Translation(simulation.HeroCenter());
+                       * math::Translation(simulation.HeroCenter() + kDemoOffset);
             hero.color = { 0.95f, 0.55f, 0.25f, 1.0f };
             scene.meshDraws.push_back(hero);
 
@@ -55,7 +64,8 @@ namespace engine::game
             {
                 render::MeshDraw satellite{};
                 satellite.mesh = render::MeshId::Cube;
-                satellite.world = math::Scaling({ 0.6f, 0.6f, 0.6f }) * math::Translation(centers[i]);
+                satellite.world = math::Scaling({ 0.6f, 0.6f, 0.6f })
+                                * math::Translation(centers[i] + kDemoOffset);
                 satellite.color = hits[i]
                     ? math::Color{ 0.95f, 0.30f, 0.30f, 1.0f }   // in contact with the hero cube
                     : math::Color{ 0.35f, 0.75f, 0.95f, 1.0f };

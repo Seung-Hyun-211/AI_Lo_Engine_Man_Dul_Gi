@@ -125,7 +125,8 @@ sampler.Evaluate(model.skeleton, model.animations[0], timeSeconds, skin);
 | `ModelImporter` — 머티리얼 | ✅ 이름·컬러 추출. `pbr.base_color` 없으면 `fbx.diffuse_color` 폴백 |
 | `ModelImporter` — 애니메이션 bake | ✅ 컴파일. **애니메이션 있는 FBX 로 미검증** (Unity-chan 모델 FBX 엔 클립 없음 — 별도 파일) |
 | `AnimationSampler` (CPU 포즈 평가, loop) | ✅ 컴파일. 실데이터 미검증, 블렌딩 미구현 |
-| `SkinnedMeshPass3D` (GPU 스키닝) | ❌ 설계만 (§5.2) |
+| `ModelMeshPass3D` — **정적** 렌더 (바인드 포즈, 스키닝 없음) | ✅ FBX 를 시작 시 로드해 immutable VB/IB 생성, MeshPass3D 조명으로 그림. `main.cpp` 에서 `AddRenderPass`. 데모에서 Unity-chan 표시. 스키닝은 다음 |
+| `SkinnedMeshPass3D` (GPU 스키닝) | ❌ 설계만 (§5.2) — `ModelMeshPass3D` 에 본 팔레트 + 스킨 셰이더 추가하는 형태 |
 | 상태 머신 / 블렌딩 / 루트 모션 | ❌ 설계만 (§5.3) |
 
 관찰: Unity-chan FBX 는 단위가 **cm** (키 ≈156 유닛). `ImportOptions::scale = 0.01` 로 미터화. 텍스처 경로는 원본 `.psd` 참조 (stale) — 실제 `.tga` 는 FBX 옆에. 에셋 경로 해석기는 별도 과제.

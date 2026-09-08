@@ -27,6 +27,7 @@
     <ClCompile Include="src\render\Dx11Renderer.cpp" />
     <ClCompile Include="src\render\r2d\QuadPass2D.cpp" />
     <ClCompile Include="src\render\r3d\MeshPass3D.cpp" />
+    <ClCompile Include="src\render\r3d\ModelMeshPass3D.cpp" />
     <ClCompile Include="src\ui\UI.cpp" />
     <ClCompile Include="src\vendor\ufbx\ufbx.c">
       <CompileAs>CompileAsCpp</CompileAs>
@@ -60,6 +61,7 @@
     <ClInclude Include="src\render\r2d\QuadPass2D.h" />
     <ClInclude Include="src\render\r2d\Sprite2D.h" />
     <ClInclude Include="src\render\r3d\MeshPass3D.h" />
+    <ClInclude Include="src\render\r3d\ModelMeshPass3D.h" />
     <ClInclude Include="src\render\r3d\Scene3D.h" />
     <ClInclude Include="src\ui\UI.h" />
     <ClInclude Include="src\vendor\ufbx\ufbx.h" />

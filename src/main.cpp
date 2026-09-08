@@ -1,9 +1,13 @@
 #include "game/Application.h"
 #include "render/Dx11Renderer.h"
+#if defined(ENGINE_WITH_3D)
+#include "render/r3d/ModelMeshPass3D.h"
+#endif
 
 #include <Windows.h>
 
 #include <exception>
+#include <memory>
 #include <string>
 
 // Entry point only. It picks the concrete renderer and hands it to Application
@@ -15,9 +19,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     try
     {
         engine::render::Dx11Renderer renderer;
-        // The renderer ships with MeshPass3D + QuadPass2D. Add more stages here
-        // before Run(), e.g.:
-        //   renderer.AddRenderPass(std::make_unique<engine::render::DebugLinePass>());
+        // The renderer ships with MeshPass3D + QuadPass2D. Extra stages slot in
+        // before the 2D overlay.
+#if defined(ENGINE_WITH_3D)
+        renderer.AddRenderPass(std::make_unique<engine::render::ModelMeshPass3D>(
+            "assets/models/unitychan/unitychan.fbx"));
+#endif
         engine::game::Application application(instance, renderer);
         return application.Run();
     }

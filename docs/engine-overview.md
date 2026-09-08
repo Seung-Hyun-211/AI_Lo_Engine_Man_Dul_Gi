@@ -107,7 +107,8 @@ render(Dx11) ─▶ core(NonCopyable), D3D11     상위 레이어를 도로 참�
 
 뼈대가 살아있음을 보이기 위한 최소 콘텐츠만 있다. 실제 게임 로직은 없다.
 
-- **3D (MeshPass3D):** 바닥 평면 + 두 축으로 회전하는 큐브 + 궤도 반경이 진동하는 위성 큐브 2개. 위성은 `CollisionWorld3D`(Box vs Sphere)로 중심 큐브와의 접촉을 감지해 접촉 시 빨갛게. 카메라는 궤도, directional light Lambert.
+- **3D 모델 (ModelMeshPass3D):** `assets/models/unitychan/unitychan.fbx` 를 시작 시 로드해 화면 중앙에서 천천히 회전(정적 바인드 포즈, 평면 조명, 텍스처 없음).
+- **3D 데모 (MeshPass3D):** 옆으로 치운 위치에 바닥 평면 + 회전 큐브 + 궤도 위성 큐브 2개. 위성은 `CollisionWorld3D`(Box vs Sphere)로 중심 큐브 접촉 감지 → 빨갛게.
 - **2D 오버레이 (QuadPass2D):** 방향키로 움직이는 사각형 + 고정 장애물 박스 3개. `CollisionWorld2D`(AABB)로 겹침 감지 → 겹치면 플레이어가 주황색(위치 보정은 없음).
 - 20,000개 파티클을 매 고정 스텝 `ParallelFor`로 advect — **JobSystem 처리량 스텁**. 앞 2,048개만 2D 점으로 그린다.
 - `UIContext`: 반투명 패널 + `START` 버튼 + 상태 텍스트 2줄.
