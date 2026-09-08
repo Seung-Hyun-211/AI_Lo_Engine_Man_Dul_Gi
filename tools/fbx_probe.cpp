@@ -3,6 +3,7 @@
 // Run:   fbx_probe.exe [path/to/model.fbx]
 
 #include "import/ModelImporter.h"
+#include "import/CreaseLines.h"
 #include "anim/AnimationSampler.h"
 
 #include <cmath>
@@ -101,6 +102,21 @@ int main(int argc, char** argv)
             for (float f : m.m) if (!std::isfinite(f)) finite = false;
         std::printf("  AnimationSampler @%.3fs -> %zu skin matrices, all finite=%d, bone[0] translate=(%.3f %.3f %.3f)\n",
             t, skin.size(), finite ? 1 : 0, skin[0].m[12], skin[0].m[13], skin[0].m[14]);
+    }
+
+    // Crease-line segment counts at a few normal-angle thresholds (helps tune
+    // ModelMeshPass3D / import::CreaseOptions::thresholdDegrees).
+    std::printf("  crease segments by threshold (angle between adjacent face normals):\n");
+    for (float threshold : { 90.0f, 60.0f, 45.0f, 30.0f, 20.0f })
+    {
+        std::size_t segs = 0;
+        for (const engine::import::ModelMesh& mesh : model.meshes)
+        {
+            engine::import::CreaseOptions opt;
+            opt.thresholdDegrees = threshold;
+            segs += engine::import::BuildCreaseLines(mesh, nullptr, nullptr, opt).size() / 6;
+        }
+        std::printf("    > %4.0f deg : %zu segments\n", threshold, segs);
     }
 
     std::printf("done.\n");

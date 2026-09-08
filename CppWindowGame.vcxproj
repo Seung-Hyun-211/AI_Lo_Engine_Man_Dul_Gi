@@ -21,6 +21,7 @@
     <ClCompile Include="src\game\Application.cpp" />
     <ClCompile Include="src\game\Simulation.cpp" />
     <ClCompile Include="src\game\SnapshotBuilder.cpp" />
+    <ClCompile Include="src\import\CreaseLines.cpp" />
     <ClCompile Include="src\import\ModelImporter.cpp" />
     <ClCompile Include="src\import\TgaImage.cpp" />
     <ClCompile Include="src\platform\Win32Window.cpp" />
@@ -46,6 +47,7 @@
     <ClInclude Include="src\game\Application.h" />
     <ClInclude Include="src\game\Simulation.h" />
     <ClInclude Include="src\game\SnapshotBuilder.h" />
+    <ClInclude Include="src\import\CreaseLines.h" />
     <ClInclude Include="src\import\Model.h" />
     <ClInclude Include="src\import\ModelImporter.h" />
     <ClInclude Include="src\import\TgaImage.h" />
@@ -65,6 +67,8 @@
     <ClInclude Include="src\render\RenderSnapshot.h" />
     <ClInclude Include="src\render\r2d\QuadPass2D.h" />
     <ClInclude Include="src\render\r2d\Sprite2D.h" />
+    <ClInclude Include="src\render\r3d\FrameConstants.h" />
+    <ClInclude Include="src\render\r3d\Lighting.h" />
     <ClInclude Include="src\render\r3d\MeshPass3D.h" />
     <ClInclude Include="src\render\r3d\ModelMeshPass3D.h" />
     <ClInclude Include="src\render\r3d\Scene3D.h" />
@@ -74,8 +78,11 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="assets\shaders\common3d.hlsli" />
+    <None Include="assets\shaders\cel.hlsl" />
+    <None Include="assets\shaders\crease.hlsl" />
     <None Include="assets\shaders\mesh.hlsl" />
     <None Include="assets\shaders\model.hlsl" />
+    <None Include="assets\shaders\outline.hlsl" />
     <None Include="assets\shaders\quad2d.hlsl" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

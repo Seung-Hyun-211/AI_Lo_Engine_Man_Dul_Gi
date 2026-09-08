@@ -15,17 +15,19 @@ struct ID3D11RasterizerState;
 struct ID3D11SamplerState;
 struct ID3D11ShaderResourceView;
 
+namespace engine::import { struct TgaImage; }
+
 namespace engine::render
 {
     struct ShaderProgram;
 
-    // Draws one FBX model, loaded once at startup, as static lit geometry (bind
-    // pose - no skinning yet). It reuses the MeshPass3D lighting model. The model
-    // path is given to the constructor; if the file cannot be loaded the pass
-    // simply draws nothing.
-    //
-    // This is the "see the model" milestone. Skinned animation replaces the
-    // static draw with SkinnedMeshPass3D - see docs/model-animation-research.md.
+    // Draws one FBX model, loaded once at startup, as static geometry (bind pose
+    // - no skinning yet):
+    //   1. inverted-hull silhouette outline (assets/shaders/outline.hlsl)
+    //   2. cel-shaded surface, textured        (assets/shaders/cel.hlsl)
+    //   3. interior crease lines, AO-tinted    (assets/shaders/crease.hlsl,
+    //      geometry from import/CreaseLines)
+    // If the file cannot be loaded the pass draws nothing.
     class ModelMeshPass3D final : public IRenderPass, private core::NonCopyable
     {
     public:
@@ -48,21 +50,29 @@ namespace engine::render
         };
 
         void LoadModel(ID3D11Device* device);
-        // Resolves a material to a texture SRV (loading + caching the TGA), or
-        // nullptr. Demo-asset heuristic - see the .cpp.
-        ID3D11ShaderResourceView* ResolveTexture(ID3D11Device* device, const std::string& materialName,
-                                                 const std::string& fbxRefPath);
+        ID3D11ShaderResourceView* CreateTextureSrv(ID3D11Device* device, const std::string& fileName,
+                                                   const engine::import::TgaImage& image);
 
         std::string m_modelPath;
         std::string m_resolvedDir;   // directory the FBX actually loaded from
         std::vector<SubMesh> m_subMeshes;
         std::unordered_map<std::string, ID3D11ShaderResourceView*> m_textures;   // filename -> SRV (owned)
-        const ShaderProgram* m_shader{};   // owned by ShaderLibrary
+
+        const ShaderProgram* m_shader{};          // "cel"
+        const ShaderProgram* m_outlineShader{};   // "outline"
+        const ShaderProgram* m_creaseShader{};    // "crease"
+
         ID3D11Buffer* m_frameConstants{};
         ID3D11Buffer* m_objectConstants{};
-        ID3D11DepthStencilState* m_depthEnabled{};
-        ID3D11RasterizerState* m_rasterizer{};
+        ID3D11Buffer* m_outlineConstants{};       // b2: outline width
+        ID3D11Buffer* m_creaseVertexBuffer{};
+        std::uint32_t m_creaseVertexCount{};
+
+        ID3D11DepthStencilState* m_depthEnabled{};        // test LESS + write
+        ID3D11DepthStencilState* m_depthReadLessEqual{};  // test LESS_EQUAL, no write (crease)
+        ID3D11RasterizerState* m_rasterizer{};            // solid, cull none
+        ID3D11RasterizerState* m_outlineRasterizer{};     // solid, cull front (hull)
         ID3D11SamplerState* m_sampler{};
-        ID3D11ShaderResourceView* m_whiteTexture{};   // 1x1, fallback when a mesh has no texture
+        ID3D11ShaderResourceView* m_whiteTexture{};       // 1x1 fallback
     };
 }

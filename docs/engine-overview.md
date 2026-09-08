@@ -48,7 +48,7 @@ wWinMain (src/main.cpp)
 | `engine::input` | `input/InputState.h` | 입력 상태 표현·에지 판정이 바뀔 때 |
 | `engine::render` | `render/IRenderer.h`, `RenderPass.h`, `RenderSnapshot.h`, `Dx11Renderer.*` + `render/shader/*` + `render/r2d/*` + `render/r3d/*` | 렌더 백엔드/스냅샷 포맷/파이프라인 스테이지/셰이더 로딩이 바뀔 때 ([shader-pipeline.md](shader-pipeline.md)) |
 | `engine::physics` | `physics/Collision.h` + `physics/p2d/*` + `physics/p3d/*` | 충돌 탐지 규칙이 바뀔 때 ([collider-design.md](collider-design.md)) |
-| `engine::import` | `import/Model.h`, `import/ModelImporter.*` (+ `vendor/ufbx`) | FBX → `Model` 매핑이 바뀔 때 ([model-animation-research.md](model-animation-research.md)) |
+| `engine::import` | `import/Model.h`, `import/ModelImporter.*`, `import/TgaImage.*`, `import/CreaseLines.*` (+ `vendor/ufbx`) | FBX/TGA → 엔진 데이터 매핑이 바뀔 때 ([model-animation-research.md](model-animation-research.md)) |
 | `engine::anim` | `anim/AnimationSampler.*` | 포즈 평가·블렌딩 규칙이 바뀔 때 |
 | `engine::ui` | `ui/UI.*` | 위젯 트리·오버레이 규칙이 바뀔 때 |
 | `engine::game` | `game/Simulation.*`, `game/SnapshotBuilder.*`, `game/Application.*` | 프레임 흐름·월드 규칙이 바뀔 때 |
@@ -108,7 +108,7 @@ render(Dx11) ─▶ core(NonCopyable), D3D11     상위 레이어를 도로 참�
 
 뼈대가 살아있음을 보이기 위한 최소 콘텐츠만 있다. 실제 게임 로직은 없다.
 
-- **3D 모델 (ModelMeshPass3D):** `assets/models/unitychan/unitychan.fbx` 를 시작 시 로드, 디퓨즈 TGA 텍스처 적용, 화면 중앙에서 천천히 회전(정적 바인드 포즈, Lambert, alpha cutout). 스키닝 없음.
+- **3D 모델 (ModelMeshPass3D):** `assets/models/unitychan/unitychan.fbx` 를 시작 시 로드, 화면 중앙에서 천천히 회전. **셀 셰이딩**(4밴드 10/30/50°) + **인버티드 헐 실루엣 아웃라인** + **내부 크리즈 라인**(법선각 >90° 에지, AO 톤) + 디퓨즈 TGA. 정적 바인드 포즈, 스키닝 없음. 세부 [toon-rendering.md](toon-rendering.md), 조명 [lighting.md](lighting.md).
 - **3D 데모 (MeshPass3D):** 옆으로 치운 위치에 바닥 평면 + 회전 큐브 + 궤도 위성 큐브 2개. 위성은 `CollisionWorld3D`(Box vs Sphere)로 중심 큐브 접촉 감지 → 빨갛게.
 - **2D 오버레이 (QuadPass2D):** 방향키로 움직이는 사각형 + 고정 장애물 박스 3개. `CollisionWorld2D`(AABB)로 겹침 감지 → 겹치면 플레이어가 주황색(위치 보정은 없음).
 - 20,000개 파티클을 매 고정 스텝 `ParallelFor`로 advect — **JobSystem 처리량 스텁**. 앞 2,048개만 2D 점으로 그린다.

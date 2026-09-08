@@ -29,8 +29,18 @@ namespace engine::game
             render::CameraView camera{};
             camera.view = math::LookAtLH(eye, target, { 0.0f, 1.0f, 0.0f });
             camera.projection = math::PerspectiveFovLH(kPi / 3.0f, aspect, 0.05f, 100.0f);
-            camera.lightDirection = { 0.4f, -1.0f, 0.35f };
             return camera;
+        }
+
+        render::Lighting BuildLighting()
+        {
+            render::Lighting lighting{};
+            // 3/4 key from front-upper-right so the camera-facing side reads;
+            // warm tint, modest ambient fill so nothing goes fully black.
+            lighting.key.direction = { 0.35f, -0.55f, 0.75f };
+            lighting.key.color = { 1.0f, 0.96f, 0.88f, 1.0f };   // rgb, a = intensity
+            lighting.ambient.color = { 0.17f, 0.18f, 0.22f, 1.0f };
+            return lighting;
         }
 
         // The cube/collision demo lives off to the side so the FBX model has the
@@ -86,6 +96,7 @@ namespace engine::game
 
 #if defined(ENGINE_WITH_3D)
         snapshot.scene3d.camera = BuildCamera(simulation.ElapsedTime(), viewportWidth, viewportHeight);
+        snapshot.scene3d.lighting = BuildLighting();
         BuildScene3D(snapshot.scene3d, simulation);
 #else
         (void)viewportWidth;

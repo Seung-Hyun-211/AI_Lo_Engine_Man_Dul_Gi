@@ -3,6 +3,7 @@
 #if defined(ENGINE_WITH_3D)
 
 #include "math/Math3D.h"
+#include "render/r3d/FrameConstants.h"
 #include "render/shader/ShaderLibrary.h"
 
 #include <d3d11.h>
@@ -29,7 +30,6 @@ namespace
     using engine::render::MeshData;
     using engine::render::MeshVertex;
 
-    struct FrameConstants { float viewProj[16]; float lightDir[4]; };
     struct ObjectConstants { float world[16]; float color[4]; };
 
     void ThrowIfFailed(HRESULT result, const char* message)
@@ -112,7 +112,7 @@ namespace engine::render
         m_shader = shaders.Get(device, "mesh", layout, ARRAYSIZE(layout));
 
         D3D11_BUFFER_DESC frameDesc{};
-        frameDesc.ByteWidth = sizeof(FrameConstants);
+        frameDesc.ByteWidth = sizeof(FrameConstantsGpu);
         frameDesc.Usage = D3D11_USAGE_DEFAULT;
         frameDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
         ThrowIfFailed(device->CreateBuffer(&frameDesc, nullptr, &m_frameConstants), "CreateBuffer (mesh frame) failed");
@@ -150,13 +150,8 @@ namespace engine::render
 
         ID3D11DeviceContext* device = context.context;
 
-        const math::Mat4 viewProj = scene.camera.view * scene.camera.projection;
-        FrameConstants frame{};
-        std::memcpy(frame.viewProj, viewProj.m, sizeof(frame.viewProj));
-        frame.lightDir[0] = scene.camera.lightDirection.x;
-        frame.lightDir[1] = scene.camera.lightDirection.y;
-        frame.lightDir[2] = scene.camera.lightDirection.z;
-        frame.lightDir[3] = 0.0f;
+        FrameConstantsGpu frame{};
+        FillFrameConstants(scene.camera, scene.lighting, frame);
         device->UpdateSubresource(m_frameConstants, 0, nullptr, &frame, 0, 0);
 
         device->OMSetBlendState(nullptr, nullptr, 0xffffffff);

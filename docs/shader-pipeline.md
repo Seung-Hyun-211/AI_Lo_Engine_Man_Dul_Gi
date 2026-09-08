@@ -12,13 +12,19 @@
 
 ```text
 assets/shaders/
-  common3d.hlsli   Frame(b0)/Object(b1) cbuffer + ApplyDirectionalLight()
-  mesh.hlsl        MeshPass3D      (pos+normal, 평면 색)
-  model.hlsl       ModelMeshPass3D (pos+normal+uv, 텍스처 + alpha cutout)
-  quad2d.hlsl      QuadPass2D      (스크린 공간 pos+color)
+  common3d.hlsli   Frame(b0: viewProj + key/ambient 조명) / Object(b1) cbuffer
+                   + ApplyLighting() / ApplyCelLighting()   ← 조명은 docs/lighting.md
+  mesh.hlsl        MeshPass3D       (pos+normal, 평면 색, 램버트)
+  model.hlsl       ModelMeshPass3D  (pos+normal+uv, 텍스처 + 램버트) — 대안
+  cel.hlsl         ModelMeshPass3D  (pos+normal+uv, 텍스처 + 4밴드 셀)  ← 기본
+  outline.hlsl     ModelMeshPass3D  (pos+normal, 인버티드 헐 실루엣)
+  crease.hlsl      ModelMeshPass3D  (pos+color, CPU 생성 크리즈 리본)
+  quad2d.hlsl      QuadPass2D       (스크린 공간 pos+color)
+  ← 툰 3종(cel/outline/crease) 세부: docs/toon-rendering.md
 
 src/core/AssetPaths.{h,cpp}          작업 디렉터리와 무관하게 assets/ 루트를 찾음
 src/render/shader/ShaderLibrary.{h,cpp}   .hlsl -> ShaderProgram{vs, ps, inputLayout}, 캐시 + 핫리로드
+src/render/r3d/FrameConstants.h      Frame cbuffer(b0) 의 C++ 레이아웃 + FillFrameConstants()
 ```
 
 ### `AssetPaths`

@@ -30,8 +30,9 @@ src/
     shader/ShaderLibrary.* assets/shaders/*.hlsl 컴파일·캐시·핫리로드  → docs/shader-pipeline.md
     Dx11Renderer.*         렌더 스레드. device/swapchain/depth + ShaderLibrary 소유. 패스 목록 실행
     r2d/Sprite2D.h, QuadPass2D.*   [2D] 스크린 공간 Quad, 깊이 off, straight-alpha
-    r3d/Scene3D.h, MeshPass3D.*    [3D] 깊이 테스트, 원근 카메라, directional light, 내장 큐브·평면
-    r3d/ModelMeshPass3D.*          [3D] 시작 시 FBX + 디퓨즈 TGA 로드 → 정적 텍스처 렌더(바인드 포즈; 스키닝 아직)
+    r3d/Lighting.h, FrameConstants.h  [3D] key + ambient 조명, Frame cbuffer  → docs/lighting.md
+    r3d/Scene3D.h, MeshPass3D.*    [3D] 깊이 테스트, 원근 카메라, 내장 큐브·평면
+    r3d/ModelMeshPass3D.*          [3D] FBX 셀 셰이딩 + 아웃라인 + 크리즈 라인 + TGA  → docs/toon-rendering.md
   physics/                 core + p2d/p3d 모듈  → docs/collider-design.md
     Collision.h            ColliderId / CollisionLayer / Contact
     p2d/Collider2D.h, CollisionWorld2D.*   [2D] Box·Circle, N² 겹침 탐지
@@ -40,6 +41,7 @@ src/
     Model.h                ModelMesh / ModelMaterial / Skeleton(Bone) / AnimationClip
     ModelImporter.*        ufbx 로 로드. 메시·머티리얼·스켈레톤·애니메이션(bake). ufbx 는 여기 갇힘
     TgaImage.*             작은 TGA 리더 (uncompressed 24/32bpp) -> RGBA8
+    CreaseLines.*          법선각 급한 에지 -> AO 톤 크리즈 리본 (CPU, 로드 시 1회)
   anim/AnimationSampler.*  CPU 포즈 평가: (skeleton + clip + time) -> 본별 skin Mat4
   vendor/ufbx/             ufbx 0.23.0 (ufbx.h + ufbx.c), MIT/Public Domain
   ui/UI.*                  Widget / UIWindow / Button / TextLine / UIContext
@@ -48,13 +50,13 @@ src/
     SnapshotBuilder.*      Simulation + UIContext → RenderSnapshot
     Application.*           조립·프레임 지휘. IWindowEventSink 구현
 assets/
-  shaders/*.hlsl(i)        mesh / model / quad2d + common3d.hlsli (핫리로드)  → docs/shader-pipeline.md
+  shaders/*.hlsl(i)        cel / model / mesh / outline / crease / quad2d + common3d.hlsli (핫리로드)
   models/                  FBX (+ .tga 는 .gitignore)
 ```
 
 2D와 3D는 서로 `#include` 하지 않는 별도 모듈이다. `ENGINE_WITH_3D`를 빼면 3D 코드가 빌드에서 완전히 제외되고 2D 전용 exe가 경고 0으로 빌드된다.
 
-자세한 지도·프레임 흐름·확장 지점은 [docs/engine-overview.md](docs/engine-overview.md). 명령 단위 작업 절차는 [docs/command-playbook.md](docs/command-playbook.md). 설계 문서: [time-design](docs/time-design.md) · [collider-design](docs/collider-design.md) · [model-animation-research](docs/model-animation-research.md) · [shader-pipeline](docs/shader-pipeline.md).
+자세한 지도·프레임 흐름·확장 지점은 [docs/engine-overview.md](docs/engine-overview.md). 명령 단위 작업 절차는 [docs/command-playbook.md](docs/command-playbook.md). 설계 문서: [time-design](docs/time-design.md) · [collider-design](docs/collider-design.md) · [model-animation-research](docs/model-animation-research.md) · [shader-pipeline](docs/shader-pipeline.md) · [toon-rendering](docs/toon-rendering.md) · [lighting](docs/lighting.md).
 
 ## 스레드 계약
 

@@ -32,7 +32,9 @@ C++20 / Win32 / DirectX 11 기반 2D 게임 엔진 뼈대. 이 파일은 세션�
 
 9. 서드파티는 `src/vendor/`에 소스 vendor (현재 `ufbx` — FBX 로더, MIT/PD, v0.23.0). `ufbx.c`는 C++로 컴파일, 경고 off. ufbx 타입은 `src/import/ModelImporter.cpp` 안에만 — 밖으로는 엔진 타입(`import::Model` 등)만 나간다. 모델/애니메이션 세부는 `docs/model-animation-research.md`.
 
-모듈 지도·프레임 흐름·확장 지점은 `docs/engine-overview.md`, 스레드 계약은 `docs/multithreaded_game_engine_architecture.md`, UI는 `docs/ui-architecture.md`, 시간은 `docs/time-design.md`, 충돌은 `docs/collider-design.md`, 모델·애니메이션은 `docs/model-animation-research.md`, 셰이더는 `docs/shader-pipeline.md`.
+모듈별 상세: `docs/engine-overview.md`(지도), `multithreaded_game_engine_architecture.md`(스레드), `ui-architecture.md`, `time-design.md`, `collider-design.md`, `model-animation-research.md`, `shader-pipeline.md`(셰이더 로딩), `toon-rendering.md`(셀·아웃라인·크리즈), `lighting.md`(조명).
+
+3D 조명은 `Scene3D::lighting`(값 타입, `render/r3d/Lighting.h`) → `Frame` cbuffer(b0). C++ `FrameConstantsGpu` 와 `common3d.hlsli` 의 `cbuffer Frame` 레이아웃은 항상 같이 고친다. 패스마다 `FrameConstants` 재정의 금지 — `render/r3d/FrameConstants.h` 공유.
 
 ## 설계 원칙 — 최우선 (모든 신규/수정 코드에 적용)
 

@@ -4,8 +4,8 @@
 // ENGINE_WITH_3D is defined. Peer of render/r2d; nothing here depends on 2D.
 
 #include "math/Math3D.h"
-
 #include "math/Math2D.h"   // math::Color is shared (lives in the 2D module)
+#include "render/r3d/Lighting.h"
 
 #include <cstdint>
 #include <vector>
@@ -30,13 +30,11 @@ namespace engine::render
         math::Color color{ 1.0f, 1.0f, 1.0f, 1.0f };
     };
 
-    // Camera + lighting for the 3D pass this frame.
+    // Camera for the 3D passes this frame.
     struct CameraView
     {
         math::Mat4 view{ math::Mat4::Identity() };
         math::Mat4 projection{ math::Mat4::Identity() };
-        // Direction the light travels, world space (need not be unit).
-        math::Vec3 lightDirection{ 0.3f, -1.0f, 0.4f };
     };
 
     // One instance of the model that ModelMeshPass3D loaded at startup. Drawn as
@@ -52,6 +50,7 @@ namespace engine::render
     struct Scene3D
     {
         CameraView camera{};
+        Lighting lighting{};
         std::vector<MeshDraw> meshDraws;
         std::vector<ModelDraw> modelDraws;
     };

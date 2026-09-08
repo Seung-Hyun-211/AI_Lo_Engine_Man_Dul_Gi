@@ -15,5 +15,5 @@ VSOut VSMain(VSIn input)
 
 float4 PSMain(VSOut input) : SV_TARGET
 {
-    return float4(ApplyDirectionalLight(objColor.rgb, input.nrm, 0.25f), objColor.a);
+    return float4(ApplyLighting(objColor.rgb, input.nrm), objColor.a);
 }
