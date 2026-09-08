@@ -47,6 +47,7 @@ namespace engine::render
             std::uint32_t indexCount{};
             std::uint32_t vertexStride{};
             math::Color color{ 1.0f, 1.0f, 1.0f, 1.0f };
+            float shadowBias{};                    // degrees; larger on face/skin materials
             ID3D11ShaderResourceView* texture{};   // non-owning; owned by m_textures
         };
 
@@ -66,6 +67,7 @@ namespace engine::render
         ID3D11Buffer* m_frameConstants{};
         ID3D11Buffer* m_objectConstants{};
         ID3D11Buffer* m_outlineConstants{};       // b2: outline width
+        ID3D11Buffer* m_celConstants{};           // b3: per-material shadow bias
         ID3D11Buffer* m_creaseVertexBuffer{};
         std::uint32_t m_creaseVertexCount{};
 

@@ -26,6 +26,7 @@ namespace
 {
     struct ObjectConstants { float world[16]; float color[4]; };
     struct OutlineConstants { float width; float pad[3]; };
+    struct CelParamsGpu { float shadowBias; float pad[3]; };   // b3, per-material
     struct CreaseVertexGpu { float px, py, pz, r, g, b, a; };
 
     // Silhouette thickness as a fraction of half-screen (see outline.hlsl).
@@ -82,6 +83,17 @@ namespace
         }
         const char* mapped = MaterialToTga(materialName);
         return mapped != nullptr ? std::string(mapped) : std::string{};
+    }
+
+    // Face / skin materials keep lit through a wider angle so the self-shadow
+    // terminator does not carve up the face (docs/toon-rendering.md).
+    float MaterialShadowBias(const std::string& materialName)
+    {
+        const std::string n = ToLower(materialName);
+        if (n.rfind("face", 0) == 0 || n == "eyebase" || n == "eyeline"
+            || n == "eye_l1" || n == "eye_r1" || n == "mat_cheek" || n == "cheek" || n == "skin1")
+            return 14.0f;
+        return 0.0f;
     }
 }
 
@@ -169,6 +181,7 @@ namespace engine::render
             {
                 material = &result.model.materials[static_cast<std::size_t>(mesh.materialIndex)];
                 sub.color = material->baseColor;
+                sub.shadowBias = MaterialShadowBias(material->name);
                 fileName = ResolveTextureFileName(material->name, material->diffuseTexture);
             }
             else
@@ -272,6 +285,7 @@ namespace engine::render
         makeConstantBuffer(sizeof(FrameConstantsGpu), &m_frameConstants, "CreateBuffer (model frame) failed");
         makeConstantBuffer(sizeof(ObjectConstants), &m_objectConstants, "CreateBuffer (model object) failed");
         makeConstantBuffer(sizeof(OutlineConstants), &m_outlineConstants, "CreateBuffer (outline) failed");
+        makeConstantBuffer(sizeof(CelParamsGpu), &m_celConstants, "CreateBuffer (cel params) failed");
 
         D3D11_DEPTH_STENCIL_DESC depthDesc{};
         depthDesc.DepthEnable = TRUE;
@@ -381,6 +395,10 @@ namespace engine::render
                 perSub.color[3] = sub.color.a * draw.tint.a;
                 device->UpdateSubresource(m_objectConstants, 0, nullptr, &perSub, 0, 0);
 
+                const CelParamsGpu cel{ sub.shadowBias, { 0.0f, 0.0f, 0.0f } };
+                device->UpdateSubresource(m_celConstants, 0, nullptr, &cel, 0, 0);
+                device->PSSetConstantBuffers(3, 1, &m_celConstants);
+
                 ID3D11ShaderResourceView* srv = sub.texture != nullptr ? sub.texture : m_whiteTexture;
                 device->PSSetShaderResources(0, 1, &srv);
 
@@ -436,6 +454,7 @@ namespace engine::render
         SafeRelease(m_rasterizer);
         SafeRelease(m_depthReadLessEqual);
         SafeRelease(m_depthEnabled);
+        SafeRelease(m_celConstants);
         SafeRelease(m_outlineConstants);
         SafeRelease(m_objectConstants);
         SafeRelease(m_frameConstants);

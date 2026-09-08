@@ -24,20 +24,30 @@ float3 ApplyLighting(float3 albedo, float3 worldNormal)
     return albedo * (ambientColor.rgb + key);
 }
 
-// Toon: the key term is quantised into 4 bands at 10 / 30 / 50 degrees
-// (black -> white), then coloured by the key light; ambient is added on top so
-// the darkest band is not fully black unless ambient is 0.
-float3 ApplyCelLighting(float3 albedo, float3 worldNormal, float lampFloor)
+// Toon key term: quantised into 4 bands at 10 / 30 / 50 degrees (black -> white),
+// coloured by the key light; ambient is added on top.
+//
+//   shadowBias   (deg) : subtract from the effective angle -> the surface stays
+//                        lit through a wider angle. Per-material; use a larger
+//                        value on the face so the self-shadow terminator does
+//                        not carve it up.
+//   bandSoftness (deg) : transition half-width at each band edge. 0 = hard steps.
+//   wrap         [0..1]: compress the angle toward the lit side (half-Lambert
+//                        analogue) so the shadow side does not fall into black.
+float3 ApplyCelLighting(float3 albedo, float3 worldNormal,
+                        float shadowBias, float bandSoftness, float wrap)
 {
     float ndl = dot(normalize(worldNormal), -keyDirection.xyz);   // -1 .. 1
     float angleDeg = degrees(acos(clamp(ndl, -1.0f, 1.0f)));      // 0 .. 180
 
-    float lamp;
-    if      (angleDeg < 10.0f) lamp = 1.00f;
-    else if (angleDeg < 30.0f) lamp = 0.66f;
-    else if (angleDeg < 50.0f) lamp = 0.33f;
-    else                       lamp = 0.00f;
-    lamp = max(lamp, lampFloor);
+    angleDeg = lerp(angleDeg, angleDeg * 0.5f, saturate(wrap));
+    angleDeg -= shadowBias;
+
+    float s = max(bandSoftness, 0.001f);
+    float lamp = 1.0f;
+    lamp = lerp(lamp, 0.66f, smoothstep(10.0f - s, 10.0f + s, angleDeg));
+    lamp = lerp(lamp, 0.33f, smoothstep(30.0f - s, 30.0f + s, angleDeg));
+    lamp = lerp(lamp, 0.00f, smoothstep(50.0f - s, 50.0f + s, angleDeg));
 
     float3 key = keyColor.rgb * (lamp * keyDirection.w);
     return albedo * (ambientColor.rgb + key);

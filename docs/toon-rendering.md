@@ -23,11 +23,23 @@
 | 30° ≤ θ < 50°   | 0.33 |
 | θ ≥ 50°         | 0.00 (검정) |
 
-`최종색 = albedo · (ambientColor + keyColor · 램프 · 세기)`. 조명 값은 `Scene3D::lighting` → `Frame` cbuffer ([lighting.md](lighting.md)). 앰비언트가 있어 가장 어두운 밴드도 `albedo · ambient` (완전 검정 아님) — 순검정 원하면 `BuildLighting` 의 `ambient.color` 를 0으로, 또는 `cel.hlsl` `#define LAMP_FLOOR` 를 올려 그림자 밴드에 색을 남긴다.
+`최종색 = albedo · (ambientColor + keyColor · 램프 · 세기)`. 조명 값은 `Scene3D::lighting` → `Frame` cbuffer ([lighting.md](lighting.md)).
 
-> **"시꺼멓다" 였던 이유**: 앰비언트가 없고 광원이 위에서만 와서 카메라 정면 면(법선 ~ -z)이 전부 50° 초과 → 순검정이었다. key 방향을 전상 3/4(`{0.35,-0.55,0.75}`)로 바꾸고 앰비언트를 넣어 해결. 자세히는 [lighting.md](lighting.md).
+### 얼굴 그림자 제어 (셰이더만)
 
-밴드 경계·개수는 `common3d.hlsli` 의 `ApplyCelLighting` if 체인 (저장 즉시 핫리로드). `"cel"` ↔ `"model"` (`ModelMeshPass3D::Initialize`) 바꾸면 평범한 램버트(`ApplyLighting`)와 비교.
+`ApplyCelLighting(albedo, normal, shadowBias, bandSoftness, wrap)`:
+
+| 파라미터 | 위치 | 기본 | 효과 |
+|---|---|---:|---|
+| `bandSoftness` (도) | `cel.hlsl` `#define CEL_BAND_SOFTNESS` | 6 | 밴드 경계 전이 반폭. 0 = 하드 4단, 클수록 부드럽게 |
+| `wrap` [0..1] | `cel.hlsl` `#define CEL_WRAP` | 0.35 | 각도를 밝은 쪽으로 압축(하프 램버트 유사). 그림자면이 검정 밴드에 안 빠짐 |
+| `shadowBias` (도) | `cel.hlsl` `CelParams` cbuffer **b3**, `ModelMeshPass3D::MaterialShadowBias` | 얼굴/피부 14, 그 외 0 | 유효 각도에서 빼줌 → 그 표면이 더 넓은 각도까지 밝게 유지. **얼굴이 셀프 섀도우로 갈리지 않게** |
+
+- 얼굴/피부 판정: 머티리얼 이름 (`face*`, `eyebase`, `eyeline`, `eye_l1/r1`, `mat_cheek`, `cheek`, `skin1`) — `MaterialShadowBias` 테이블. 다른 모델은 이 테이블을 늘리거나 임포트 머티리얼에 플래그.
+- `bandSoftness`/`wrap` 은 전역이라 `.hlsl` 저장 즉시 핫리로드. `shadowBias` 는 C++(재빌드).
+- 더 예쁘게: 툰 램프 텍스처, 얼굴 SDF 섀도우 — 미구현 ([command-playbook](command-playbook.md) 참조).
+
+> **"시꺼멓다" 였던 이유**: 앰비언트가 없고 광원이 위에서만 와서 카메라 정면 면이 전부 50° 초과 → 순검정. key 방향 전상 45° + 앰비언트 + `wrap` 으로 해결. [lighting.md](lighting.md).
 
 ## 2. 실루엣 아웃라인 (`outline.hlsl`, 인버티드 헐)
 
