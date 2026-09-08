@@ -1,0 +1,237 @@
+#include "render/passes/MeshPass3D.h"
+
+#include "math/Math.h"
+
+#include <d3d11.h>
+#include <d3dcompiler.h>
+
+#include <cstring>
+#include <stdexcept>
+#include <vector>
+
+namespace engine::render
+{
+    // Position + normal. Matches the input layout and the HLSL VSIn below.
+    struct MeshVertex { float px, py, pz, nx, ny, nz; };
+
+    struct MeshData
+    {
+        std::vector<MeshVertex> vertices;
+        std::vector<std::uint32_t> indices;
+    };
+}
+
+namespace
+{
+    using engine::math::Vec3;
+    using engine::render::MeshData;
+    using engine::render::MeshVertex;
+
+    struct FrameConstants { float viewProj[16]; float lightDir[4]; };
+    struct ObjectConstants { float world[16]; float color[4]; };
+
+    void ThrowIfFailed(HRESULT result, const char* message)
+    {
+        if (FAILED(result)) throw std::runtime_error(message);
+    }
+
+    template <typename T>
+    void SafeRelease(T*& object)
+    {
+        if (object != nullptr) { object->Release(); object = nullptr; }
+    }
+
+    // Adds one quad face (two triangles) spanning center +- u/2 +- v/2, all four
+    // vertices sharing the face normal. Winding is CCW seen from outside.
+    void AddFace(MeshData& mesh, Vec3 center, Vec3 u, Vec3 v, Vec3 normal)
+    {
+        const auto base = static_cast<std::uint32_t>(mesh.vertices.size());
+        const Vec3 corners[4]{
+            center - u * 0.5f - v * 0.5f,
+            center + u * 0.5f - v * 0.5f,
+            center + u * 0.5f + v * 0.5f,
+            center - u * 0.5f + v * 0.5f,
+        };
+        for (const Vec3& c : corners)
+            mesh.vertices.push_back({ c.x, c.y, c.z, normal.x, normal.y, normal.z });
+        for (std::uint32_t index : { 0u, 1u, 2u, 0u, 2u, 3u })
+            mesh.indices.push_back(base + index);
+    }
+
+    MeshData MakeCube()
+    {
+        MeshData mesh;
+        AddFace(mesh, { 0.5f, 0, 0 }, { 0, 0, -1 }, { 0, 1, 0 }, { 1, 0, 0 });
+        AddFace(mesh, { -0.5f, 0, 0 }, { 0, 0, 1 }, { 0, 1, 0 }, { -1, 0, 0 });
+        AddFace(mesh, { 0, 0.5f, 0 }, { 1, 0, 0 }, { 0, 0, -1 }, { 0, 1, 0 });
+        AddFace(mesh, { 0, -0.5f, 0 }, { 1, 0, 0 }, { 0, 0, 1 }, { 0, -1, 0 });
+        AddFace(mesh, { 0, 0, 0.5f }, { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 });
+        AddFace(mesh, { 0, 0, -0.5f }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, 0, -1 });
+        return mesh;
+    }
+
+    MeshData MakePlane()
+    {
+        MeshData mesh;
+        AddFace(mesh, { 0, 0, 0 }, { 1, 0, 0 }, { 0, 0, 1 }, { 0, 1, 0 });
+        return mesh;
+    }
+}
+
+namespace engine::render
+{
+    void MeshPass3D::CreateMesh(ID3D11Device* device, MeshId id, const MeshData& data)
+    {
+        GpuMesh& mesh = m_meshes[static_cast<std::size_t>(id)];
+
+        D3D11_BUFFER_DESC vertexDesc{};
+        vertexDesc.ByteWidth = static_cast<UINT>(sizeof(MeshVertex) * data.vertices.size());
+        vertexDesc.Usage = D3D11_USAGE_IMMUTABLE;
+        vertexDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+        D3D11_SUBRESOURCE_DATA vertexInit{ data.vertices.data(), 0, 0 };
+        ThrowIfFailed(device->CreateBuffer(&vertexDesc, &vertexInit, &mesh.vertexBuffer), "CreateBuffer (mesh vertex) failed");
+
+        D3D11_BUFFER_DESC indexDesc{};
+        indexDesc.ByteWidth = static_cast<UINT>(sizeof(std::uint32_t) * data.indices.size());
+        indexDesc.Usage = D3D11_USAGE_IMMUTABLE;
+        indexDesc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+        D3D11_SUBRESOURCE_DATA indexInit{ data.indices.data(), 0, 0 };
+        ThrowIfFailed(device->CreateBuffer(&indexDesc, &indexInit, &mesh.indexBuffer), "CreateBuffer (mesh index) failed");
+
+        mesh.indexCount = static_cast<std::uint32_t>(data.indices.size());
+    }
+
+    void MeshPass3D::Initialize(ID3D11Device* device)
+    {
+        constexpr char shader[] = R"(
+cbuffer Frame  : register(b0) { row_major float4x4 viewProj; float4 lightDir; };
+cbuffer Object : register(b1) { row_major float4x4 world;    float4 objColor; };
+struct VSIn  { float3 pos : POSITION; float3 nrm : NORMAL; };
+struct VSOut { float4 pos : SV_POSITION; float3 nrm : NORMAL; };
+VSOut VSMain(VSIn input) {
+    VSOut output;
+    float4 worldPos = mul(float4(input.pos, 1.0f), world);
+    output.pos = mul(worldPos, viewProj);
+    output.nrm = mul(float4(input.nrm, 0.0f), world).xyz;
+    return output;
+}
+float4 PSMain(VSOut input) : SV_TARGET {
+    float3 n = normalize(input.nrm);
+    float ndotl = saturate(dot(n, -normalize(lightDir.xyz)));
+    float3 lit = objColor.rgb * (0.25f + 0.75f * ndotl);
+    return float4(lit, objColor.a);
+}
+)";
+        ID3DBlob* vs{}; ID3DBlob* ps{}; ID3DBlob* errors{};
+        ThrowIfFailed(D3DCompile(shader, sizeof(shader), nullptr, nullptr, nullptr, "VSMain", "vs_5_0", 0, 0, &vs, &errors), "MeshPass3D vertex shader compile failed");
+        SafeRelease(errors);
+        ThrowIfFailed(D3DCompile(shader, sizeof(shader), nullptr, nullptr, nullptr, "PSMain", "ps_5_0", 0, 0, &ps, &errors), "MeshPass3D pixel shader compile failed");
+        SafeRelease(errors);
+        ThrowIfFailed(device->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, &m_vertexShader), "CreateVertexShader failed");
+        ThrowIfFailed(device->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, &m_pixelShader), "CreatePixelShader failed");
+
+        const D3D11_INPUT_ELEMENT_DESC layout[] = {
+            { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+            { "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        };
+        const HRESULT layoutResult = device->CreateInputLayout(layout, ARRAYSIZE(layout), vs->GetBufferPointer(), vs->GetBufferSize(), &m_inputLayout);
+        SafeRelease(vs); SafeRelease(ps);
+        ThrowIfFailed(layoutResult, "CreateInputLayout failed");
+
+        D3D11_BUFFER_DESC frameDesc{};
+        frameDesc.ByteWidth = sizeof(FrameConstants);
+        frameDesc.Usage = D3D11_USAGE_DEFAULT;
+        frameDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        ThrowIfFailed(device->CreateBuffer(&frameDesc, nullptr, &m_frameConstants), "CreateBuffer (mesh frame) failed");
+
+        D3D11_BUFFER_DESC objectDesc{};
+        objectDesc.ByteWidth = sizeof(ObjectConstants);
+        objectDesc.Usage = D3D11_USAGE_DEFAULT;
+        objectDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        ThrowIfFailed(device->CreateBuffer(&objectDesc, nullptr, &m_objectConstants), "CreateBuffer (mesh object) failed");
+
+        D3D11_DEPTH_STENCIL_DESC depthDesc{};
+        depthDesc.DepthEnable = TRUE;
+        depthDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+        depthDesc.DepthFunc = D3D11_COMPARISON_LESS;
+        depthDesc.StencilEnable = FALSE;
+        ThrowIfFailed(device->CreateDepthStencilState(&depthDesc, &m_depthEnabled), "CreateDepthStencilState (mesh) failed");
+
+        D3D11_RASTERIZER_DESC rasterDesc{};
+        rasterDesc.FillMode = D3D11_FILL_SOLID;
+        // Culling disabled so the skeleton does not depend on winding matching
+        // the left-handed projection. Switch to D3D11_CULL_BACK once verified.
+        rasterDesc.CullMode = D3D11_CULL_NONE;
+        rasterDesc.FrontCounterClockwise = FALSE;
+        rasterDesc.DepthClipEnable = TRUE;
+        ThrowIfFailed(device->CreateRasterizerState(&rasterDesc, &m_rasterizer), "CreateRasterizerState failed");
+
+        CreateMesh(device, MeshId::Cube, MakeCube());
+        CreateMesh(device, MeshId::Plane, MakePlane());
+    }
+
+    void MeshPass3D::Execute(const PassContext& context)
+    {
+        const RenderSnapshot& snapshot = *context.snapshot;
+        if (snapshot.meshDraws.empty()) return;
+
+        ID3D11DeviceContext* device = context.context;
+
+        const math::Mat4 viewProj = snapshot.camera.view * snapshot.camera.projection;
+        FrameConstants frame{};
+        std::memcpy(frame.viewProj, viewProj.m, sizeof(frame.viewProj));
+        frame.lightDir[0] = snapshot.camera.lightDirection.x;
+        frame.lightDir[1] = snapshot.camera.lightDirection.y;
+        frame.lightDir[2] = snapshot.camera.lightDirection.z;
+        frame.lightDir[3] = 0.0f;
+        device->UpdateSubresource(m_frameConstants, 0, nullptr, &frame, 0, 0);
+
+        device->OMSetBlendState(nullptr, nullptr, 0xffffffff);
+        device->OMSetDepthStencilState(m_depthEnabled, 0);
+        device->RSSetState(m_rasterizer);
+        device->IASetInputLayout(m_inputLayout);
+        device->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        device->VSSetShader(m_vertexShader, nullptr, 0);
+        device->PSSetShader(m_pixelShader, nullptr, 0);
+        device->VSSetConstantBuffers(0, 1, &m_frameConstants);
+        device->PSSetConstantBuffers(0, 1, &m_frameConstants);
+
+        for (const MeshDraw& draw : snapshot.meshDraws)
+        {
+            const GpuMesh& mesh = m_meshes[static_cast<std::size_t>(draw.mesh)];
+            if (mesh.vertexBuffer == nullptr) continue;
+
+            ObjectConstants object{};
+            std::memcpy(object.world, draw.world.m, sizeof(object.world));
+            object.color[0] = draw.color.r;
+            object.color[1] = draw.color.g;
+            object.color[2] = draw.color.b;
+            object.color[3] = draw.color.a;
+            device->UpdateSubresource(m_objectConstants, 0, nullptr, &object, 0, 0);
+            device->VSSetConstantBuffers(1, 1, &m_objectConstants);
+            device->PSSetConstantBuffers(1, 1, &m_objectConstants);
+
+            const UINT stride = sizeof(MeshVertex), offset = 0;
+            device->IASetVertexBuffers(0, 1, &mesh.vertexBuffer, &stride, &offset);
+            device->IASetIndexBuffer(mesh.indexBuffer, DXGI_FORMAT_R32_UINT, 0);
+            device->DrawIndexed(mesh.indexCount, 0, 0);
+        }
+    }
+
+    void MeshPass3D::Release()
+    {
+        for (GpuMesh& mesh : m_meshes)
+        {
+            SafeRelease(mesh.vertexBuffer);
+            SafeRelease(mesh.indexBuffer);
+            mesh.indexCount = 0;
+        }
+        SafeRelease(m_rasterizer);
+        SafeRelease(m_depthEnabled);
+        SafeRelease(m_objectConstants);
+        SafeRelease(m_frameConstants);
+        SafeRelease(m_inputLayout);
+        SafeRelease(m_pixelShader);
+        SafeRelease(m_vertexShader);
+    }
+}

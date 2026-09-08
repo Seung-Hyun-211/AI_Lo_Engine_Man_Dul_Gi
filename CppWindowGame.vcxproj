@@ -21,6 +21,8 @@
     <ClCompile Include="src\game\SnapshotBuilder.cpp" />
     <ClCompile Include="src\platform\Win32Window.cpp" />
     <ClCompile Include="src\render\Dx11Renderer.cpp" />
+    <ClCompile Include="src\render\passes\MeshPass3D.cpp" />
+    <ClCompile Include="src\render\passes\QuadPass2D.cpp" />
     <ClCompile Include="src\ui\UI.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -35,7 +37,10 @@
     <ClInclude Include="src\platform\Win32Window.h" />
     <ClInclude Include="src\render\Dx11Renderer.h" />
     <ClInclude Include="src\render\IRenderer.h" />
+    <ClInclude Include="src\render\RenderPass.h" />
     <ClInclude Include="src\render\RenderSnapshot.h" />
+    <ClInclude Include="src\render\passes\MeshPass3D.h" />
+    <ClInclude Include="src\render\passes\QuadPass2D.h" />
     <ClInclude Include="src\ui\UI.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

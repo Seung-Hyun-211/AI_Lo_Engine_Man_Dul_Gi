@@ -12,7 +12,7 @@ Visual Studio 2022로 `CppWindowGame.vcxproj`를 열고 **Debug | x64** 선택 �
 ```text
 src/
   main.cpp                 진입점. Dx11Renderer 를 만들어 IRenderer 로 Application 에 주입
-  math/Math.h              Vec2 / Rect / Color 공용 기하 타입
+  math/Math.h              Vec2 / Vec3 / Mat4 / Rect / Color 공용 기하 타입
   core/
     JobSystem.*            워커 풀 + Job + Fence (예외 안전). ParallelFor
     Time.h                 FrameClock(clamp 된 delta), FixedTimestep(고정 스텝 누적)
@@ -21,8 +21,11 @@ src/
   input/InputState.h       이번 프레임 키/마우스 상태 + 에지 질의(Pressed/Released)
   render/
     IRenderer.h            렌더러 추상 (Start/SetFrameSettings/Submit/Resize/Stop) + FrameSettings
-    RenderSnapshot.h       값 기반 스냅샷: worldQuads + uiQuads (Quad 배열)
-    Dx11Renderer.*         렌더 스레드. device/swapchain/Present 단독 소유. 알파 블렌딩
+    RenderPass.h           파이프라인 스테이지 추상 (Initialize/Execute/Release) — 확장 지점
+    RenderSnapshot.h       값 기반 스냅샷: camera + meshDraws(3D) + worldQuads + uiQuads
+    Dx11Renderer.*         렌더 스레드. device/swapchain/depth 단독 소유. 패스 목록 실행
+    passes/MeshPass3D.*    3D: 깊이 테스트, 원근 카메라, directional light, 내장 큐브·평면
+    passes/QuadPass2D.*    2D: 스크린 공간 Quad, 깊이 off, straight-alpha 블렌드
   ui/UI.*                  Widget / UIWindow / Button / TextLine / UIContext
   game/
     Simulation.*           가변 월드. 고정 timestep. 플레이어 + 20k 파티클(JobSystem 스텁)
@@ -55,7 +58,7 @@ Render Thread (Dx11Renderer::RenderLoop): latest-frame mailbox → DX11 draw →
 
 ## 현재 데모 (게임 아님)
 
-방향키로 움직이는 시안색 사각형, 반투명 UI 패널 + `START` 버튼 + 상태 텍스트, 그리고 매 고정 스텝 `ParallelFor`로 도는 20,000개 파티클(앞 2,048개만 그림 — 나머지는 JobSystem 처리량 스텁). 실제 게임 로직은 아직 없다.
+3D: 회전하는 큐브 + 공전 큐브 2개 + 바닥 평면, 궤도 카메라, directional light. 2D 오버레이: 방향키로 움직이는 시안색 사각형, 반투명 UI 패널 + `START` 버튼 + 상태 텍스트. 배경: 매 고정 스텝 `ParallelFor`로 도는 20,000개 파티클(앞 2,048개만 그림 — 나머지는 JobSystem 처리량 스텁). 실제 게임 로직은 아직 없다.
 
 ## UI 설계
 

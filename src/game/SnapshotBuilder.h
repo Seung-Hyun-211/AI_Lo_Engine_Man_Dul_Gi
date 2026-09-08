@@ -20,8 +20,11 @@ namespace engine::game
         // in the simulation as the JobSystem benchmark; they are just not drawn.
         static constexpr std::size_t kVisibleParticleSample = 2'048;
 
+        // viewportWidth/Height set the 3D camera's aspect ratio.
         [[nodiscard]] render::RenderSnapshot Build(std::uint64_t frameNumber,
                                                    const Simulation& simulation,
-                                                   const ui::UIContext& ui) const;
+                                                   const ui::UIContext& ui,
+                                                   int viewportWidth,
+                                                   int viewportHeight) const;
     };
 }

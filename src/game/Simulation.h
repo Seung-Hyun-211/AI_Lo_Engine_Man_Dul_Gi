@@ -44,6 +44,9 @@ namespace engine::game
 
         [[nodiscard]] math::Vec2 PlayerPosition() const { return m_player; }
         [[nodiscard]] const std::vector<Particle>& Particles() const { return m_particles; }
+        // Seconds of simulation time elapsed. Drives the demo's 3D camera orbit
+        // and cube spin in the SnapshotBuilder.
+        [[nodiscard]] float ElapsedTime() const { return m_elapsed; }
 
     private:
         void SeedParticles();
@@ -51,6 +54,7 @@ namespace engine::game
         core::JobSystem& m_jobs;
         int m_worldWidth;
         int m_worldHeight;
+        float m_elapsed{};
         math::Vec2 m_player;
         std::vector<Particle> m_particles;
     };

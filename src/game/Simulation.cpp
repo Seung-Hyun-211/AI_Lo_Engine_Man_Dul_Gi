@@ -39,6 +39,8 @@ namespace engine::game
 
     void Simulation::Step(float fixedDelta, const PlayerIntent& intent)
     {
+        m_elapsed += fixedDelta;
+
         const math::Vec2 direction = math::Normalized(intent.move);
         m_player = m_player + direction * (kPlayerSpeed * fixedDelta);
         m_player.x = math::Clamp(m_player.x, 0.0f, std::max(0.0f, static_cast<float>(m_worldWidth) - kPlayerSize));

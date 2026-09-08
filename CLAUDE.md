@@ -21,8 +21,8 @@ C++20 / Win32 / DirectX 11 기반 2D 게임 엔진 뼈대. 이 파일은 세션�
 ## 아키텍처 불변 규칙 (절대 깨지 말 것)
 
 1. **D3D11 API 호출은 렌더 스레드에서만** 한다. 메인 스레드(`src/game/Application.cpp`의 프레임 루프)는 입력·시뮬레이션·스냅샷 생성만 한다.
-2. 렌더 스레드(`src/render/Dx11Renderer.cpp`)가 device, immediate context, swap chain, back buffer, `ResizeBuffers`, `Present`의 **유일한 소유자**다.
-3. 스레드 경계는 값 기반 `RenderSnapshot`만 넘어간다. 가변 게임 객체 포인터를 넣지 않는다.
+2. 렌더 스레드(`src/render/Dx11Renderer.cpp`)가 device, immediate context, swap chain, back buffer, depth buffer, `ResizeBuffers`, `Present`의 **유일한 소유자**다. 실제 드로우는 `IRenderPass` 목록(`src/render/passes/*`)이 하고, 렌더러 코어는 clear·bind·pass 순회만 한다. 새 패스는 `RenderPass.h` 구현 + `main.cpp`에서 `AddRenderPass`(Start 전).
+3. 스레드 경계는 값 기반 `RenderSnapshot`만 넘어간다(`Quad`·`MeshDraw`·`CameraView` 모두 값, `Mat4` 포함). 가변 게임 객체 포인터를 넣지 않는다.
 4. 렌더러는 최신 스냅샷 1개만 보관한다(1슬롯 메일박스). 오래된 미렌더 프레임은 버린다.
 5. 창 resize 요청은 메인에서 전달하되 `ResizeBuffers`는 렌더 스레드만 호출한다.
 6. `JobSystem::ParallelFor`의 각 잡은 겹치지 않는 연속 `[begin, end)` 범위만 쓴다. 워커 안에서 공유 카운터 증가·`vector` 재할당·엔티티 생성/파괴 금지. `JobFence::Wait()`는 프레임 단계 경계에서만 쓴다.
@@ -52,6 +52,7 @@ C++20 / Win32 / DirectX 11 기반 2D 게임 엔진 뼈대. 이 파일은 세션�
 
 ### 다음 후보 (측정/필요 시)
 
+- 3D 파이프라인은 있음: `math`에 `Vec3`/`Mat4`, `MeshPass3D`(depth·원근·Lambert, 내장 큐브·평면), `QuadPass2D`(2D 오버레이), `IRenderPass` 확장 지점. 다음: 파일 메시 로더, 텍스처, 실사용 카메라 조작, `MeshPass3D` back-face culling(현재 `CULL_NONE`).
 - 텍스처 `SpriteDraw` + SpriteBatch(dynamic VB + atlas) — 로드맵 3.
 - 시뮬/렌더 파이프라이닝·더블 버퍼링(현재 매 프레임 `ParallelFor(...).Wait()` 완전 블록).
 - 고정 timestep 물리/애니메이션 잡 (`FixedTimestep`은 준비됨) — 로드맵 5.

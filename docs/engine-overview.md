@@ -15,17 +15,21 @@ wWinMain (src/main.cpp)
         │    └─ JobSystem    (core/)            연속 범위 병렬 update
         ├─ SnapshotBuilder   (game/)            월드+UI → 값 기반 RenderSnapshot
         └─ IRenderer         (render/)          추상 렌더러 (구현: Dx11Renderer)
+                                                코어는 device/swapchain/RT/depth만 소유
+                                                그리기 = IRenderPass 목록
+                                                  MeshPass3D  (3D, 깊이 테스트, 원근)
+                                                  QuadPass2D  (2D, 스크린 공간, 깊이 off)
 ```
 
 ## 모듈과 책임 (SRP)
 
 | 모듈 | 파일 | 유일한 변경 이유 |
 |---|---|---|
-| `engine::math` | `math/Math.h` | 공용 기하 타입(`Vec2`/`Rect`/`Color`)이 바뀔 때 |
+| `engine::math` | `math/Math.h` | 공용 기하 타입(`Vec2`/`Vec3`/`Mat4`/`Rect`/`Color`)이 바뀔 때 |
 | `engine::core` | `core/JobSystem.*`, `core/Time.h`, `core/NonCopyable.h` | 작업 스케줄링·시간 누적 규칙이 바뀔 때 |
 | `engine::platform` | `platform/Win32Window.*` | OS 창/메시지 처리 방식이 바뀔 때 |
 | `engine::input` | `input/InputState.h` | 입력 상태 표현·에지 판정이 바뀔 때 |
-| `engine::render` | `render/IRenderer.h`, `render/RenderSnapshot.h`, `render/Dx11Renderer.*` | 렌더 백엔드/스냅샷 포맷이 바뀔 때 |
+| `engine::render` | `render/IRenderer.h`, `render/RenderPass.h`, `render/RenderSnapshot.h`, `render/Dx11Renderer.*`, `render/passes/*` | 렌더 백엔드/스냅샷 포맷/파이프라인 스테이지가 바뀔 때 |
 | `engine::ui` | `ui/UI.*` | 위젯 트리·오버레이 규칙이 바뀔 때 |
 | `engine::game` | `game/Simulation.*`, `game/SnapshotBuilder.*`, `game/Application.*` | 프레임 흐름·월드 규칙이 바뀔 때 |
 
@@ -57,27 +61,29 @@ render(Dx11) ─▶ core(NonCopyable), D3D11     상위 레이어를 도로 참�
 4. FrameClock::Tick()                clamp 된 deltaTime
 5. BuildPlayerIntent()               InputState → PlayerIntent (정규화 전 축값)
 6. FixedTimestep::Advance(dt)        누적 → 이번 프레임 실행할 고정 스텝 수 (상한 5)
-7. for each step: Simulation::Step() 플레이어 이동 + JobSystem 으로 파티클 병렬 advect + Fence
-8. SnapshotBuilder::Build()          월드 Quad + UI Quad → 값 기반 RenderSnapshot
+7. for each step: Simulation::Step() 플레이어 이동 + JobSystem 으로 파티클 병렬 advect + Fence + 시간 누적
+8. SnapshotBuilder::Build()          카메라 + MeshDraw(3D) + 월드 Quad + UI Quad → 값 기반 RenderSnapshot
 9. IRenderer::Submit(snapshot)       1슬롯 메일박스에 최신 프레임만 적재
 ```
 
-렌더 스레드(`Dx11Renderer::RenderLoop`)는 독립적으로 돈다: 최신 스냅샷을 꺼내 `worldQuads` → `uiQuads` 순으로 그리고 `Present`. device·context·swap chain·`ResizeBuffers`·`Present`의 유일 소유자다. 스레드 경계는 값 기반 `RenderSnapshot`만 넘어간다.
+렌더 스레드(`Dx11Renderer::RenderLoop`)는 독립적으로 돈다: 최신 스냅샷을 꺼내 RT·depth를 clear·bind하고, `IRenderPass` 목록을 등록 순서대로 실행한 뒤 `Present`한다. 기본 파이프라인은 `MeshPass3D`(깊이 테스트 on, 원근, 단일 directional light) → `QuadPass2D`(스크린 공간, 깊이 off, straight-alpha 블렌드). device·context·swap chain·depth·`ResizeBuffers`·`Present`의 유일 소유자다. 스레드 경계는 값 기반 `RenderSnapshot`만 넘어간다.
 
 ## 확장 지점
 
 - **새 시스템(물리/애니메이션/컬링)** — `game/`에 클래스를 추가하고 `Application::Run`의 스텝 루프에서 호출한다. 병렬화가 필요하면 `JobSystem::ParallelFor`로 겹치지 않는 `[begin,end)` 범위만 쓰고 `Fence`는 단계 경계에서만 기다린다.
 - **새 위젯** — `ui::Widget`을 상속한다. 기존 위젯 수정 없이(OCP) `Build`(로컬 좌표 → `Quad`), `PointerXxx`(소비 시 `true`)만 구현한다. LSP: 기반 계약(로컬 좌표·`parentOrigin` 기준 배치·소비 반환)을 지킨다.
-- **새 렌더 프리미티브** — `render/RenderSnapshot.h`에 값 타입을 추가하고(예: 텍스처용 `SpriteDraw`) 렌더러가 그 배열을 소비하게 한다. 렌더러에 게임 개념(`playerX` 등)을 하드코딩하지 않는다.
-- **렌더 백엔드 교체** — `IRenderer`를 구현하는 새 클래스를 만들고 `main.cpp`에서 그것을 생성한다.
+- **새 렌더 패스/스테이지** — `render::IRenderPass`(`Name`/`Initialize`/`Execute`/`Release`)를 구현하고 `main.cpp`에서 `renderer.AddRenderPass(...)`로 등록한다(Start 전). 렌더러 코어·기존 패스는 건드리지 않는다(OCP). 그림자·블룸·디버그 라인·포스트프로세스가 여기 해당한다.
+- **새 렌더 프리미티브** — `render/RenderSnapshot.h`에 값 타입을 추가하고(예: 텍스처용 `SpriteDraw`) 그것을 소비하는 패스를 만든다. 렌더러 코어에 게임 개념(`playerX` 등)을 하드코딩하지 않는다.
+- **렌더 백엔드 교체** — `IRenderer`를 구현하는 새 클래스를 만들고 `main.cpp`에서 그것을 생성한다. `IRenderPass`는 D3D11 전용 계약이라 새 백엔드는 자체 패스 계약을 갖는다.
 - **입력 소스 추가(게임패드 등)** — `InputState`에 상태·질의를 추가하고 `Win32Window`(또는 새 platform 소스)가 채운다. gameplay는 여전히 `PlayerIntent` 번역을 거친다.
 
 ## 현재 데모 페이로드 (게임 아님)
 
 뼈대가 살아있음을 보이기 위한 최소 콘텐츠만 있다. 실제 게임 로직은 없다.
 
-- 방향키로 움직이는 시안색 64×64 사각형(경계 clamp, 대각선 정규화).
-- 20,000개 파티클을 매 고정 스텝 `ParallelFor`로 advect — **JobSystem 처리량 스텁**이다. `SnapshotBuilder`는 그중 앞 2,048개만 그린다(파이프라인 연결 확인용). 나머지는 계산만 하는 벤치마크 부하다.
+- **3D (MeshPass3D):** 바닥 평면 + 두 축으로 회전하는 큐브 + 공전하는 작은 큐브 2개. 카메라는 원점을 천천히 궤도. 단일 directional light Lambert.
+- **2D 오버레이 (QuadPass2D):** 방향키로 움직이는 시안색 64×64 사각형(경계 clamp, 대각선 정규화).
+- 20,000개 파티클을 매 고정 스텝 `ParallelFor`로 advect — **JobSystem 처리량 스텁**. `SnapshotBuilder`는 앞 2,048개만 2D 점으로 그린다. 나머지는 계산만 하는 벤치마크 부하다.
 - `UIContext`: 반투명 패널 1개 + `START` 버튼 + 상태 텍스트 2줄. 버튼 클릭 시 상태 텍스트가 바뀐다.
 
 ## 빌드

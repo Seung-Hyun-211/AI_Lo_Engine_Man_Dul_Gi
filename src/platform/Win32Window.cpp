@@ -76,11 +76,15 @@ namespace engine::platform
         }
         auto* self = reinterpret_cast<Win32Window*>(GetWindowLongPtrW(window, GWLP_USERDATA));
         if (self == nullptr) return DefWindowProcW(window, message, wParam, lParam);
-        return self->HandleMessage(message, wParam, lParam);
+        return self->HandleMessage(window, message, wParam, lParam);
     }
 
-    LRESULT Win32Window::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
+    LRESULT Win32Window::HandleMessage(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
     {
+        // `window` is always valid here, including for creation-time messages
+        // (WM_NCCREATE, WM_CREATE) that arrive before CreateWindowExW returns and
+        // sets m_window. Falling through to DefWindowProcW with a null m_window
+        // would make WM_NCCREATE return FALSE and abort window creation.
         switch (message)
         {
         case WM_KEYDOWN:
@@ -101,7 +105,7 @@ namespace engine::platform
         case WM_RBUTTONDOWN:
         case WM_MBUTTONDOWN:
         {
-            SetCapture(m_window);
+            SetCapture(window);
             const int button = message == WM_LBUTTONDOWN ? 0 : message == WM_RBUTTONDOWN ? 1 : 2;
             if (m_sink != nullptr) m_sink->OnMouseButton(button, true);
             return 0;
@@ -127,14 +131,14 @@ namespace engine::platform
 
         case WM_CLOSE:
             if (m_sink != nullptr) m_sink->OnClose();
-            return DefWindowProcW(m_window, message, wParam, lParam);
+            return DefWindowProcW(window, message, wParam, lParam);
 
         case WM_DESTROY:
             PostQuitMessage(0);
             return 0;
 
         default:
-            return DefWindowProcW(m_window, message, wParam, lParam);
+            return DefWindowProcW(window, message, wParam, lParam);
         }
     }
 }
