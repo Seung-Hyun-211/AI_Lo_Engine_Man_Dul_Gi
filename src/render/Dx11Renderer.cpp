@@ -2,6 +2,7 @@
 
 #include "render/r2d/QuadPass2D.h"
 #if defined(ENGINE_WITH_3D)
+#include "render/r3d/FrameConstants.h"
 #include "render/r3d/MeshPass3D.h"
 #endif
 
@@ -10,6 +11,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <exception>
 #include <stdexcept>
 #include <thread>
@@ -173,6 +175,7 @@ namespace engine::render
         for (std::unique_ptr<IRenderPass>& pass : m_passes)
             if (pass) pass->Release();
         m_shaders.ReleaseAll();
+        ReleaseShadowResources();
         ReleaseSceneTargets();
         Release(m_backBufferRtv);
         Release(m_swapChain);
@@ -251,9 +254,108 @@ namespace engine::render
         m_width = width; m_height = height;
         CreateBackBufferView();
         CreateSceneTargets(width, height);
+        CreateShadowResources();
 
         for (std::unique_ptr<IRenderPass>& pass : m_passes)
             pass->Initialize(m_device, m_shaders);
+    }
+
+    void Dx11Renderer::CreateShadowResources()
+    {
+#if defined(ENGINE_WITH_3D)
+        const UINT size = kShadowMapSize;
+
+        D3D11_TEXTURE2D_DESC depthDesc{};
+        depthDesc.Width = size;
+        depthDesc.Height = size;
+        depthDesc.MipLevels = 1;
+        depthDesc.ArraySize = 1;
+        depthDesc.Format = DXGI_FORMAT_R32_TYPELESS;
+        depthDesc.SampleDesc.Count = 1;
+        depthDesc.Usage = D3D11_USAGE_DEFAULT;
+        depthDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+        ThrowIfFailed(m_device->CreateTexture2D(&depthDesc, nullptr, &m_shadowDepth), "CreateTexture2D (shadow) failed");
+
+        D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
+        dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
+        dsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+        ThrowIfFailed(m_device->CreateDepthStencilView(m_shadowDepth, &dsvDesc, &m_shadowDsv), "CreateDepthStencilView (shadow) failed");
+
+        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+        srvDesc.Format = DXGI_FORMAT_R32_FLOAT;
+        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Texture2D.MipLevels = 1;
+        ThrowIfFailed(m_device->CreateShaderResourceView(m_shadowDepth, &srvDesc, &m_shadowSrv), "CreateShaderResourceView (shadow) failed");
+
+        D3D11_BUFFER_DESC cbDesc{};
+        cbDesc.ByteWidth = 16 * sizeof(float);   // one row-major float4x4
+        cbDesc.Usage = D3D11_USAGE_DEFAULT;
+        cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        ThrowIfFailed(m_device->CreateBuffer(&cbDesc, nullptr, &m_shadowFrameCb), "CreateBuffer (shadow frame) failed");
+
+        D3D11_SAMPLER_DESC sampDesc{};
+        sampDesc.Filter = D3D11_FILTER_COMPARISON_MIN_MAG_MIP_LINEAR;
+        sampDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+        sampDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+        sampDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+        sampDesc.ComparisonFunc = D3D11_COMPARISON_LESS_EQUAL;
+        sampDesc.MaxLOD = D3D11_FLOAT32_MAX;
+        ThrowIfFailed(m_device->CreateSamplerState(&sampDesc, &m_shadowSampler), "CreateSamplerState (shadow) failed");
+
+        D3D11_RASTERIZER_DESC rasterDesc{};
+        rasterDesc.FillMode = D3D11_FILL_SOLID;
+        rasterDesc.CullMode = D3D11_CULL_NONE;   // model winding unverified; lean on bias
+        rasterDesc.DepthClipEnable = TRUE;
+        rasterDesc.DepthBias = 1200;
+        rasterDesc.SlopeScaledDepthBias = 2.5f;
+        ThrowIfFailed(m_device->CreateRasterizerState(&rasterDesc, &m_shadowRaster), "CreateRasterizerState (shadow) failed");
+
+        D3D11_DEPTH_STENCIL_DESC dsDesc{};
+        dsDesc.DepthEnable = TRUE;
+        dsDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+        dsDesc.DepthFunc = D3D11_COMPARISON_LESS;
+        ThrowIfFailed(m_device->CreateDepthStencilState(&dsDesc, &m_shadowDepthState), "CreateDepthStencilState (shadow) failed");
+#endif
+    }
+
+    void Dx11Renderer::ReleaseShadowResources()
+    {
+        Release(m_shadowDepthState);
+        Release(m_shadowRaster);
+        Release(m_shadowSampler);
+        Release(m_shadowFrameCb);
+        Release(m_shadowSrv);
+        Release(m_shadowDsv);
+        Release(m_shadowDepth);
+    }
+
+    void Dx11Renderer::RenderShadowMap(const RenderSnapshot& snapshot)
+    {
+#if defined(ENGINE_WITH_3D)
+        ID3D11ShaderResourceView* nullSrv = nullptr;
+        m_context->PSSetShaderResources(1, 1, &nullSrv);   // detach before writing it
+
+        m_context->OMSetRenderTargets(0, nullptr, m_shadowDsv);
+        m_context->ClearDepthStencilView(m_shadowDsv, D3D11_CLEAR_DEPTH, 1.0f, 0);
+        const D3D11_VIEWPORT viewport{ 0, 0, static_cast<float>(kShadowMapSize), static_cast<float>(kShadowMapSize), 0, 1 };
+        m_context->RSSetViewports(1, &viewport);
+        m_context->RSSetState(m_shadowRaster);
+        m_context->OMSetDepthStencilState(m_shadowDepthState, 0);
+        m_context->OMSetBlendState(nullptr, nullptr, 0xffffffff);
+
+        float lightViewProj[16];
+        std::memcpy(lightViewProj, snapshot.scene3d.lighting.lightViewProj.m, sizeof(lightViewProj));
+        m_context->UpdateSubresource(m_shadowFrameCb, 0, nullptr, lightViewProj, 0, 0);
+        m_context->VSSetConstantBuffers(0, 1, &m_shadowFrameCb);
+
+        ShadowContext context{};
+        context.context = m_context;
+        context.snapshot = &snapshot;
+        for (std::unique_ptr<IRenderPass>& pass : m_passes)
+            pass->RenderShadow(context);
+#else
+        (void)snapshot;
+#endif
     }
 
     void Dx11Renderer::CreateBackBufferView()
@@ -325,14 +427,28 @@ namespace engine::render
 
     void Dx11Renderer::Render(const RenderSnapshot& snapshot, const FrameSettings& settings)
     {
+        // Pick up any .hlsl edited on disk since the last frame.
+        m_shaders.PollHotReload(m_device);
+
+        // Shadow map first (own target + viewport), then the scene.
+#if defined(ENGINE_WITH_3D)
+        const bool shadows = snapshot.scene3d.lighting.shadowsEnabled && m_shadowDsv != nullptr;
+        if (shadows) RenderShadowMap(snapshot);
+#endif
+
         m_context->OMSetRenderTargets(1, &m_sceneColorRtv, m_sceneDepthDsv);
         m_context->ClearRenderTargetView(m_sceneColorRtv, snapshot.clearColor);
         m_context->ClearDepthStencilView(m_sceneDepthDsv, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
         const D3D11_VIEWPORT viewport{ 0, 0, static_cast<float>(m_width), static_cast<float>(m_height), 0, 1 };
         m_context->RSSetViewports(1, &viewport);
 
-        // Pick up any .hlsl edited on disk since the last frame.
-        m_shaders.PollHotReload(m_device);
+#if defined(ENGINE_WITH_3D)
+        if (shadows)
+        {
+            m_context->PSSetShaderResources(1, 1, &m_shadowSrv);
+            m_context->PSSetSamplers(1, 1, &m_shadowSampler);
+        }
+#endif
 
         PassContext context{};
         context.device = m_device;

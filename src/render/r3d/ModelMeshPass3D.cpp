@@ -273,6 +273,7 @@ namespace engine::render
         m_shader = shaders.Get(device, "cel", modelLayout, ARRAYSIZE(modelLayout));
         m_outlineShader = shaders.Get(device, "outline", outlineLayout, ARRAYSIZE(outlineLayout));
         m_creaseShader = shaders.Get(device, "crease", creaseLayout, ARRAYSIZE(creaseLayout));
+        m_shadowShader = shaders.Get(device, "shadow", outlineLayout, 1);   // POSITION only
 
         auto makeConstantBuffer = [device](UINT bytes, ID3D11Buffer** buffer, const char* what)
         {
@@ -429,6 +430,35 @@ namespace engine::render
         }
     }
 
+    void ModelMeshPass3D::RenderShadow(const ShadowContext& context)
+    {
+        if (m_subMeshes.empty() || m_shadowShader == nullptr) return;
+        const Scene3D& scene = context.snapshot->scene3d;
+        if (scene.modelDraws.empty()) return;
+
+        ID3D11DeviceContext* device = context.context;
+        device->IASetInputLayout(m_shadowShader->inputLayout);
+        device->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        device->VSSetShader(m_shadowShader->vs, nullptr, 0);
+        device->PSSetShader(nullptr, nullptr, 0);
+
+        for (const ModelDraw& draw : scene.modelDraws)
+        {
+            ObjectConstants object{};
+            std::memcpy(object.world, draw.world.m, sizeof(object.world));
+            device->UpdateSubresource(m_objectConstants, 0, nullptr, &object, 0, 0);
+            device->VSSetConstantBuffers(1, 1, &m_objectConstants);
+
+            for (const SubMesh& sub : m_subMeshes)
+            {
+                const UINT stride = sub.vertexStride, offset = 0;
+                device->IASetVertexBuffers(0, 1, &sub.vertexBuffer, &stride, &offset);
+                device->IASetIndexBuffer(sub.indexBuffer, DXGI_FORMAT_R32_UINT, 0);
+                device->DrawIndexed(sub.indexCount, 0, 0);
+            }
+        }
+    }
+
     void ModelMeshPass3D::Release()
     {
         for (SubMesh& sub : m_subMeshes)
@@ -445,6 +475,7 @@ namespace engine::render
         m_shader = nullptr;
         m_outlineShader = nullptr;
         m_creaseShader = nullptr;
+        m_shadowShader = nullptr;
         m_creaseVertexCount = 0;
 
         SafeRelease(m_creaseVertexBuffer);

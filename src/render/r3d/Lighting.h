@@ -28,5 +28,11 @@ namespace engine::render
     {
         DirectionalLight key{};
         AmbientLight ambient{};
+
+        // View-projection for the directional shadow map, fitted to the scene by
+        // the game layer (SnapshotBuilder). Identity + shadowsEnabled=false skips
+        // shadow rendering entirely.
+        math::Mat4 lightViewProj{ math::Mat4::Identity() };
+        bool shadowsEnabled{ false };
     };
 }

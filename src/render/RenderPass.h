@@ -28,6 +28,15 @@ namespace engine::render
         const RenderSnapshot* snapshot{};
     };
 
+    // Handed to RenderShadow(). The renderer has already bound the shadow depth
+    // target, the viewport, and the light view-projection at b0. A casting pass
+    // only sets its per-object world at b1 and issues depth-only draws.
+    struct ShadowContext
+    {
+        ID3D11DeviceContext* context{};
+        const RenderSnapshot* snapshot{};
+    };
+
     // One stage of the render pipeline. Passes run on the render thread in the
     // order they were added to the renderer, between the frame clear and Present.
     //
@@ -54,6 +63,10 @@ namespace engine::render
 
         // Called every frame. Read ctx.snapshot for what to draw.
         virtual void Execute(const PassContext& context) = 0;
+
+        // Optional: draw this pass's geometry depth-only into the shadow map,
+        // from the light's point of view. Default casts nothing.
+        virtual void RenderShadow(const ShadowContext& context) { (void)context; }
 
         // Called on renderer shutdown. Release every device object created in
         // Initialize. Safe to call when Initialize never ran.

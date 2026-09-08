@@ -36,6 +36,7 @@ namespace engine::render
         [[nodiscard]] const char* Name() const override { return "ModelMeshPass3D"; }
         void Initialize(ID3D11Device* device, ShaderLibrary& shaders) override;
         void Execute(const PassContext& context) override;
+        void RenderShadow(const ShadowContext& context) override;
         void Release() override;
 
     private:
@@ -63,6 +64,7 @@ namespace engine::render
         const ShaderProgram* m_shader{};          // "cel"
         const ShaderProgram* m_outlineShader{};   // "outline"
         const ShaderProgram* m_creaseShader{};    // "crease"
+        const ShaderProgram* m_shadowShader{};    // "shadow" (depth-only)
 
         ID3D11Buffer* m_frameConstants{};
         ID3D11Buffer* m_objectConstants{};

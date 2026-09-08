@@ -56,7 +56,7 @@ assets/
 
 2D와 3D는 서로 `#include` 하지 않는 별도 모듈이다. `ENGINE_WITH_3D`를 빼면 3D 코드가 빌드에서 완전히 제외되고 2D 전용 exe가 경고 0으로 빌드된다.
 
-자세한 지도·프레임 흐름·확장 지점은 [docs/engine-overview.md](docs/engine-overview.md). 명령 단위 작업 절차는 [docs/command-playbook.md](docs/command-playbook.md). 설계 문서: [time-design](docs/time-design.md) · [collider-design](docs/collider-design.md) · [model-animation-research](docs/model-animation-research.md) · [shader-pipeline](docs/shader-pipeline.md) · [toon-rendering](docs/toon-rendering.md) · [lighting](docs/lighting.md) · [msaa](docs/msaa.md).
+자세한 지도·프레임 흐름·확장 지점은 [docs/engine-overview.md](docs/engine-overview.md). 명령 단위 작업 절차는 [docs/command-playbook.md](docs/command-playbook.md). 설계 문서: [time-design](docs/time-design.md) · [collider-design](docs/collider-design.md) · [model-animation-research](docs/model-animation-research.md) · [shader-pipeline](docs/shader-pipeline.md) · [toon-rendering](docs/toon-rendering.md) · [lighting](docs/lighting.md) · [msaa](docs/msaa.md) · [shadows](docs/shadows.md).
 
 ## 스레드 계약
 

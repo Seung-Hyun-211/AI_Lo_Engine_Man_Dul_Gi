@@ -24,7 +24,7 @@ cbuffer CelParams : register(b3)
 };
 
 struct VSIn  { float3 pos : POSITION; float3 nrm : NORMAL; float2 uv : TEXCOORD; };
-struct VSOut { float4 pos : SV_POSITION; float3 nrm : NORMAL; float2 uv : TEXCOORD; };
+struct VSOut { float4 pos : SV_POSITION; float3 nrm : NORMAL; float2 uv : TEXCOORD; float4 shadowClip : TEXCOORD1; };
 
 VSOut VSMain(VSIn input)
 {
@@ -33,6 +33,7 @@ VSOut VSMain(VSIn input)
     output.pos = mul(worldPos, viewProj);
     output.nrm = mul(float4(input.nrm, 0.0f), world).xyz;
     output.uv = float2(input.uv.x, 1.0f - input.uv.y);   // FBX bottom-left -> D3D top-left
+    output.shadowClip = mul(worldPos, lightViewProj);
     return output;
 }
 
@@ -41,5 +42,6 @@ float4 PSMain(VSOut input) : SV_TARGET
     float4 tex = albedo.Sample(samp, input.uv);
     clip(tex.a - 0.35f);                                  // cutout for hair / eyelashes
     float3 base = tex.rgb * objColor.rgb;
-    return float4(ApplyCelLighting(base, input.nrm, uShadowBias, CEL_BAND_SOFTNESS, CEL_WRAP), 1.0f);
+    float shadow = SampleShadow(input.shadowClip);
+    return float4(ApplyCelLighting(base, input.nrm, uShadowBias, CEL_BAND_SOFTNESS, CEL_WRAP, shadow), 1.0f);
 }

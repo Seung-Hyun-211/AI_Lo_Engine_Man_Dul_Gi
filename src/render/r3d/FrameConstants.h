@@ -10,19 +10,24 @@
 // must match `cbuffer Frame` in assets/shaders/common3d.hlsli.
 namespace engine::render
 {
+    inline constexpr unsigned kShadowMapSize = 2048;
+
     struct FrameConstantsGpu
     {
         float viewProj[16];
+        float lightViewProj[16]; // world -> shadow map clip space
         float keyDirection[4];   // xyz = normalised travel direction, w = intensity
         float keyColor[4];       // rgb
         float ambientSky[4];     // rgb, hemisphere fill from above
         float ambientGround[4];  // rgb, hemisphere fill from below
+        float shadowParams[4];   // x = texel size, y = depth bias, z = enabled (0/1)
     };
 
     inline void FillFrameConstants(const CameraView& camera, const Lighting& lighting, FrameConstantsGpu& out)
     {
         const math::Mat4 viewProj = camera.view * camera.projection;
         std::memcpy(out.viewProj, viewProj.m, sizeof(out.viewProj));
+        std::memcpy(out.lightViewProj, lighting.lightViewProj.m, sizeof(out.lightViewProj));
 
         const math::Vec3 dir = math::Normalized(lighting.key.direction);
         out.keyDirection[0] = dir.x;
@@ -44,5 +49,10 @@ namespace engine::render
         out.ambientGround[1] = lighting.ambient.ground.g;
         out.ambientGround[2] = lighting.ambient.ground.b;
         out.ambientGround[3] = 1.0f;
+
+        out.shadowParams[0] = 1.0f / static_cast<float>(kShadowMapSize);
+        out.shadowParams[1] = 0.0018f;   // depth bias
+        out.shadowParams[2] = lighting.shadowsEnabled ? 1.0f : 0.0f;
+        out.shadowParams[3] = 0.0f;
     }
 }

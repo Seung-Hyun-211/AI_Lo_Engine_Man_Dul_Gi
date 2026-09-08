@@ -53,6 +53,9 @@ namespace engine::render
         void CreateBackBufferView();
         void CreateSceneTargets(std::uint32_t width, std::uint32_t height);
         void ReleaseSceneTargets();
+        void CreateShadowResources();
+        void ReleaseShadowResources();
+        void RenderShadowMap(const RenderSnapshot& snapshot);
         void ResizeBackBuffer(std::uint32_t width, std::uint32_t height);
         void Render(const RenderSnapshot& snapshot, const FrameSettings& settings);
 
@@ -85,6 +88,15 @@ namespace engine::render
         ID3D11Texture2D* m_sceneDepth{};
         ID3D11DepthStencilView* m_sceneDepthDsv{};
         std::uint32_t m_sampleCount{ 1 };
+
+        // Directional shadow map (single-sample). See docs/shadows.md.
+        ID3D11Texture2D* m_shadowDepth{};
+        ID3D11DepthStencilView* m_shadowDsv{};
+        ID3D11ShaderResourceView* m_shadowSrv{};
+        ID3D11Buffer* m_shadowFrameCb{};        // b0 for the depth-only pass: lightViewProj
+        ID3D11SamplerState* m_shadowSampler{};
+        ID3D11RasterizerState* m_shadowRaster{};
+        ID3D11DepthStencilState* m_shadowDepthState{};
 
         std::uint32_t m_width{};
         std::uint32_t m_height{};

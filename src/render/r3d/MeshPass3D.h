@@ -25,6 +25,7 @@ namespace engine::render
         [[nodiscard]] const char* Name() const override { return "MeshPass3D"; }
         void Initialize(ID3D11Device* device, ShaderLibrary& shaders) override;
         void Execute(const PassContext& context) override;
+        void RenderShadow(const ShadowContext& context) override;
         void Release() override;
 
     private:
@@ -38,7 +39,8 @@ namespace engine::render
         void CreateMesh(ID3D11Device* device, MeshId id, const struct MeshData& data);
 
         std::array<GpuMesh, static_cast<std::size_t>(MeshId::Count)> m_meshes{};
-        const ShaderProgram* m_shader{};   // owned by ShaderLibrary
+        const ShaderProgram* m_shader{};         // owned by ShaderLibrary
+        const ShaderProgram* m_shadowShader{};   // depth-only, owned by ShaderLibrary
         ID3D11Buffer* m_frameConstants{};
         ID3D11Buffer* m_objectConstants{};
         ID3D11DepthStencilState* m_depthEnabled{};

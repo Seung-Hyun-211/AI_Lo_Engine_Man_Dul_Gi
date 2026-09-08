@@ -84,6 +84,7 @@
     <None Include="assets\shaders\model.hlsl" />
     <None Include="assets\shaders\outline.hlsl" />
     <None Include="assets\shaders\quad2d.hlsl" />
+    <None Include="assets\shaders\shadow.hlsl" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

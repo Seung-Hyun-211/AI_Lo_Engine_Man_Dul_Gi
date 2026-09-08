@@ -111,6 +111,11 @@ namespace engine::render
         };
         m_shader = shaders.Get(device, "mesh", layout, ARRAYSIZE(layout));
 
+        const D3D11_INPUT_ELEMENT_DESC posOnly[] = {
+            { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        };
+        m_shadowShader = shaders.Get(device, "shadow", posOnly, ARRAYSIZE(posOnly));
+
         D3D11_BUFFER_DESC frameDesc{};
         frameDesc.ByteWidth = sizeof(FrameConstantsGpu);
         frameDesc.Usage = D3D11_USAGE_DEFAULT;
@@ -187,6 +192,34 @@ namespace engine::render
         }
     }
 
+    void MeshPass3D::RenderShadow(const ShadowContext& context)
+    {
+        const Scene3D& scene = context.snapshot->scene3d;
+        if (scene.meshDraws.empty() || m_shadowShader == nullptr) return;
+
+        ID3D11DeviceContext* device = context.context;
+        device->IASetInputLayout(m_shadowShader->inputLayout);
+        device->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        device->VSSetShader(m_shadowShader->vs, nullptr, 0);
+        device->PSSetShader(nullptr, nullptr, 0);
+
+        for (const MeshDraw& draw : scene.meshDraws)
+        {
+            const GpuMesh& mesh = m_meshes[static_cast<std::size_t>(draw.mesh)];
+            if (mesh.vertexBuffer == nullptr) continue;
+
+            ObjectConstants object{};
+            std::memcpy(object.world, draw.world.m, sizeof(object.world));
+            device->UpdateSubresource(m_objectConstants, 0, nullptr, &object, 0, 0);
+            device->VSSetConstantBuffers(1, 1, &m_objectConstants);
+
+            const UINT stride = sizeof(MeshVertex), offset = 0;
+            device->IASetVertexBuffers(0, 1, &mesh.vertexBuffer, &stride, &offset);
+            device->IASetIndexBuffer(mesh.indexBuffer, DXGI_FORMAT_R32_UINT, 0);
+            device->DrawIndexed(mesh.indexCount, 0, 0);
+        }
+    }
+
     void MeshPass3D::Release()
     {
         for (GpuMesh& mesh : m_meshes)
@@ -195,7 +228,8 @@ namespace engine::render
             SafeRelease(mesh.indexBuffer);
             mesh.indexCount = 0;
         }
-        m_shader = nullptr;   // owned by ShaderLibrary
+        m_shader = nullptr;         // owned by ShaderLibrary
+        m_shadowShader = nullptr;   // owned by ShaderLibrary
         SafeRelease(m_rasterizer);
         SafeRelease(m_depthEnabled);
         SafeRelease(m_objectConstants);

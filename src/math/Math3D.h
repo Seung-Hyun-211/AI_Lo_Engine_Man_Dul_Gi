@@ -168,6 +168,19 @@ namespace engine::math
         return Scaling(scale) * QuatToMat4(rotation) * Translation(translation);
     }
 
+    // Left-handed orthographic, depth mapped to [0, 1] (D3D convention). Used
+    // for the directional shadow map's light projection.
+    [[nodiscard]] inline Mat4 OrthographicLH(float width, float height, float nearZ, float farZ)
+    {
+        Mat4 r{};
+        r.m[0] = 2.0f / width;
+        r.m[5] = 2.0f / height;
+        r.m[10] = 1.0f / (farZ - nearZ);
+        r.m[14] = -nearZ / (farZ - nearZ);
+        r.m[15] = 1.0f;
+        return r;
+    }
+
     // Left-handed perspective, depth mapped to [0, 1] (D3D convention).
     [[nodiscard]] inline Mat4 PerspectiveFovLH(float fovYRadians, float aspect, float nearZ, float farZ)
     {
