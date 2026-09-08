@@ -88,7 +88,7 @@ render(Dx11) ─▶ core(NonCopyable), D3D11     상위 레이어를 도로 참�
 9. IRenderer::Submit(snapshot)       1슬롯 메일박스에 최신 프레임만 적재
 ```
 
-렌더 스레드(`Dx11Renderer::RenderLoop`)는 독립적으로 돈다: 최신 스냅샷을 꺼내 RT·depth를 clear·bind하고, `IRenderPass` 목록을 등록 순서대로 실행한 뒤 `Present`한다. 기본 파이프라인은 `MeshPass3D`(깊이 테스트 on, 원근, 단일 directional light) → `QuadPass2D`(스크린 공간, 깊이 off, straight-alpha 블렌드). device·context·swap chain·depth·`ResizeBuffers`·`Present`의 유일 소유자다. 스레드 경계는 값 기반 `RenderSnapshot`만 넘어간다.
+렌더 스레드(`Dx11Renderer::RenderLoop`)는 독립적으로 돈다: 최신 스냅샷을 꺼내 **멀티샘플 씬 타깃**(MSAA, 최대 8x — [msaa.md](msaa.md))을 clear·bind하고, `IRenderPass` 목록을 등록 순서대로 실행하고, 백버퍼로 resolve한 뒤 `Present`한다. 기본 파이프라인은 `MeshPass3D`(깊이 테스트 on, 원근, 단일 directional light) → `QuadPass2D`(스크린 공간, 깊이 off, straight-alpha 블렌드). device·context·swap chain·depth·`ResizeBuffers`·`Present`의 유일 소유자다. 스레드 경계는 값 기반 `RenderSnapshot`만 넘어간다.
 
 ## 확장 지점
 

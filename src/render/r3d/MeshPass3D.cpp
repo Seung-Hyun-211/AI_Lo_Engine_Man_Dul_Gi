@@ -137,6 +137,7 @@ namespace engine::render
         rasterDesc.CullMode = D3D11_CULL_NONE;
         rasterDesc.FrontCounterClockwise = FALSE;
         rasterDesc.DepthClipEnable = TRUE;
+        rasterDesc.MultisampleEnable = TRUE;   // MSAA coverage (scene target is multisampled)
         ThrowIfFailed(device->CreateRasterizerState(&rasterDesc, &m_rasterizer), "CreateRasterizerState failed");
 
         CreateMesh(device, MeshId::Cube, MakeCube());

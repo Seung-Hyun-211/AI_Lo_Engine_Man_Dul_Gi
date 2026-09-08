@@ -173,9 +173,8 @@ namespace engine::render
         for (std::unique_ptr<IRenderPass>& pass : m_passes)
             if (pass) pass->Release();
         m_shaders.ReleaseAll();
-        Release(m_depthStencil);
-        Release(m_depthTexture);
-        Release(m_renderTarget);
+        ReleaseSceneTargets();
+        Release(m_backBufferRtv);
         Release(m_swapChain);
         Release(m_context);
         Release(m_device);
@@ -234,55 +233,101 @@ namespace engine::render
             Release(dxgiDevice);
         }
 
+        // Pick the highest supported MSAA sample count up to 8x for smooth
+        // silhouettes (the toon outline is a geometry edge). Falls back to 1x
+        // (no MSAA, no resolve) when nothing is supported.
+        m_sampleCount = 1;
+        for (const UINT candidate : { 8u, 4u, 2u })
+        {
+            UINT qualityLevels = 0;
+            if (SUCCEEDED(m_device->CheckMultisampleQualityLevels(DXGI_FORMAT_R8G8B8A8_UNORM, candidate, &qualityLevels))
+                && qualityLevels > 0)
+            {
+                m_sampleCount = candidate;
+                break;
+            }
+        }
+
         m_width = width; m_height = height;
-        CreateRenderTarget();
-        CreateDepthBuffer(width, height);
+        CreateBackBufferView();
+        CreateSceneTargets(width, height);
 
         for (std::unique_ptr<IRenderPass>& pass : m_passes)
             pass->Initialize(m_device, m_shaders);
     }
 
-    void Dx11Renderer::CreateRenderTarget()
+    void Dx11Renderer::CreateBackBufferView()
     {
         ID3D11Texture2D* backBuffer{};
         ThrowIfFailed(m_swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer)), "GetBuffer failed");
-        const HRESULT result = m_device->CreateRenderTargetView(backBuffer, nullptr, &m_renderTarget);
+        const HRESULT result = m_device->CreateRenderTargetView(backBuffer, nullptr, &m_backBufferRtv);
         Release(backBuffer);
-        ThrowIfFailed(result, "CreateRenderTargetView failed");
+        ThrowIfFailed(result, "CreateRenderTargetView (back buffer) failed");
     }
 
-    void Dx11Renderer::CreateDepthBuffer(std::uint32_t width, std::uint32_t height)
+    void Dx11Renderer::CreateSceneTargets(std::uint32_t width, std::uint32_t height)
     {
+        const bool multisampled = m_sampleCount > 1;
+
+        // Colour: a dedicated MSAA texture when multisampled (resolved to the
+        // back buffer each frame); otherwise render straight into the back buffer.
+        if (multisampled)
+        {
+            D3D11_TEXTURE2D_DESC colorDesc{};
+            colorDesc.Width = width;
+            colorDesc.Height = height;
+            colorDesc.MipLevels = 1;
+            colorDesc.ArraySize = 1;
+            colorDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+            colorDesc.SampleDesc.Count = m_sampleCount;
+            colorDesc.Usage = D3D11_USAGE_DEFAULT;
+            colorDesc.BindFlags = D3D11_BIND_RENDER_TARGET;
+            ThrowIfFailed(m_device->CreateTexture2D(&colorDesc, nullptr, &m_sceneColor), "CreateTexture2D (MSAA colour) failed");
+            ThrowIfFailed(m_device->CreateRenderTargetView(m_sceneColor, nullptr, &m_sceneColorRtv), "CreateRenderTargetView (MSAA) failed");
+        }
+        else
+        {
+            m_sceneColorRtv = m_backBufferRtv;
+            m_sceneColorRtv->AddRef();   // released symmetrically in ReleaseSceneTargets
+        }
+
         D3D11_TEXTURE2D_DESC depthDesc{};
         depthDesc.Width = width;
         depthDesc.Height = height;
         depthDesc.MipLevels = 1;
         depthDesc.ArraySize = 1;
         depthDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-        depthDesc.SampleDesc.Count = 1;
+        depthDesc.SampleDesc.Count = m_sampleCount;
         depthDesc.Usage = D3D11_USAGE_DEFAULT;
         depthDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-        ThrowIfFailed(m_device->CreateTexture2D(&depthDesc, nullptr, &m_depthTexture), "CreateTexture2D (depth) failed");
-        ThrowIfFailed(m_device->CreateDepthStencilView(m_depthTexture, nullptr, &m_depthStencil), "CreateDepthStencilView failed");
+        ThrowIfFailed(m_device->CreateTexture2D(&depthDesc, nullptr, &m_sceneDepth), "CreateTexture2D (depth) failed");
+        ThrowIfFailed(m_device->CreateDepthStencilView(m_sceneDepth, nullptr, &m_sceneDepthDsv), "CreateDepthStencilView failed");
+    }
+
+    void Dx11Renderer::ReleaseSceneTargets()
+    {
+        Release(m_sceneDepthDsv);
+        Release(m_sceneDepth);
+        Release(m_sceneColorRtv);   // an AddRef'd alias of m_backBufferRtv when 1x
+        Release(m_sceneColor);
     }
 
     void Dx11Renderer::ResizeBackBuffer(std::uint32_t width, std::uint32_t height)
     {
         m_context->OMSetRenderTargets(0, nullptr, nullptr);
-        Release(m_depthStencil);
-        Release(m_depthTexture);
-        Release(m_renderTarget);
+        ReleaseSceneTargets();
+        Release(m_backBufferRtv);
         ThrowIfFailed(m_swapChain->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0), "ResizeBuffers failed");
         m_width = width; m_height = height;
-        CreateRenderTarget();
-        CreateDepthBuffer(width, height);
+        CreateBackBufferView();
+        CreateSceneTargets(width, height);
     }
 
     void Dx11Renderer::Render(const RenderSnapshot& snapshot, const FrameSettings& settings)
     {
-        m_context->OMSetRenderTargets(1, &m_renderTarget, m_depthStencil);
-        m_context->ClearRenderTargetView(m_renderTarget, snapshot.clearColor);
-        m_context->ClearDepthStencilView(m_depthStencil, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
+        m_context->OMSetRenderTargets(1, &m_sceneColorRtv, m_sceneDepthDsv);
+        m_context->ClearRenderTargetView(m_sceneColorRtv, snapshot.clearColor);
+        m_context->ClearDepthStencilView(m_sceneDepthDsv, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
         const D3D11_VIEWPORT viewport{ 0, 0, static_cast<float>(m_width), static_cast<float>(m_height), 0, 1 };
         m_context->RSSetViewports(1, &viewport);
 
@@ -292,13 +337,23 @@ namespace engine::render
         PassContext context{};
         context.device = m_device;
         context.context = m_context;
-        context.renderTarget = m_renderTarget;
-        context.depthStencil = m_depthStencil;
+        context.renderTarget = m_sceneColorRtv;
+        context.depthStencil = m_sceneDepthDsv;
         context.viewportWidth = m_width;
         context.viewportHeight = m_height;
         context.snapshot = &snapshot;
         for (std::unique_ptr<IRenderPass>& pass : m_passes)
             pass->Execute(context);
+
+        // Resolve the multisampled colour into the back buffer, then present.
+        if (m_sampleCount > 1)
+        {
+            m_context->OMSetRenderTargets(0, nullptr, nullptr);   // unbind before resolve
+            ID3D11Texture2D* backBuffer{};
+            ThrowIfFailed(m_swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer)), "GetBuffer (resolve) failed");
+            m_context->ResolveSubresource(backBuffer, 0, m_sceneColor, 0, DXGI_FORMAT_R8G8B8A8_UNORM);
+            Release(backBuffer);
+        }
 
         ThrowIfFailed(m_swapChain->Present(settings.verticalSync ? 1 : 0, 0), "Present failed");
     }

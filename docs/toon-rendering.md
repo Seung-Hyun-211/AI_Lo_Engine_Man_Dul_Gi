@@ -33,10 +33,10 @@
 
 모델을 한 번 더 그리되 정점을 법선 방향으로 부풀리고 **front face culling** → 부푼 껍질의 뒷면만 남아 실루엣 둘레에 검정 링. 셀 표면보다 **먼저** 그려서(깊이 기록) 모델이 그 위를 덮으면 링만 남는다.
 
-- 두께: `outline.hlsl` 의 `outlineWidth` (b2 cbuffer). 클립공간에서 `w` 로 스케일 → 거리와 무관하게 화면상 일정 두께. 현재 값 `kOutlineWidth = 0.004f` (`ModelMeshPass3D.cpp`).
+- 두께: `outline.hlsl` 의 `outlineWidth` (b2 cbuffer). 클립공간에서 `w` 로 스케일 → 거리와 무관하게 화면상 일정 두께. 현재 값 `kOutlineWidth = 0.002f` (기존의 반) (`ModelMeshPass3D.cpp`).
 - 상태: `m_outlineRasterizer` = `D3D11_CULL_FRONT`.
 - **스무딩**: 헐 팽창에 원본 정점 법선이 아니라 `import::BuildSmoothNormals` 로 만든 **위치 기준 welded·면적가중 평균 법선**을 쓴다. hard normal(UV seam)에서 껍질이 갈라져 각지는 걸 막아 외곽선이 부드럽게 이어진다. `ModelMeshPass3D` 가 서브메시마다 `pos + smoothNormal`(stride 24) 헐 VB 를 만들고(인덱스는 모델과 공유), 아웃라인 패스가 그걸로 그린다.
-- 더: 서브픽셀 계단은 스왑체인 MSAA 나 포스트 AA 로 (미구현).
+- 서브픽셀 계단: 씬 타깃이 MSAA(최대 8x, `docs/msaa.md`)라 실루엣 엣지가 부드럽게 그려진다. 셀 밴드 경계는 셰이딩 단차라 MSAA 밖 — `smoothstep` 또는 포스트 AA.
 
 대안(선택 안 함): 포스트프로세스 엣지 검출(오프스크린 RT 필요), 림/프레넬(1패스, 두께 불균일). [command-playbook](command-playbook.md) 3g 참조.
 
@@ -50,7 +50,7 @@
 2. 삼각형별 **기하 법선**(정점 법선 아님) + centroid UV 로 텍스처 샘플한 **면 중심색**.
 3. 정확히 2개 삼각형이 공유하는 에지마다: `angle = acos(dot(n_a, n_b))`.
 4. `angle > thresholdDegrees` (기본 **90°**) 이면 리본 생성:
-   - **두께**: `angle` 이 임계값→180° 로 갈수록 `minHalfWidth`(4mm) → `maxHalfWidth`(20mm), 모델 공간. 각질수록 굵다.
+   - **두께**: `angle` 이 임계값→180° 로 갈수록 `minHalfWidth`(≈1.3mm) → `maxHalfWidth`(≈6.7mm), 모델 공간. 각질수록 굵다.
    - **색**: 좌·우 면 중심색 평균 → 채도 `×0.65` + 명도 `×0.80` → AO 처럼.
    - **형태**: 에지를 따라 `side = cross(edgeDir, foldNormal)` 방향으로 폭만큼 확장한 쿼드(삼각형 2개), 표면에서 `surfaceOffset`(1.5mm) 만큼 띄움.
 5. 모든 서브메시 리본을 한 VB 로 합침. `crease.hlsl` 은 변환 + 정점색 통과, 깊이 `LESS_EQUAL` + 기록 off.

@@ -29,7 +29,7 @@ namespace
     struct CreaseVertexGpu { float px, py, pz, r, g, b, a; };
 
     // Silhouette thickness as a fraction of half-screen (see outline.hlsl).
-    constexpr float kOutlineWidth = 0.004f;
+    constexpr float kOutlineWidth = 0.002f;
 
     void ThrowIfFailed(HRESULT result, const char* message)
     {
@@ -287,6 +287,7 @@ namespace engine::render
         rasterDesc.FillMode = D3D11_FILL_SOLID;
         rasterDesc.CullMode = D3D11_CULL_NONE;   // winding unverified; see model-animation-research.md
         rasterDesc.DepthClipEnable = TRUE;
+        rasterDesc.MultisampleEnable = TRUE;     // MSAA coverage (scene target is multisampled)
         ThrowIfFailed(device->CreateRasterizerState(&rasterDesc, &m_rasterizer), "CreateRasterizerState failed");
 
         rasterDesc.CullMode = D3D11_CULL_FRONT;  // inverted hull: show the back of the inflated shell

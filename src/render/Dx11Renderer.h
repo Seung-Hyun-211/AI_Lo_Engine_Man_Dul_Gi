@@ -50,8 +50,9 @@ namespace engine::render
     private:
         void RenderLoop(HWND window, std::uint32_t initialWidth, std::uint32_t initialHeight);
         void CreateDeviceAndSwapChain(HWND window, std::uint32_t width, std::uint32_t height);
-        void CreateRenderTarget();
-        void CreateDepthBuffer(std::uint32_t width, std::uint32_t height);
+        void CreateBackBufferView();
+        void CreateSceneTargets(std::uint32_t width, std::uint32_t height);
+        void ReleaseSceneTargets();
         void ResizeBackBuffer(std::uint32_t width, std::uint32_t height);
         void Render(const RenderSnapshot& snapshot, const FrameSettings& settings);
 
@@ -73,9 +74,18 @@ namespace engine::render
         ID3D11Device* m_device{};
         ID3D11DeviceContext* m_context{};
         IDXGISwapChain* m_swapChain{};
-        ID3D11RenderTargetView* m_renderTarget{};
-        ID3D11Texture2D* m_depthTexture{};
-        ID3D11DepthStencilView* m_depthStencil{};
+
+        // Back buffer: only the resolve/copy destination, never bound for passes.
+        ID3D11RenderTargetView* m_backBufferRtv{};
+
+        // Scene targets the passes render into. Multisampled when m_sampleCount>1;
+        // otherwise m_sceneColorRtv aliases the back buffer and no resolve runs.
+        ID3D11Texture2D* m_sceneColor{};
+        ID3D11RenderTargetView* m_sceneColorRtv{};
+        ID3D11Texture2D* m_sceneDepth{};
+        ID3D11DepthStencilView* m_sceneDepthDsv{};
+        std::uint32_t m_sampleCount{ 1 };
+
         std::uint32_t m_width{};
         std::uint32_t m_height{};
     };
