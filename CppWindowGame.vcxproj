@@ -16,6 +16,7 @@
   <ItemGroup>
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\anim\AnimationSampler.cpp" />
+    <ClCompile Include="src\core\AssetPaths.cpp" />
     <ClCompile Include="src\core\JobSystem.cpp" />
     <ClCompile Include="src\game\Application.cpp" />
     <ClCompile Include="src\game\Simulation.cpp" />
@@ -29,6 +30,7 @@
     <ClCompile Include="src\render\r2d\QuadPass2D.cpp" />
     <ClCompile Include="src\render\r3d\MeshPass3D.cpp" />
     <ClCompile Include="src\render\r3d\ModelMeshPass3D.cpp" />
+    <ClCompile Include="src\render\shader\ShaderLibrary.cpp" />
     <ClCompile Include="src\ui\UI.cpp" />
     <ClCompile Include="src\vendor\ufbx\ufbx.c">
       <CompileAs>CompileAsCpp</CompileAs>
@@ -37,6 +39,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\anim\AnimationSampler.h" />
+    <ClInclude Include="src\core\AssetPaths.h" />
     <ClInclude Include="src\core\JobSystem.h" />
     <ClInclude Include="src\core\NonCopyable.h" />
     <ClInclude Include="src\core\Time.h" />
@@ -65,8 +68,15 @@
     <ClInclude Include="src\render\r3d\MeshPass3D.h" />
     <ClInclude Include="src\render\r3d\ModelMeshPass3D.h" />
     <ClInclude Include="src\render\r3d\Scene3D.h" />
+    <ClInclude Include="src\render\shader\ShaderLibrary.h" />
     <ClInclude Include="src\ui\UI.h" />
     <ClInclude Include="src\vendor\ufbx\ufbx.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="assets\shaders\common3d.hlsli" />
+    <None Include="assets\shaders\mesh.hlsl" />
+    <None Include="assets\shaders\model.hlsl" />
+    <None Include="assets\shaders\quad2d.hlsl" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

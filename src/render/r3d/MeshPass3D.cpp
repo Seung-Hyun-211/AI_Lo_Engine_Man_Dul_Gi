@@ -3,9 +3,9 @@
 #if defined(ENGINE_WITH_3D)
 
 #include "math/Math3D.h"
+#include "render/shader/ShaderLibrary.h"
 
 #include <d3d11.h>
-#include <d3dcompiler.h>
 
 #include <cstring>
 #include <stdexcept>
@@ -103,42 +103,13 @@ namespace engine::render
         mesh.indexCount = static_cast<std::uint32_t>(data.indices.size());
     }
 
-    void MeshPass3D::Initialize(ID3D11Device* device)
+    void MeshPass3D::Initialize(ID3D11Device* device, ShaderLibrary& shaders)
     {
-        constexpr char shader[] = R"(
-cbuffer Frame  : register(b0) { row_major float4x4 viewProj; float4 lightDir; };
-cbuffer Object : register(b1) { row_major float4x4 world;    float4 objColor; };
-struct VSIn  { float3 pos : POSITION; float3 nrm : NORMAL; };
-struct VSOut { float4 pos : SV_POSITION; float3 nrm : NORMAL; };
-VSOut VSMain(VSIn input) {
-    VSOut output;
-    float4 worldPos = mul(float4(input.pos, 1.0f), world);
-    output.pos = mul(worldPos, viewProj);
-    output.nrm = mul(float4(input.nrm, 0.0f), world).xyz;
-    return output;
-}
-float4 PSMain(VSOut input) : SV_TARGET {
-    float3 n = normalize(input.nrm);
-    float ndotl = saturate(dot(n, -normalize(lightDir.xyz)));
-    float3 lit = objColor.rgb * (0.25f + 0.75f * ndotl);
-    return float4(lit, objColor.a);
-}
-)";
-        ID3DBlob* vs{}; ID3DBlob* ps{}; ID3DBlob* errors{};
-        ThrowIfFailed(D3DCompile(shader, sizeof(shader), nullptr, nullptr, nullptr, "VSMain", "vs_5_0", 0, 0, &vs, &errors), "MeshPass3D vertex shader compile failed");
-        SafeRelease(errors);
-        ThrowIfFailed(D3DCompile(shader, sizeof(shader), nullptr, nullptr, nullptr, "PSMain", "ps_5_0", 0, 0, &ps, &errors), "MeshPass3D pixel shader compile failed");
-        SafeRelease(errors);
-        ThrowIfFailed(device->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, &m_vertexShader), "CreateVertexShader failed");
-        ThrowIfFailed(device->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, &m_pixelShader), "CreatePixelShader failed");
-
         const D3D11_INPUT_ELEMENT_DESC layout[] = {
             { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
             { "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
         };
-        const HRESULT layoutResult = device->CreateInputLayout(layout, ARRAYSIZE(layout), vs->GetBufferPointer(), vs->GetBufferSize(), &m_inputLayout);
-        SafeRelease(vs); SafeRelease(ps);
-        ThrowIfFailed(layoutResult, "CreateInputLayout failed");
+        m_shader = shaders.Get(device, "mesh", layout, ARRAYSIZE(layout));
 
         D3D11_BUFFER_DESC frameDesc{};
         frameDesc.ByteWidth = sizeof(FrameConstants);
@@ -175,7 +146,7 @@ float4 PSMain(VSOut input) : SV_TARGET {
     void MeshPass3D::Execute(const PassContext& context)
     {
         const Scene3D& scene = context.snapshot->scene3d;
-        if (scene.meshDraws.empty()) return;
+        if (scene.meshDraws.empty() || m_shader == nullptr) return;
 
         ID3D11DeviceContext* device = context.context;
 
@@ -191,10 +162,10 @@ float4 PSMain(VSOut input) : SV_TARGET {
         device->OMSetBlendState(nullptr, nullptr, 0xffffffff);
         device->OMSetDepthStencilState(m_depthEnabled, 0);
         device->RSSetState(m_rasterizer);
-        device->IASetInputLayout(m_inputLayout);
+        device->IASetInputLayout(m_shader->inputLayout);
         device->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        device->VSSetShader(m_vertexShader, nullptr, 0);
-        device->PSSetShader(m_pixelShader, nullptr, 0);
+        device->VSSetShader(m_shader->vs, nullptr, 0);
+        device->PSSetShader(m_shader->ps, nullptr, 0);
         device->VSSetConstantBuffers(0, 1, &m_frameConstants);
         device->PSSetConstantBuffers(0, 1, &m_frameConstants);
 
@@ -228,13 +199,11 @@ float4 PSMain(VSOut input) : SV_TARGET {
             SafeRelease(mesh.indexBuffer);
             mesh.indexCount = 0;
         }
+        m_shader = nullptr;   // owned by ShaderLibrary
         SafeRelease(m_rasterizer);
         SafeRelease(m_depthEnabled);
         SafeRelease(m_objectConstants);
         SafeRelease(m_frameConstants);
-        SafeRelease(m_inputLayout);
-        SafeRelease(m_pixelShader);
-        SafeRelease(m_vertexShader);
     }
 }
 

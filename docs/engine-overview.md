@@ -43,10 +43,10 @@ wWinMain (src/main.cpp)
 | 모듈 | 파일 | 유일한 변경 이유 |
 |---|---|---|
 | `engine::math` | `math/Math.h`(umbrella), `Math2D.h`, `Math3D.h` | 공용 기하 타입이 바뀔 때 |
-| `engine::core` | `core/JobSystem.*`, `core/Time.h`, `core/NonCopyable.h` | 작업 스케줄링·시간 규칙이 바뀔 때 ([time-design.md](time-design.md)) |
+| `engine::core` | `core/JobSystem.*`, `core/Time.h`, `core/NonCopyable.h`, `core/AssetPaths.*` | 작업 스케줄링·시간·자산 경로 규칙이 바뀔 때 ([time-design.md](time-design.md)) |
 | `engine::platform` | `platform/Win32Window.*` | OS 창/메시지 처리 방식이 바뀔 때 |
 | `engine::input` | `input/InputState.h` | 입력 상태 표현·에지 판정이 바뀔 때 |
-| `engine::render` | `render/IRenderer.h`, `RenderPass.h`, `RenderSnapshot.h`, `Dx11Renderer.*` + `render/r2d/*` + `render/r3d/*` | 렌더 백엔드/스냅샷 포맷/파이프라인 스테이지가 바뀔 때 |
+| `engine::render` | `render/IRenderer.h`, `RenderPass.h`, `RenderSnapshot.h`, `Dx11Renderer.*` + `render/shader/*` + `render/r2d/*` + `render/r3d/*` | 렌더 백엔드/스냅샷 포맷/파이프라인 스테이지/셰이더 로딩이 바뀔 때 ([shader-pipeline.md](shader-pipeline.md)) |
 | `engine::physics` | `physics/Collision.h` + `physics/p2d/*` + `physics/p3d/*` | 충돌 탐지 규칙이 바뀔 때 ([collider-design.md](collider-design.md)) |
 | `engine::import` | `import/Model.h`, `import/ModelImporter.*` (+ `vendor/ufbx`) | FBX → `Model` 매핑이 바뀔 때 ([model-animation-research.md](model-animation-research.md)) |
 | `engine::anim` | `anim/AnimationSampler.*` | 포즈 평가·블렌딩 규칙이 바뀔 때 |
@@ -98,7 +98,8 @@ render(Dx11) ─▶ core(NonCopyable), D3D11     상위 레이어를 도로 참�
 - **서드파티 추가** — `src/vendor/<lib>/`에 소스 vendor, 벤더 헤더는 그 라이브러리를 쓰는 `.cpp` 안에서만 include, 밖으로는 엔진 타입만. vcxproj 에 소스 추가(필요 시 `CompileAs`/`WarningLevel` per-file).
 - **새 차원 모듈** — `<layer>/core` + `<layer>/x2d` + `<layer>/x3d` 디렉터리, 서로 include 금지, `ENGINE_WITH_3D`로 3D 빌드 제외 가능하게. `render`·`physics`가 예시.
 - **새 위젯** — `ui::Widget`을 상속한다. 기존 위젯 수정 없이(OCP) `Build`(로컬 좌표 → `Quad`), `PointerXxx`(소비 시 `true`)만 구현한다. LSP: 기반 계약(로컬 좌표·`parentOrigin` 기준 배치·소비 반환)을 지킨다.
-- **새 렌더 패스/스테이지** — `render::IRenderPass`(`Name`/`Initialize`/`Execute`/`Release`)를 구현하고 `main.cpp`에서 `renderer.AddRenderPass(...)`로 등록한다(Start 전). 렌더러 코어·기존 패스는 건드리지 않는다(OCP). 그림자·블룸·디버그 라인·포스트프로세스가 여기 해당한다.
+- **새 렌더 패스/스테이지** — `render::IRenderPass`(`Name`/`Initialize(device, ShaderLibrary&)`/`Execute`/`Release`)를 구현하고 `main.cpp`에서 `renderer.AddRenderPass(...)`로 등록한다(Start 전). 셰이더는 `assets/shaders/<name>.hlsl` + `shaders.Get(device, "<name>", layout, count)`. 렌더러 코어·기존 패스는 안 건드린다(OCP). 세부는 [shader-pipeline.md](shader-pipeline.md).
+- **셰이더 수정** — `assets/shaders/*.hlsl` 편집·저장 → 실행 중이면 다음 프레임에 핫리로드. 공통 코드는 `common3d.hlsli`.
 - **새 렌더 프리미티브** — `render/RenderSnapshot.h`에 값 타입을 추가하고(예: 텍스처용 `SpriteDraw`) 그것을 소비하는 패스를 만든다. 렌더러 코어에 게임 개념(`playerX` 등)을 하드코딩하지 않는다.
 - **렌더 백엔드 교체** — `IRenderer`를 구현하는 새 클래스를 만들고 `main.cpp`에서 그것을 생성한다. `IRenderPass`는 D3D11 전용 계약이라 새 백엔드는 자체 패스 계약을 갖는다.
 - **입력 소스 추가(게임패드 등)** — `InputState`에 상태·질의를 추가하고 `Win32Window`(또는 새 platform 소스)가 채운다. gameplay는 여전히 `PlayerIntent` 번역을 거친다.

@@ -3,6 +3,7 @@
 #include "core/NonCopyable.h"
 #include "render/IRenderer.h"
 #include "render/RenderPass.h"
+#include "render/shader/ShaderLibrary.h"
 
 #include <Windows.h>
 #include <condition_variable>
@@ -67,6 +68,7 @@ namespace engine::render
         FrameSettings m_frameSettings{};
 
         std::vector<std::unique_ptr<IRenderPass>> m_passes;
+        ShaderLibrary m_shaders;
 
         ID3D11Device* m_device{};
         ID3D11DeviceContext* m_context{};

@@ -172,6 +172,7 @@ namespace engine::render
 
         for (std::unique_ptr<IRenderPass>& pass : m_passes)
             if (pass) pass->Release();
+        m_shaders.ReleaseAll();
         Release(m_depthStencil);
         Release(m_depthTexture);
         Release(m_renderTarget);
@@ -238,7 +239,7 @@ namespace engine::render
         CreateDepthBuffer(width, height);
 
         for (std::unique_ptr<IRenderPass>& pass : m_passes)
-            pass->Initialize(m_device);
+            pass->Initialize(m_device, m_shaders);
     }
 
     void Dx11Renderer::CreateRenderTarget()
@@ -284,6 +285,9 @@ namespace engine::render
         m_context->ClearDepthStencilView(m_depthStencil, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
         const D3D11_VIEWPORT viewport{ 0, 0, static_cast<float>(m_width), static_cast<float>(m_height), 0, 1 };
         m_context->RSSetViewports(1, &viewport);
+
+        // Pick up any .hlsl edited on disk since the last frame.
+        m_shaders.PollHotReload(m_device);
 
         PassContext context{};
         context.device = m_device;

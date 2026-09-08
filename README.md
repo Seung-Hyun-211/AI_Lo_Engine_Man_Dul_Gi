@@ -19,14 +19,16 @@ src/
   core/
     JobSystem.*            워커 풀 + Job + Fence (예외 안전). ParallelFor
     Time.h                 FrameClock(clamp 된 delta), FixedTimestep(고정 스텝)  → docs/time-design.md
+    AssetPaths.*           작업 디렉터리와 무관하게 assets/ 루트 탐색
     NonCopyable.h          소유 타입 공통 base
   platform/Win32Window.*   OS 창 + WndProc → IWindowEventSink 로 이벤트 전달
   input/InputState.h       이번 프레임 키/마우스 상태 + 에지 질의(Pressed/Released)
-  render/                  core + r2d/r3d 모듈
+  render/                  core + shader + r2d/r3d 모듈
     IRenderer.h            렌더러 추상 (Start/SetFrameSettings/Submit/Resize/Stop)
     RenderPass.h           파이프라인 스테이지 추상 (Initialize/Execute/Release) — 확장 지점
     RenderSnapshot.h       값 기반 스냅샷: scene3d(3D) + worldQuads + uiQuads
-    Dx11Renderer.*         렌더 스레드. device/swapchain/depth 단독 소유. 패스 목록 실행
+    shader/ShaderLibrary.* assets/shaders/*.hlsl 컴파일·캐시·핫리로드  → docs/shader-pipeline.md
+    Dx11Renderer.*         렌더 스레드. device/swapchain/depth + ShaderLibrary 소유. 패스 목록 실행
     r2d/Sprite2D.h, QuadPass2D.*   [2D] 스크린 공간 Quad, 깊이 off, straight-alpha
     r3d/Scene3D.h, MeshPass3D.*    [3D] 깊이 테스트, 원근 카메라, directional light, 내장 큐브·평면
     r3d/ModelMeshPass3D.*          [3D] 시작 시 FBX + 디퓨즈 TGA 로드 → 정적 텍스처 렌더(바인드 포즈; 스키닝 아직)
@@ -45,11 +47,14 @@ src/
     Simulation.*           가변 월드. 고정 timestep. 플레이어 + 장애물 + 20k 파티클 + 3D 데모. 충돌 구동
     SnapshotBuilder.*      Simulation + UIContext → RenderSnapshot
     Application.*           조립·프레임 지휘. IWindowEventSink 구현
+assets/
+  shaders/*.hlsl(i)        mesh / model / quad2d + common3d.hlsli (핫리로드)  → docs/shader-pipeline.md
+  models/                  FBX (+ .tga 는 .gitignore)
 ```
 
 2D와 3D는 서로 `#include` 하지 않는 별도 모듈이다. `ENGINE_WITH_3D`를 빼면 3D 코드가 빌드에서 완전히 제외되고 2D 전용 exe가 경고 0으로 빌드된다.
 
-자세한 지도·프레임 흐름·확장 지점은 [docs/engine-overview.md](docs/engine-overview.md). 명령 단위 작업 절차는 [docs/command-playbook.md](docs/command-playbook.md). 설계 문서: [time-design](docs/time-design.md) · [collider-design](docs/collider-design.md) · [model-animation-research](docs/model-animation-research.md).
+자세한 지도·프레임 흐름·확장 지점은 [docs/engine-overview.md](docs/engine-overview.md). 명령 단위 작업 절차는 [docs/command-playbook.md](docs/command-playbook.md). 설계 문서: [time-design](docs/time-design.md) · [collider-design](docs/collider-design.md) · [model-animation-research](docs/model-animation-research.md) · [shader-pipeline](docs/shader-pipeline.md).
 
 ## 스레드 계약
 

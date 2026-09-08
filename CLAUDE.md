@@ -22,7 +22,7 @@ C++20 / Win32 / DirectX 11 기반 2D 게임 엔진 뼈대. 이 파일은 세션�
 ## 아키텍처 불변 규칙 (절대 깨지 말 것)
 
 1. **D3D11 API 호출은 렌더 스레드에서만** 한다. 메인 스레드(`src/game/Application.cpp`의 프레임 루프)는 입력·시뮬레이션·스냅샷 생성만 한다.
-2. 렌더 스레드(`src/render/Dx11Renderer.cpp`)가 device, immediate context, swap chain, back buffer, depth buffer, `ResizeBuffers`, `Present`의 **유일한 소유자**다. 실제 드로우는 `IRenderPass` 목록(`src/render/r2d/*`, `src/render/r3d/*`)이 하고, 렌더러 코어는 clear·bind·pass 순회만 한다. 새 패스는 `RenderPass.h` 구현 + `main.cpp`에서 `AddRenderPass`(Start 전).
+2. 렌더 스레드(`src/render/Dx11Renderer.cpp`)가 device, immediate context, swap chain, back buffer, depth buffer, `ResizeBuffers`, `Present`의 **유일한 소유자**다. 실제 드로우는 `IRenderPass` 목록(`src/render/r2d/*`, `src/render/r3d/*`)이 하고, 렌더러 코어는 clear·bind·pass 순회 + `ShaderLibrary` 소유만 한다. 새 패스는 `RenderPass.h` 구현 + `main.cpp`에서 `AddRenderPass`(Start 전). **셰이더는 `assets/shaders/<name>.hlsl` + `Initialize(device, ShaderLibrary&)`에서 `shaders.Get(...)`; 인라인 `D3DCompile` 금지. `.hlsl`/`.hlsli`는 커밋 소스, 실행 중 편집하면 핫리로드.** 세부 `docs/shader-pipeline.md`.
 3. 스레드 경계는 값 기반 `RenderSnapshot`만 넘어간다(`Quad`·`MeshDraw`·`CameraView` 모두 값, `Mat4` 포함). 가변 게임 객체 포인터를 넣지 않는다.
 4. 렌더러는 최신 스냅샷 1개만 보관한다(1슬롯 메일박스). 오래된 미렌더 프레임은 버린다.
 5. 창 resize 요청은 메인에서 전달하되 `ResizeBuffers`는 렌더 스레드만 호출한다.
@@ -32,7 +32,7 @@ C++20 / Win32 / DirectX 11 기반 2D 게임 엔진 뼈대. 이 파일은 세션�
 
 9. 서드파티는 `src/vendor/`에 소스 vendor (현재 `ufbx` — FBX 로더, MIT/PD, v0.23.0). `ufbx.c`는 C++로 컴파일, 경고 off. ufbx 타입은 `src/import/ModelImporter.cpp` 안에만 — 밖으로는 엔진 타입(`import::Model` 등)만 나간다. 모델/애니메이션 세부는 `docs/model-animation-research.md`.
 
-모듈 지도·프레임 흐름·확장 지점은 `docs/engine-overview.md`, 스레드 계약은 `docs/multithreaded_game_engine_architecture.md`, UI는 `docs/ui-architecture.md`, 시간은 `docs/time-design.md`, 충돌은 `docs/collider-design.md`, 모델·애니메이션은 `docs/model-animation-research.md`.
+모듈 지도·프레임 흐름·확장 지점은 `docs/engine-overview.md`, 스레드 계약은 `docs/multithreaded_game_engine_architecture.md`, UI는 `docs/ui-architecture.md`, 시간은 `docs/time-design.md`, 충돌은 `docs/collider-design.md`, 모델·애니메이션은 `docs/model-animation-research.md`, 셰이더는 `docs/shader-pipeline.md`.
 
 ## 설계 원칙 — 최우선 (모든 신규/수정 코드에 적용)
 

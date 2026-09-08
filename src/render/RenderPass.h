@@ -11,6 +11,8 @@ struct ID3D11DepthStencilView;
 
 namespace engine::render
 {
+    class ShaderLibrary;
+
     // What a pass is handed each frame. The render target and depth buffer are
     // already created, cleared, and bound by Dx11Renderer; a pass only issues
     // draw calls and sets the pipeline state it needs. It must not Present,
@@ -46,8 +48,9 @@ namespace engine::render
         [[nodiscard]] virtual const char* Name() const = 0;
 
         // Called once on the render thread after the device exists, before the
-        // first Execute. Create shaders, buffers, and pipeline states here.
-        virtual void Initialize(ID3D11Device* device) = 0;
+        // first Execute. Get shader programs from `shaders` (by .hlsl name) and
+        // create buffers / pipeline states here.
+        virtual void Initialize(ID3D11Device* device, ShaderLibrary& shaders) = 0;
 
         // Called every frame. Read ctx.snapshot for what to draw.
         virtual void Execute(const PassContext& context) = 0;

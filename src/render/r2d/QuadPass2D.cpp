@@ -1,7 +1,8 @@
 #include "render/r2d/QuadPass2D.h"
 
+#include "render/shader/ShaderLibrary.h"
+
 #include <d3d11.h>
-#include <d3dcompiler.h>
 
 #include <cstring>
 #include <stdexcept>
@@ -47,34 +48,13 @@ namespace
 
 namespace engine::render
 {
-    void QuadPass2D::Initialize(ID3D11Device* device)
+    void QuadPass2D::Initialize(ID3D11Device* device, ShaderLibrary& shaders)
     {
-        constexpr char shader[] = R"(
-cbuffer Constants : register(b0) { float2 screen; float2 unused; };
-struct VSIn { float2 pos : POSITION; float4 color : COLOR; };
-struct VSOut { float4 pos : SV_POSITION; float4 color : COLOR; };
-VSOut VSMain(VSIn input) {
-    VSOut output;
-    output.pos = float4(input.pos.x / screen.x * 2.0f - 1.0f, 1.0f - input.pos.y / screen.y * 2.0f, 0, 1);
-    output.color = input.color; return output;
-}
-float4 PSMain(VSOut input) : SV_TARGET { return input.color; }
-)";
-        ID3DBlob* vs{}; ID3DBlob* ps{}; ID3DBlob* errors{};
-        ThrowIfFailed(D3DCompile(shader, sizeof(shader), nullptr, nullptr, nullptr, "VSMain", "vs_5_0", 0, 0, &vs, &errors), "QuadPass2D vertex shader compile failed");
-        SafeRelease(errors);
-        ThrowIfFailed(D3DCompile(shader, sizeof(shader), nullptr, nullptr, nullptr, "PSMain", "ps_5_0", 0, 0, &ps, &errors), "QuadPass2D pixel shader compile failed");
-        SafeRelease(errors);
-        ThrowIfFailed(device->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, &m_vertexShader), "CreateVertexShader failed");
-        ThrowIfFailed(device->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, &m_pixelShader), "CreatePixelShader failed");
-
         const D3D11_INPUT_ELEMENT_DESC layout[] = {
             { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
             { "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0 },
         };
-        const HRESULT layoutResult = device->CreateInputLayout(layout, ARRAYSIZE(layout), vs->GetBufferPointer(), vs->GetBufferSize(), &m_inputLayout);
-        SafeRelease(vs); SafeRelease(ps);
-        ThrowIfFailed(layoutResult, "CreateInputLayout failed");
+        m_shader = shaders.Get(device, "quad2d", layout, ARRAYSIZE(layout));
 
         D3D11_BUFFER_DESC vertexDesc{};
         vertexDesc.ByteWidth = static_cast<UINT>(sizeof(Vertex) * kMaxVertices);
@@ -114,7 +94,7 @@ float4 PSMain(VSOut input) : SV_TARGET { return input.color; }
         vertices.reserve(6 * (snapshot.worldQuads.size() + snapshot.uiQuads.size()));
         AppendQuads(vertices, snapshot.worldQuads);
         AppendQuads(vertices, snapshot.uiQuads);
-        if (vertices.empty()) return;
+        if (vertices.empty() || m_shader == nullptr) return;
 
         ID3D11DeviceContext* device = context.context;
         D3D11_MAPPED_SUBRESOURCE mapped{};
@@ -129,23 +109,21 @@ float4 PSMain(VSOut input) : SV_TARGET { return input.color; }
         const float blendFactor[4]{ 0, 0, 0, 0 };
         device->OMSetBlendState(m_blendState, blendFactor, 0xffffffff);
         device->OMSetDepthStencilState(m_depthDisabled, 0);
-        device->IASetInputLayout(m_inputLayout);
+        device->IASetInputLayout(m_shader->inputLayout);
         device->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         device->IASetVertexBuffers(0, 1, &m_vertexBuffer, &stride, &offset);
-        device->VSSetShader(m_vertexShader, nullptr, 0);
+        device->VSSetShader(m_shader->vs, nullptr, 0);
         device->VSSetConstantBuffers(0, 1, &m_constantBuffer);
-        device->PSSetShader(m_pixelShader, nullptr, 0);
+        device->PSSetShader(m_shader->ps, nullptr, 0);
         device->Draw(static_cast<UINT>(vertices.size()), 0);
     }
 
     void QuadPass2D::Release()
     {
+        m_shader = nullptr;   // owned by ShaderLibrary
         SafeRelease(m_depthDisabled);
         SafeRelease(m_blendState);
         SafeRelease(m_constantBuffer);
         SafeRelease(m_vertexBuffer);
-        SafeRelease(m_inputLayout);
-        SafeRelease(m_pixelShader);
-        SafeRelease(m_vertexShader);
     }
 }

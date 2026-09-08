@@ -9,9 +9,6 @@
 #include <unordered_map>
 #include <vector>
 
-struct ID3D11VertexShader;
-struct ID3D11PixelShader;
-struct ID3D11InputLayout;
 struct ID3D11Buffer;
 struct ID3D11DepthStencilState;
 struct ID3D11RasterizerState;
@@ -20,6 +17,8 @@ struct ID3D11ShaderResourceView;
 
 namespace engine::render
 {
+    struct ShaderProgram;
+
     // Draws one FBX model, loaded once at startup, as static lit geometry (bind
     // pose - no skinning yet). It reuses the MeshPass3D lighting model. The model
     // path is given to the constructor; if the file cannot be loaded the pass
@@ -33,7 +32,7 @@ namespace engine::render
         explicit ModelMeshPass3D(std::string modelPath);
 
         [[nodiscard]] const char* Name() const override { return "ModelMeshPass3D"; }
-        void Initialize(ID3D11Device* device) override;
+        void Initialize(ID3D11Device* device, ShaderLibrary& shaders) override;
         void Execute(const PassContext& context) override;
         void Release() override;
 
@@ -58,9 +57,7 @@ namespace engine::render
         std::string m_resolvedDir;   // directory the FBX actually loaded from
         std::vector<SubMesh> m_subMeshes;
         std::unordered_map<std::string, ID3D11ShaderResourceView*> m_textures;   // filename -> SRV (owned)
-        ID3D11VertexShader* m_vertexShader{};
-        ID3D11PixelShader* m_pixelShader{};
-        ID3D11InputLayout* m_inputLayout{};
+        const ShaderProgram* m_shader{};   // owned by ShaderLibrary
         ID3D11Buffer* m_frameConstants{};
         ID3D11Buffer* m_objectConstants{};
         ID3D11DepthStencilState* m_depthEnabled{};
