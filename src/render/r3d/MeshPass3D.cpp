@@ -1,6 +1,8 @@
-#include "render/passes/MeshPass3D.h"
+#include "render/r3d/MeshPass3D.h"
 
-#include "math/Math.h"
+#if defined(ENGINE_WITH_3D)
+
+#include "math/Math3D.h"
 
 #include <d3d11.h>
 #include <d3dcompiler.h>
@@ -172,17 +174,17 @@ float4 PSMain(VSOut input) : SV_TARGET {
 
     void MeshPass3D::Execute(const PassContext& context)
     {
-        const RenderSnapshot& snapshot = *context.snapshot;
-        if (snapshot.meshDraws.empty()) return;
+        const Scene3D& scene = context.snapshot->scene3d;
+        if (scene.meshDraws.empty()) return;
 
         ID3D11DeviceContext* device = context.context;
 
-        const math::Mat4 viewProj = snapshot.camera.view * snapshot.camera.projection;
+        const math::Mat4 viewProj = scene.camera.view * scene.camera.projection;
         FrameConstants frame{};
         std::memcpy(frame.viewProj, viewProj.m, sizeof(frame.viewProj));
-        frame.lightDir[0] = snapshot.camera.lightDirection.x;
-        frame.lightDir[1] = snapshot.camera.lightDirection.y;
-        frame.lightDir[2] = snapshot.camera.lightDirection.z;
+        frame.lightDir[0] = scene.camera.lightDirection.x;
+        frame.lightDir[1] = scene.camera.lightDirection.y;
+        frame.lightDir[2] = scene.camera.lightDirection.z;
         frame.lightDir[3] = 0.0f;
         device->UpdateSubresource(m_frameConstants, 0, nullptr, &frame, 0, 0);
 
@@ -196,7 +198,7 @@ float4 PSMain(VSOut input) : SV_TARGET {
         device->VSSetConstantBuffers(0, 1, &m_frameConstants);
         device->PSSetConstantBuffers(0, 1, &m_frameConstants);
 
-        for (const MeshDraw& draw : snapshot.meshDraws)
+        for (const MeshDraw& draw : scene.meshDraws)
         {
             const GpuMesh& mesh = m_meshes[static_cast<std::size_t>(draw.mesh)];
             if (mesh.vertexBuffer == nullptr) continue;
@@ -235,3 +237,5 @@ float4 PSMain(VSOut input) : SV_TARGET {
         SafeRelease(m_vertexShader);
     }
 }
+
+#endif  // ENGINE_WITH_3D

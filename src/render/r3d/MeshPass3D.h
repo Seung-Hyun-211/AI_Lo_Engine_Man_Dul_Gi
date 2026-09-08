@@ -2,9 +2,10 @@
 
 #include "core/NonCopyable.h"
 #include "render/RenderPass.h"
-#include "render/RenderSnapshot.h"
+#include "render/r3d/Scene3D.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 struct ID3D11VertexShader;

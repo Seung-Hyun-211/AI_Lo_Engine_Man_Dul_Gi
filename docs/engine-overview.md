@@ -12,24 +12,42 @@ wWinMain (src/main.cpp)
         ├─ InputState        (input/)           이번 프레임 키/마우스
         ├─ UIContext         (ui/)              화면 오버레이 (월드 위)
         ├─ Simulation        (game/)            가변 월드, 고정 timestep
-        │    └─ JobSystem    (core/)            연속 범위 병렬 update
+        │    ├─ JobSystem    (core/)            연속 범위 병렬 update
+        │    ├─ CollisionWorld2D (physics/p2d)  2D 겹침 탐지 (탐지만)
+        │    └─ CollisionWorld3D (physics/p3d)  3D 겹침 탐지  [ENGINE_WITH_3D]
         ├─ SnapshotBuilder   (game/)            월드+UI → 값 기반 RenderSnapshot
         └─ IRenderer         (render/)          추상 렌더러 (구현: Dx11Renderer)
                                                 코어는 device/swapchain/RT/depth만 소유
                                                 그리기 = IRenderPass 목록
-                                                  MeshPass3D  (3D, 깊이 테스트, 원근)
-                                                  QuadPass2D  (2D, 스크린 공간, 깊이 off)
+                                                  MeshPass3D  (render/r3d)  [ENGINE_WITH_3D]
+                                                  QuadPass2D  (render/r2d)
 ```
+
+## 2D / 3D 모듈 분리 · 빌드 토글
+
+같은 빌드 안이지만 2D와 3D는 **서로 include하지 않는 별도 모듈**이다. 공유는 각 계층의 core로만.
+
+| 계층 | core (공유) | 2D 모듈 | 3D 모듈 |
+|---|---|---|---|
+| math | — | `math/Math2D.h` (Vec2/Rect/Color) | `math/Math3D.h` (Vec3/Vec4/Mat4) |
+| render | `IRenderer.h`, `RenderPass.h`, `Dx11Renderer.*`, `RenderSnapshot.h` | `render/r2d/` (Sprite2D, QuadPass2D) | `render/r3d/` (Scene3D, MeshPass3D) |
+| physics | `physics/Collision.h` | `physics/p2d/` (Collider2D, CollisionWorld2D) | `physics/p3d/` (Collider3D, CollisionWorld3D) |
+
+- `math/Math.h`는 umbrella: 2D는 항상, 3D는 `ENGINE_WITH_3D`일 때만 pull.
+- **`ENGINE_WITH_3D` 미정의 시**: 3D `.cpp` 본문이 `#if`로 비워짐 → `MeshPass3D`·`CollisionWorld3D` 심볼 없음, `RenderSnapshot`에 `scene3d` 없음, `Dx11Renderer`가 3D 패스 미등록, `SnapshotBuilder`/`Simulation`이 3D 스킵. 2D 전용 exe가 경고 0으로 빌드된다(검증됨).
+- `ENGINE_WITH_2D`는 baseline (UI가 의존). 프로젝트 정의는 `CppWindowGame.vcxproj`의 `PreprocessorDefinitions`.
+- 새 차원 모듈(예: 사운드 2D/3D)도 같은 패턴: `<layer>/core` + `<layer>/x2d` + `<layer>/x3d` + 토글.
 
 ## 모듈과 책임 (SRP)
 
 | 모듈 | 파일 | 유일한 변경 이유 |
 |---|---|---|
-| `engine::math` | `math/Math.h` | 공용 기하 타입(`Vec2`/`Vec3`/`Mat4`/`Rect`/`Color`)이 바뀔 때 |
-| `engine::core` | `core/JobSystem.*`, `core/Time.h`, `core/NonCopyable.h` | 작업 스케줄링·시간 누적 규칙이 바뀔 때 |
+| `engine::math` | `math/Math.h`(umbrella), `Math2D.h`, `Math3D.h` | 공용 기하 타입이 바뀔 때 |
+| `engine::core` | `core/JobSystem.*`, `core/Time.h`, `core/NonCopyable.h` | 작업 스케줄링·시간 규칙이 바뀔 때 ([time-design.md](time-design.md)) |
 | `engine::platform` | `platform/Win32Window.*` | OS 창/메시지 처리 방식이 바뀔 때 |
 | `engine::input` | `input/InputState.h` | 입력 상태 표현·에지 판정이 바뀔 때 |
-| `engine::render` | `render/IRenderer.h`, `render/RenderPass.h`, `render/RenderSnapshot.h`, `render/Dx11Renderer.*`, `render/passes/*` | 렌더 백엔드/스냅샷 포맷/파이프라인 스테이지가 바뀔 때 |
+| `engine::render` | `render/IRenderer.h`, `RenderPass.h`, `RenderSnapshot.h`, `Dx11Renderer.*` + `render/r2d/*` + `render/r3d/*` | 렌더 백엔드/스냅샷 포맷/파이프라인 스테이지가 바뀔 때 |
+| `engine::physics` | `physics/Collision.h` + `physics/p2d/*` + `physics/p3d/*` | 충돌 탐지 규칙이 바뀔 때 ([collider-design.md](collider-design.md)) |
 | `engine::ui` | `ui/UI.*` | 위젯 트리·오버레이 규칙이 바뀔 때 |
 | `engine::game` | `game/Simulation.*`, `game/SnapshotBuilder.*`, `game/Application.*` | 프레임 흐름·월드 규칙이 바뀔 때 |
 
@@ -61,8 +79,10 @@ render(Dx11) ─▶ core(NonCopyable), D3D11     상위 레이어를 도로 참�
 4. FrameClock::Tick()                clamp 된 deltaTime
 5. BuildPlayerIntent()               InputState → PlayerIntent (정규화 전 축값)
 6. FixedTimestep::Advance(dt)        누적 → 이번 프레임 실행할 고정 스텝 수 (상한 5)
-7. for each step: Simulation::Step() 플레이어 이동 + JobSystem 으로 파티클 병렬 advect + Fence + 시간 누적
-8. SnapshotBuilder::Build()          카메라 + MeshDraw(3D) + 월드 Quad + UI Quad → 값 기반 RenderSnapshot
+7. for each step: Simulation::Step() 시간 누적 → 플레이어 이동 → JobSystem 파티클 advect+Fence
+                                     → CollisionWorld2D(+3D) Clear/Add/Step → 접촉 읽어 상태 갱신
+8. SnapshotBuilder::Build()          Simulation 상태 → 카메라 + MeshDraw(3D) + 월드 Quad + UI Quad
+                                     (접촉 여부에 따라 색만 바꿈; 위치 보정 없음)
 9. IRenderer::Submit(snapshot)       1슬롯 메일박스에 최신 프레임만 적재
 ```
 
@@ -70,7 +90,9 @@ render(Dx11) ─▶ core(NonCopyable), D3D11     상위 레이어를 도로 참�
 
 ## 확장 지점
 
-- **새 시스템(물리/애니메이션/컬링)** — `game/`에 클래스를 추가하고 `Application::Run`의 스텝 루프에서 호출한다. 병렬화가 필요하면 `JobSystem::ParallelFor`로 겹치지 않는 `[begin,end)` 범위만 쓰고 `Fence`는 단계 경계에서만 기다린다.
+- **새 시스템(물리/애니메이션/컬링)** — `game/`에 클래스를 추가하고 `Application::Run`의 스텝 루프에서 호출한다(고정 `dt`). 병렬화가 필요하면 `JobSystem::ParallelFor`로 겹치지 않는 `[begin,end)` 범위만 쓰고 `Fence`는 단계 경계에서만 기다린다.
+- **콜라이더 붙이기** — `physics::CollisionWorld2D`(또는 `#if ENGINE_WITH_3D` `CollisionWorld3D`)를 `Simulation` 멤버로 두고 `Step()`에서 `Clear`→`Add`→`Step`→`Contacts()`. 탐지만; 응답은 게임 코드. 사용법·레이어·불변 규칙은 [collider-design.md](collider-design.md).
+- **새 차원 모듈** — `<layer>/core` + `<layer>/x2d` + `<layer>/x3d` 디렉터리, 서로 include 금지, `ENGINE_WITH_3D`로 3D 빌드 제외 가능하게. `render`·`physics`가 예시.
 - **새 위젯** — `ui::Widget`을 상속한다. 기존 위젯 수정 없이(OCP) `Build`(로컬 좌표 → `Quad`), `PointerXxx`(소비 시 `true`)만 구현한다. LSP: 기반 계약(로컬 좌표·`parentOrigin` 기준 배치·소비 반환)을 지킨다.
 - **새 렌더 패스/스테이지** — `render::IRenderPass`(`Name`/`Initialize`/`Execute`/`Release`)를 구현하고 `main.cpp`에서 `renderer.AddRenderPass(...)`로 등록한다(Start 전). 렌더러 코어·기존 패스는 건드리지 않는다(OCP). 그림자·블룸·디버그 라인·포스트프로세스가 여기 해당한다.
 - **새 렌더 프리미티브** — `render/RenderSnapshot.h`에 값 타입을 추가하고(예: 텍스처용 `SpriteDraw`) 그것을 소비하는 패스를 만든다. 렌더러 코어에 게임 개념(`playerX` 등)을 하드코딩하지 않는다.
@@ -81,11 +103,11 @@ render(Dx11) ─▶ core(NonCopyable), D3D11     상위 레이어를 도로 참�
 
 뼈대가 살아있음을 보이기 위한 최소 콘텐츠만 있다. 실제 게임 로직은 없다.
 
-- **3D (MeshPass3D):** 바닥 평면 + 두 축으로 회전하는 큐브 + 공전하는 작은 큐브 2개. 카메라는 원점을 천천히 궤도. 단일 directional light Lambert.
-- **2D 오버레이 (QuadPass2D):** 방향키로 움직이는 시안색 64×64 사각형(경계 clamp, 대각선 정규화).
-- 20,000개 파티클을 매 고정 스텝 `ParallelFor`로 advect — **JobSystem 처리량 스텁**. `SnapshotBuilder`는 앞 2,048개만 2D 점으로 그린다. 나머지는 계산만 하는 벤치마크 부하다.
-- `UIContext`: 반투명 패널 1개 + `START` 버튼 + 상태 텍스트 2줄. 버튼 클릭 시 상태 텍스트가 바뀐다.
+- **3D (MeshPass3D):** 바닥 평면 + 두 축으로 회전하는 큐브 + 궤도 반경이 진동하는 위성 큐브 2개. 위성은 `CollisionWorld3D`(Box vs Sphere)로 중심 큐브와의 접촉을 감지해 접촉 시 빨갛게. 카메라는 궤도, directional light Lambert.
+- **2D 오버레이 (QuadPass2D):** 방향키로 움직이는 사각형 + 고정 장애물 박스 3개. `CollisionWorld2D`(AABB)로 겹침 감지 → 겹치면 플레이어가 주황색(위치 보정은 없음).
+- 20,000개 파티클을 매 고정 스텝 `ParallelFor`로 advect — **JobSystem 처리량 스텁**. 앞 2,048개만 2D 점으로 그린다.
+- `UIContext`: 반투명 패널 + `START` 버튼 + 상태 텍스트 2줄.
 
 ## 빌드
 
-`CppWindowGame.vcxproj` (VS 2022, 툴셋 v143, `stdcpp20`, Level4). 인클루드 루트 `src`. 링크 `d3d11.lib;dxgi.lib;d3dcompiler.lib`. `Debug | x64` → `F5`.
+`CppWindowGame.vcxproj` (VS 2022, 툴셋 v143, `stdcpp20`, Level4). 인클루드 루트 `src`. 링크 `d3d11.lib;dxgi.lib;d3dcompiler.lib`. `Debug | x64` → `F5`. 3D 제외 빌드는 `PreprocessorDefinitions`에서 `ENGINE_WITH_3D` 제거 (2D 전용, 경고 0 검증됨).

@@ -1,7 +1,9 @@
 #include "render/Dx11Renderer.h"
 
-#include "render/passes/MeshPass3D.h"
-#include "render/passes/QuadPass2D.h"
+#include "render/r2d/QuadPass2D.h"
+#if defined(ENGINE_WITH_3D)
+#include "render/r3d/MeshPass3D.h"
+#endif
 
 #include <d3d11.h>
 #include <dxgi.h>
@@ -32,7 +34,11 @@ namespace engine::render
     Dx11Renderer::Dx11Renderer()
     {
         // Default pipeline: 3D first (writes depth), then the 2D overlay on top.
+        // The 3D pass is only registered when the 3D module is built in;
+        // AddRenderPass appends further stages (see main.cpp).
+#if defined(ENGINE_WITH_3D)
         m_passes.push_back(std::make_unique<MeshPass3D>());
+#endif
         m_passes.push_back(std::make_unique<QuadPass2D>());
     }
 

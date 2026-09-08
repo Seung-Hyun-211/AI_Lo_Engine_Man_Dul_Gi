@@ -12,28 +12,37 @@ Visual Studio 2022로 `CppWindowGame.vcxproj`를 열고 **Debug | x64** 선택 �
 ```text
 src/
   main.cpp                 진입점. Dx11Renderer 를 만들어 IRenderer 로 Application 에 주입
-  math/Math.h              Vec2 / Vec3 / Mat4 / Rect / Color 공용 기하 타입
+  math/
+    Math.h                 umbrella (2D 항상 + 3D는 ENGINE_WITH_3D 일 때)
+    Math2D.h               Vec2 / Rect / Color            [2D 모듈]
+    Math3D.h               Vec3 / Vec4 / Mat4 (row-major, LH)  [3D 모듈]
   core/
     JobSystem.*            워커 풀 + Job + Fence (예외 안전). ParallelFor
-    Time.h                 FrameClock(clamp 된 delta), FixedTimestep(고정 스텝 누적)
+    Time.h                 FrameClock(clamp 된 delta), FixedTimestep(고정 스텝)  → docs/time-design.md
     NonCopyable.h          소유 타입 공통 base
   platform/Win32Window.*   OS 창 + WndProc → IWindowEventSink 로 이벤트 전달
   input/InputState.h       이번 프레임 키/마우스 상태 + 에지 질의(Pressed/Released)
-  render/
-    IRenderer.h            렌더러 추상 (Start/SetFrameSettings/Submit/Resize/Stop) + FrameSettings
+  render/                  core + r2d/r3d 모듈
+    IRenderer.h            렌더러 추상 (Start/SetFrameSettings/Submit/Resize/Stop)
     RenderPass.h           파이프라인 스테이지 추상 (Initialize/Execute/Release) — 확장 지점
-    RenderSnapshot.h       값 기반 스냅샷: camera + meshDraws(3D) + worldQuads + uiQuads
+    RenderSnapshot.h       값 기반 스냅샷: scene3d(3D) + worldQuads + uiQuads
     Dx11Renderer.*         렌더 스레드. device/swapchain/depth 단독 소유. 패스 목록 실행
-    passes/MeshPass3D.*    3D: 깊이 테스트, 원근 카메라, directional light, 내장 큐브·평면
-    passes/QuadPass2D.*    2D: 스크린 공간 Quad, 깊이 off, straight-alpha 블렌드
+    r2d/Sprite2D.h, QuadPass2D.*   [2D] 스크린 공간 Quad, 깊이 off, straight-alpha
+    r3d/Scene3D.h, MeshPass3D.*    [3D] 깊이 테스트, 원근 카메라, directional light, 내장 큐브·평면
+  physics/                 core + p2d/p3d 모듈  → docs/collider-design.md
+    Collision.h            ColliderId / CollisionLayer / Contact
+    p2d/Collider2D.h, CollisionWorld2D.*   [2D] Box·Circle, N² 겹침 탐지
+    p3d/Collider3D.h, CollisionWorld3D.*   [3D] Box·Sphere, N² 겹침 탐지
   ui/UI.*                  Widget / UIWindow / Button / TextLine / UIContext
   game/
-    Simulation.*           가변 월드. 고정 timestep. 플레이어 + 20k 파티클(JobSystem 스텁)
+    Simulation.*           가변 월드. 고정 timestep. 플레이어 + 장애물 + 20k 파티클 + 3D 데모. 충돌 구동
     SnapshotBuilder.*      Simulation + UIContext → RenderSnapshot
     Application.*           조립·프레임 지휘. IWindowEventSink 구현
 ```
 
-자세한 지도·프레임 흐름·확장 지점은 [docs/engine-overview.md](docs/engine-overview.md). 명령 단위 작업 절차는 [docs/command-playbook.md](docs/command-playbook.md).
+2D와 3D는 서로 `#include` 하지 않는 별도 모듈이다. `ENGINE_WITH_3D`를 빼면 3D 코드가 빌드에서 완전히 제외되고 2D 전용 exe가 경고 0으로 빌드된다.
+
+자세한 지도·프레임 흐름·확장 지점은 [docs/engine-overview.md](docs/engine-overview.md). 명령 단위 작업 절차는 [docs/command-playbook.md](docs/command-playbook.md). 설계 문서: [time-design](docs/time-design.md) · [collider-design](docs/collider-design.md).
 
 ## 스레드 계약
 
@@ -58,7 +67,7 @@ Render Thread (Dx11Renderer::RenderLoop): latest-frame mailbox → DX11 draw →
 
 ## 현재 데모 (게임 아님)
 
-3D: 회전하는 큐브 + 공전 큐브 2개 + 바닥 평면, 궤도 카메라, directional light. 2D 오버레이: 방향키로 움직이는 시안색 사각형, 반투명 UI 패널 + `START` 버튼 + 상태 텍스트. 배경: 매 고정 스텝 `ParallelFor`로 도는 20,000개 파티클(앞 2,048개만 그림 — 나머지는 JobSystem 처리량 스텁). 실제 게임 로직은 아직 없다.
+3D: 회전 큐브 + 궤도 반경이 진동하는 위성 큐브 2개(중심 큐브와 접촉하면 빨강 — `CollisionWorld3D` Box↔Sphere) + 바닥 평면, 궤도 카메라, directional light. 2D 오버레이: 방향키로 움직이는 사각형 + 장애물 박스 3개(겹치면 주황 — `CollisionWorld2D` AABB), 반투명 UI 패널 + `START` 버튼 + 상태 텍스트. 배경: 매 고정 스텝 `ParallelFor`로 도는 20,000개 파티클(앞 2,048개만 그림). 충돌은 탐지만 하고 위치 보정은 없다. 실제 게임 로직은 아직 없다.
 
 ## UI 설계
 

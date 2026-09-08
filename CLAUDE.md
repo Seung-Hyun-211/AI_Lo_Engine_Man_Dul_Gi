@@ -9,6 +9,7 @@ C++20 / Win32 / DirectX 11 기반 2D 게임 엔진 뼈대. 이 파일은 세션�
 - 명령이 오면 **먼저 `docs/command-playbook.md`에서 해당 행**(트리거 → 절차 → 판단지점 → 파일)을 찾아 실행한다.
 - 응답은: ① 바뀐 것 1~3줄 ② 판단 필요 시 옵션 A/B(권장안 먼저), 아니면 결정하고 한 줄로 밝힘 ③ 빌드 결과 `경고 N / 오류 N` ④ 커밋은 명시 요청 시에만.
 - "사용법/확장법" 지식은 채팅이 아니라 `CLAUDE.md` · `docs/*` · memory에 남긴다.
+- **설계(구조·모듈·시스템 문서화)를 하면 반드시 그 문서에 "사용 방법(How to use)" 항목을 남긴다.** 붙이는 법·확장하는 법·하지 말 것을 예시 코드와 함께. 설계만 하고 사용법을 안 적는 것 금지. 기존 예: `docs/time-design.md`, `docs/collider-design.md`.
 - CLI 빌드·스모크테스트 절차는 memory `build-and-run` 참조 (이 환경은 GPU 없어 WARP 폴백이 정상).
 
 ## 빌드 / 실행
@@ -21,13 +22,15 @@ C++20 / Win32 / DirectX 11 기반 2D 게임 엔진 뼈대. 이 파일은 세션�
 ## 아키텍처 불변 규칙 (절대 깨지 말 것)
 
 1. **D3D11 API 호출은 렌더 스레드에서만** 한다. 메인 스레드(`src/game/Application.cpp`의 프레임 루프)는 입력·시뮬레이션·스냅샷 생성만 한다.
-2. 렌더 스레드(`src/render/Dx11Renderer.cpp`)가 device, immediate context, swap chain, back buffer, depth buffer, `ResizeBuffers`, `Present`의 **유일한 소유자**다. 실제 드로우는 `IRenderPass` 목록(`src/render/passes/*`)이 하고, 렌더러 코어는 clear·bind·pass 순회만 한다. 새 패스는 `RenderPass.h` 구현 + `main.cpp`에서 `AddRenderPass`(Start 전).
+2. 렌더 스레드(`src/render/Dx11Renderer.cpp`)가 device, immediate context, swap chain, back buffer, depth buffer, `ResizeBuffers`, `Present`의 **유일한 소유자**다. 실제 드로우는 `IRenderPass` 목록(`src/render/r2d/*`, `src/render/r3d/*`)이 하고, 렌더러 코어는 clear·bind·pass 순회만 한다. 새 패스는 `RenderPass.h` 구현 + `main.cpp`에서 `AddRenderPass`(Start 전).
 3. 스레드 경계는 값 기반 `RenderSnapshot`만 넘어간다(`Quad`·`MeshDraw`·`CameraView` 모두 값, `Mat4` 포함). 가변 게임 객체 포인터를 넣지 않는다.
 4. 렌더러는 최신 스냅샷 1개만 보관한다(1슬롯 메일박스). 오래된 미렌더 프레임은 버린다.
 5. 창 resize 요청은 메인에서 전달하되 `ResizeBuffers`는 렌더 스레드만 호출한다.
 6. `JobSystem::ParallelFor`의 각 잡은 겹치지 않는 연속 `[begin, end)` 범위만 쓴다. 워커 안에서 공유 카운터 증가·`vector` 재할당·엔티티 생성/파괴 금지. `JobFence::Wait()`는 프레임 단계 경계에서만 쓴다.
+7. **2D/3D는 별도 모듈이다.** `math/Math2D.h`↔`Math3D.h`, `render/r2d/`↔`render/r3d/`, `physics/p2d/`↔`physics/p3d/`는 서로 `#include` 하지 않는다. 공유는 각 계층의 core(`math` 공통, `render/RenderPass.h`·`IRenderer.h`, `physics/Collision.h`)로만. 3D 코드는 `ENGINE_WITH_3D` 프리프로세서로 감싸 없으면 빌드에서 완전 제외된다(패스 미등록, 스냅샷에 `scene3d` 없음, `.cpp` 본문 `#if`로 비움). 2D는 baseline(`ENGINE_WITH_2D`, UI가 의존).
+8. 충돌은 **탐지만**. `CollisionWorld*::Step()`은 콜라이더를 움직이지 않는다. 응답(밀어내기·물리)은 이 모듈 밖. `CollisionWorld`는 메인 스레드(시뮬)만 만진다. 세부는 `docs/collider-design.md`.
 
-모듈 지도·프레임 흐름·확장 지점은 `docs/engine-overview.md`, 전체 스레드 계약은 `docs/multithreaded_game_engine_architecture.md`, UI 계층은 `docs/ui-architecture.md`.
+모듈 지도·프레임 흐름·확장 지점은 `docs/engine-overview.md`, 스레드 계약은 `docs/multithreaded_game_engine_architecture.md`, UI는 `docs/ui-architecture.md`, 시간은 `docs/time-design.md`, 충돌은 `docs/collider-design.md`.
 
 ## 설계 원칙 — 최우선 (모든 신규/수정 코드에 적용)
 
