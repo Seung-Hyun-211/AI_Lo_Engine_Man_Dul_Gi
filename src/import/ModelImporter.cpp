@@ -121,6 +121,8 @@ namespace engine::import
             {
                 ModelMesh dst;
                 dst.name = ToStd(mesh->name);
+                if (dst.name.empty() && mesh->instances.count > 0)
+                    dst.name = ToStd(mesh->instances.data[0]->name);   // name lives on the node
                 dst.skinned = skin != nullptr;
 
                 const ufbx_mesh_part* part = mesh->material_parts.count > 0 ? &mesh->material_parts.data[pi] : nullptr;
@@ -286,14 +288,27 @@ namespace engine::import
                 const ufbx_material* src = scene->materials.data[m];
                 ModelMaterial dst;
                 dst.name = ToStd(src->name);
-                const ufbx_material_map& base = src->pbr.base_color;
-                dst.baseColor = { static_cast<float>(base.value_vec4.x), static_cast<float>(base.value_vec4.y),
-                                  static_cast<float>(base.value_vec4.z), static_cast<float>(base.value_vec4.w) };
-                if (dst.baseColor.a <= 0.0f) dst.baseColor.a = 1.0f;
-                if (base.texture != nullptr)
+
+                // Prefer the PBR base color; fall back to the legacy FBX diffuse
+                // color (many exporters, e.g. the custom-shader Unity-chan
+                // materials, leave the PBR maps at zero).
+                const ufbx_material_map* colorMap = src->pbr.base_color.has_value ? &src->pbr.base_color
+                                                  : src->fbx.diffuse_color.has_value ? &src->fbx.diffuse_color
+                                                  : nullptr;
+                if (colorMap != nullptr)
                 {
-                    dst.diffuseTexture = ToStd(base.texture->relative_filename);
-                    if (dst.diffuseTexture.empty()) dst.diffuseTexture = ToStd(base.texture->filename);
+                    dst.baseColor = { static_cast<float>(colorMap->value_vec4.x), static_cast<float>(colorMap->value_vec4.y),
+                                      static_cast<float>(colorMap->value_vec4.z),
+                                      colorMap->value_components >= 4 ? static_cast<float>(colorMap->value_vec4.w) : 1.0f };
+                }
+                if (dst.baseColor.a <= 0.0f) dst.baseColor.a = 1.0f;
+
+                const ufbx_texture* tex = src->pbr.base_color.texture != nullptr ? src->pbr.base_color.texture
+                                        : src->fbx.diffuse_color.texture;
+                if (tex != nullptr)
+                {
+                    dst.diffuseTexture = ToStd(tex->relative_filename);
+                    if (dst.diffuseTexture.empty()) dst.diffuseTexture = ToStd(tex->filename);
                 }
                 model.materials.push_back(std::move(dst));
             }

@@ -121,10 +121,14 @@ sampler.Evaluate(model.skeleton, model.animations[0], timeSeconds, skin);
 |---|---|
 | ufbx vendor + 빌드 | ✅ `ufbx.c` 를 C++ 로 컴파일, 경고 0 |
 | `import::Model` 타입 | ✅ |
-| `ModelImporter` (메시/머티리얼/스켈레톤/애니메이션 bake) | ✅ 컴파일. **실제 FBX 로 런타임 미검증** (샘플 에셋 없음) |
-| `AnimationSampler` (CPU 포즈 평가, loop) | ✅ 컴파일. 블렌딩 미구현 |
+| `ModelImporter` — 메시/스킨/스켈레톤 | ✅ **실제 FBX 검증됨** (Unity-chan: 23 mesh / 48k vert / 140 bone / 15 skinned. 가중치 합=1 위반 0, 본 index 범위 초과 0, 스켈레톤 위상정렬 OK). `tools/fbx_probe.cpp` 로 확인 |
+| `ModelImporter` — 머티리얼 | ✅ 이름·컬러 추출. `pbr.base_color` 없으면 `fbx.diffuse_color` 폴백 |
+| `ModelImporter` — 애니메이션 bake | ✅ 컴파일. **애니메이션 있는 FBX 로 미검증** (Unity-chan 모델 FBX 엔 클립 없음 — 별도 파일) |
+| `AnimationSampler` (CPU 포즈 평가, loop) | ✅ 컴파일. 실데이터 미검증, 블렌딩 미구현 |
 | `SkinnedMeshPass3D` (GPU 스키닝) | ❌ 설계만 (§5.2) |
 | 상태 머신 / 블렌딩 / 루트 모션 | ❌ 설계만 (§5.3) |
+
+관찰: Unity-chan FBX 는 단위가 **cm** (키 ≈156 유닛). `ImportOptions::scale = 0.01` 로 미터화. 텍스처 경로는 원본 `.psd` 참조 (stale) — 실제 `.tga` 는 FBX 옆에. 에셋 경로 해석기는 별도 과제.
 
 **검증 시 확인할 것** (첫 실제 FBX 로드 때):
 - 삼각형 winding — `MeshPass3D` 는 현재 `CULL_NONE`, 스킨드 패스도 처음엔 그렇게.

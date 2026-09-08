@@ -2,6 +2,7 @@
 x64/
 Debug/
 Release/
+build/
 *.obj
 *.exe
 *.ilk
@@ -10,6 +11,11 @@ Release/
 *.recipe
 *.tlog
 *.log
+
+# Large source textures under assets/ — not needed until there is a texture
+# pipeline. Delete these two lines to start tracking them.
+assets/**/*.tga
+assets/**/*.psd
 
 # Visual Studio local state
 .vs/
