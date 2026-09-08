@@ -7,7 +7,8 @@ cbuffer Frame : register(b0)
     row_major float4x4 viewProj;
     float4 keyDirection;   // xyz = normalised travel direction, w = intensity
     float4 keyColor;       // rgb
-    float4 ambientColor;   // rgb
+    float4 ambientSky;     // rgb, hemisphere fill from above
+    float4 ambientGround;  // rgb, hemisphere fill from below
 };
 
 cbuffer Object : register(b1)
@@ -16,12 +17,18 @@ cbuffer Object : register(b1)
     float4 objColor;
 };
 
-// Smooth Lambert key + flat ambient. albedo is the surface colour.
+// Hemisphere ambient: sky tint on up-facing surfaces, ground tint on down-facing.
+float3 HemisphereAmbient(float3 worldNormal)
+{
+    return lerp(ambientGround.rgb, ambientSky.rgb, saturate(normalize(worldNormal).y * 0.5f + 0.5f));
+}
+
+// Smooth Lambert key + hemisphere ambient. albedo is the surface colour.
 float3 ApplyLighting(float3 albedo, float3 worldNormal)
 {
     float ndl = saturate(dot(normalize(worldNormal), -keyDirection.xyz));
     float3 key = keyColor.rgb * (ndl * keyDirection.w);
-    return albedo * (ambientColor.rgb + key);
+    return albedo * (HemisphereAmbient(worldNormal) + key);
 }
 
 // Toon key term: quantised into 4 bands at 10 / 30 / 50 degrees (black -> white),
@@ -50,7 +57,7 @@ float3 ApplyCelLighting(float3 albedo, float3 worldNormal,
     lamp = lerp(lamp, 0.00f, smoothstep(50.0f - s, 50.0f + s, angleDeg));
 
     float3 key = keyColor.rgb * (lamp * keyDirection.w);
-    return albedo * (ambientColor.rgb + key);
+    return albedo * (HemisphereAmbient(worldNormal) + key);
 }
 
 #endif

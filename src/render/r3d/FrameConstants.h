@@ -15,7 +15,8 @@ namespace engine::render
         float viewProj[16];
         float keyDirection[4];   // xyz = normalised travel direction, w = intensity
         float keyColor[4];       // rgb
-        float ambientColor[4];   // rgb
+        float ambientSky[4];     // rgb, hemisphere fill from above
+        float ambientGround[4];  // rgb, hemisphere fill from below
     };
 
     inline void FillFrameConstants(const CameraView& camera, const Lighting& lighting, FrameConstantsGpu& out)
@@ -34,9 +35,14 @@ namespace engine::render
         out.keyColor[2] = lighting.key.color.b;
         out.keyColor[3] = 1.0f;
 
-        out.ambientColor[0] = lighting.ambient.color.r;
-        out.ambientColor[1] = lighting.ambient.color.g;
-        out.ambientColor[2] = lighting.ambient.color.b;
-        out.ambientColor[3] = 1.0f;
+        out.ambientSky[0] = lighting.ambient.sky.r;
+        out.ambientSky[1] = lighting.ambient.sky.g;
+        out.ambientSky[2] = lighting.ambient.sky.b;
+        out.ambientSky[3] = 1.0f;
+
+        out.ambientGround[0] = lighting.ambient.ground.r;
+        out.ambientGround[1] = lighting.ambient.ground.g;
+        out.ambientGround[2] = lighting.ambient.ground.b;
+        out.ambientGround[3] = 1.0f;
     }
 }

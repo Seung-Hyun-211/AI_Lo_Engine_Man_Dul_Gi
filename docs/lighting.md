@@ -8,19 +8,21 @@
 
 ```cpp
 struct DirectionalLight {
-    math::Vec3  direction{ 0.0f, -0.70711f, 0.70711f };  // 정면 상단 45도(빛 진행방향, 월드), 정규화 불필요
-    math::Color color{ 1.0f, 0.96f, 0.88f, 1.0f };       // rgb = 색, a = 세기
+    math::Vec3  direction{ 0.0f, -0.70711f, 0.70711f };  // 빛 진행방향(월드), 정규화 불필요
+    math::Color color{ 1.0f, 0.96f, 0.88f, 1.0f };       // rgb = 색, a = 세기(intensity)
 };
-struct AmbientLight {
-    math::Color color{ 0.17f, 0.18f, 0.22f, 1.0f };  // 모든 면에 더해지는 균일 필
+struct AmbientLight {                       // 헤미스피어 필 (평면 회색보다 화사)
+    math::Color sky{ 0.34f, 0.38f, 0.46f, 1.0f };     // 위 향한 면
+    math::Color ground{ 0.20f, 0.18f, 0.16f, 1.0f };  // 아래 향한 면
 };
-struct Lighting {
-    DirectionalLight key{};
-    AmbientLight ambient{};
-};
+struct Lighting { DirectionalLight key{}; AmbientLight ambient{}; };
 ```
 
-`Scene3D::lighting` 로 스냅샷에 포함. `SnapshotBuilder::BuildLighting()` 이 매 프레임 값을 세팅한다 (지금은 고정값; 게임 로직·시간대·트리거로 바꿀 수 있음).
+`Scene3D::lighting` 로 스냅샷에 포함. `SnapshotBuilder::BuildLighting(elapsed)` 가 매 프레임 세팅한다:
+- **빛이 움직인다**: key 방향이 정면 상단 45° 를 기준으로 좌우로 `sin(elapsed·0.5)·0.6 rad` (±34°) 스윕 (Y축 회전). 터미네이터가 얼굴을 가로질러 이동.
+- key `intensity = 1.35`, 헤미스피어 앰비언트 sky/ground.
+
+셰이더의 `HemisphereAmbient(n)` = `lerp(ground, sky, n.y·0.5+0.5)` → 위쪽은 하늘색, 아래쪽은 따뜻하게. `ApplyLighting` / `ApplyCelLighting` 둘 다 flat ambient 대신 이걸 쓴다.
 
 ## GPU 전달 (`render/r3d/FrameConstants.h`)
 
@@ -31,7 +33,8 @@ cbuffer Frame : register(b0) {
     row_major float4x4 viewProj;
     float4 keyDirection;   // xyz = 정규화된 진행방향, w = 세기
     float4 keyColor;       // rgb
-    float4 ambientColor;   // rgb
+    float4 ambientSky;     // rgb, 위 향한 면
+    float4 ambientGround;  // rgb, 아래 향한 면
 };
 ```
 
@@ -40,17 +43,22 @@ cbuffer Frame : register(b0) {
 ## 셰이딩 함수 (`common3d.hlsli`)
 
 ```hlsl
-// 부드러운 램버트 key + 균일 앰비언트
-float3 ApplyLighting(float3 albedo, float3 worldNormal);
-
-// 툰: key 항을 10/30/50도에서 4밴드로 양자화(검정→흰색) 후 key 색 곱, 앰비언트 더함
-float3 ApplyCelLighting(float3 albedo, float3 worldNormal, float lampFloor);
+float3 HemisphereAmbient(float3 worldNormal);   // lerp(ground, sky, n.y*0.5+0.5)
+float3 ApplyLighting(float3 albedo, float3 worldNormal);   // 램버트 key + 헤미스피어 ambient
+float3 ApplyCelLighting(float3 albedo, float3 worldNormal,
+                        float shadowBias, float bandSoftness, float wrap);   // 툰. docs/toon-rendering.md
 ```
 
 - `mesh.hlsl`, `model.hlsl` → `ApplyLighting`
-- `cel.hlsl` → `ApplyCelLighting(base, nrm, LAMP_FLOOR)`
+- `cel.hlsl` → `ApplyCelLighting` (얼굴 그림자 노브는 `docs/toon-rendering.md`)
 
-최종색 = `albedo * (ambientColor.rgb + keyColor.rgb * term * intensity)`. 셀은 `term` 이 {0, 0.33, 0.66, 1} 중 하나. 앰비언트가 있어 가장 어두운 밴드도 `albedo * ambient` (검정 아님). 순검정 원하면 `SnapshotBuilder::BuildLighting` 의 `ambient.color` 를 0으로.
+최종색 = `albedo * (HemisphereAmbient(n) + keyColor.rgb * term * intensity)`. 셀은 `term` 이 {0, 0.33, 0.66, 1}(soft 전이). 앰비언트가 있어 가장 어두운 밴드도 검정 아님 — 순검정 원하면 `BuildLighting` 의 `ambient.sky/ground` 를 0으로.
+
+## "너무 어두워" 대응
+
+- key `intensity` 1.0 → 1.35, 배경 clearColor·바닥색을 밝은 청회색으로.
+- flat ambient(회색 0.18) → **헤미스피어 앰비언트**(sky 0.36 / ground 0.21). 그림자면·아래면이 살아나 전체가 화사.
+- 더 깊은 방법(미구현): sRGB/리니어 파이프라인(백버퍼·텍스처 `_SRGB` → 중간톤 밝기 정상화), rim 라이트(실루엣 pop), 노출/톤매핑, 두 번째 필 라이트.
 
 ## "시꺼멓다" 였던 이유 → 지금
 
@@ -72,17 +80,18 @@ float3 ApplyCelLighting(float3 albedo, float3 worldNormal, float lampFloor);
 
 ### 조명 바꾸기 (지금)
 
-`src/game/SnapshotBuilder.cpp` `BuildLighting()`:
+`src/game/SnapshotBuilder.cpp` `BuildLighting(float elapsed)`:
 ```cpp
-lighting.key.direction = { 0.35f, -0.55f, 0.75f };  // 빛 진행방향
-lighting.key.color     = { 1.0f, 0.96f, 0.88f, 1.0f };  // rgb + a=세기
-lighting.ambient.color = { 0.17f, 0.18f, 0.22f, 1.0f };
+lighting.key.direction = { 0.70711f * s, -0.70711f, 0.70711f * c };  // s/c = sin/cos(스윕)
+lighting.key.color     = { 1.0f, 0.97f, 0.90f, 1.35f };   // rgb + a=세기
+lighting.ambient.sky    = { 0.36f, 0.40f, 0.48f, 1.0f };
+lighting.ambient.ground = { 0.22f, 0.20f, 0.18f, 1.0f };
 ```
-재빌드 필요 (C++). 셰이딩 공식만 바꾸려면 `common3d.hlsli` 편집 → 저장 즉시 핫리로드.
+재빌드 필요 (C++). 셰이딩 공식·`HemisphereAmbient` 만 바꾸려면 `common3d.hlsli` → 핫리로드. 빛 스윕 속도/폭은 `elapsed * 0.5f` / `* 0.6f` 상수.
 
-### 게임 상태에 반응하는 조명
+### 화면이 너무 어두우면
 
-`BuildLighting()` 시그니처를 `BuildLighting(const Simulation&)` 로 바꿔 시간·이벤트에서 방향/색 보간. `Scene3D::lighting` 은 이미 스냅샷에 있으니 그 아래는 안 건드려도 됨.
+`key.color.a`(intensity) ↑, `ambient.sky/ground` ↑, `RenderSnapshot::clearColor` / 바닥 `MeshDraw.color` ↑. 근본적으론 sRGB/리니어 파이프라인 (백버퍼·텍스처 `_SRGB`) — 미구현, `docs/msaa.md` 인근에 추가 예정.
 
 ### 새 3D 패스에서 조명 쓰기
 

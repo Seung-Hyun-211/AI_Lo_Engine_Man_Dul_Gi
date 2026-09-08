@@ -16,10 +16,12 @@ namespace engine::render
         math::Color color{ 1.0f, 0.97f, 0.90f, 1.0f };
     };
 
-    // Flat fill added to every lit surface so nothing goes fully black.
+    // Hemisphere fill: `sky` tints surfaces facing up, `ground` those facing
+    // down, blended by the world normal. Brighter and livelier than a flat grey.
     struct AmbientLight
     {
-        math::Color color{ 0.16f, 0.17f, 0.20f, 1.0f };
+        math::Color sky{ 0.34f, 0.38f, 0.46f, 1.0f };
+        math::Color ground{ 0.20f, 0.18f, 0.16f, 1.0f };
     };
 
     struct Lighting

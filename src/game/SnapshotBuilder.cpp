@@ -32,14 +32,17 @@ namespace engine::game
             return camera;
         }
 
-        render::Lighting BuildLighting()
+        render::Lighting BuildLighting(float elapsed)
         {
             render::Lighting lighting{};
-            // Key from straight in front, 45 degrees up (front-top 3/4). Travel
-            // direction: down and into the scene, no left/right bias.
-            lighting.key.direction = { 0.0f, -0.70711f, 0.70711f };
-            lighting.key.color = { 1.0f, 0.96f, 0.88f, 1.0f };   // rgb, a = intensity
-            lighting.ambient.color = { 0.17f, 0.18f, 0.22f, 1.0f };
+            // Front-top 45 deg key that sweeps left<->right across the front so
+            // the shading (and terminator) is visibly in motion.
+            const float sweep = std::sin(elapsed * 0.5f) * 0.6f;   // ~+-34 deg around Y
+            const float c = std::cos(sweep), s = std::sin(sweep);
+            lighting.key.direction = { 0.70711f * s, -0.70711f, 0.70711f * c };
+            lighting.key.color = { 1.0f, 0.97f, 0.90f, 1.35f };    // rgb, a = intensity (brighter)
+            lighting.ambient.sky = { 0.36f, 0.40f, 0.48f, 1.0f };
+            lighting.ambient.ground = { 0.22f, 0.20f, 0.18f, 1.0f };
             return lighting;
         }
 
@@ -57,7 +60,7 @@ namespace engine::game
             render::MeshDraw ground{};
             ground.mesh = render::MeshId::Plane;
             ground.world = math::Scaling({ 14.0f, 1.0f, 14.0f });
-            ground.color = { 0.16f, 0.18f, 0.22f, 1.0f };
+            ground.color = { 0.46f, 0.48f, 0.53f, 1.0f };
             scene.meshDraws.push_back(ground);
 
             const float spin = simulation.HeroSpin();
@@ -96,7 +99,7 @@ namespace engine::game
 
 #if defined(ENGINE_WITH_3D)
         snapshot.scene3d.camera = BuildCamera(simulation.ElapsedTime(), viewportWidth, viewportHeight);
-        snapshot.scene3d.lighting = BuildLighting();
+        snapshot.scene3d.lighting = BuildLighting(simulation.ElapsedTime());
         BuildScene3D(snapshot.scene3d, simulation);
 #else
         (void)viewportWidth;

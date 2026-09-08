@@ -24,7 +24,7 @@ namespace engine::render
     struct RenderSnapshot
     {
         std::uint64_t frameNumber{};
-        float clearColor[4]{ 0.06f, 0.07f, 0.10f, 1.0f };
+        float clearColor[4]{ 0.44f, 0.49f, 0.57f, 1.0f };   // soft blue-grey sky
 
 #if defined(ENGINE_WITH_3D)
         Scene3D scene3d{};
