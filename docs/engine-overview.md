@@ -48,6 +48,8 @@ wWinMain (src/main.cpp)
 | `engine::input` | `input/InputState.h` | 입력 상태 표현·에지 판정이 바뀔 때 |
 | `engine::render` | `render/IRenderer.h`, `RenderPass.h`, `RenderSnapshot.h`, `Dx11Renderer.*` + `render/r2d/*` + `render/r3d/*` | 렌더 백엔드/스냅샷 포맷/파이프라인 스테이지가 바뀔 때 |
 | `engine::physics` | `physics/Collision.h` + `physics/p2d/*` + `physics/p3d/*` | 충돌 탐지 규칙이 바뀔 때 ([collider-design.md](collider-design.md)) |
+| `engine::import` | `import/Model.h`, `import/ModelImporter.*` (+ `vendor/ufbx`) | FBX → `Model` 매핑이 바뀔 때 ([model-animation-research.md](model-animation-research.md)) |
+| `engine::anim` | `anim/AnimationSampler.*` | 포즈 평가·블렌딩 규칙이 바뀔 때 |
 | `engine::ui` | `ui/UI.*` | 위젯 트리·오버레이 규칙이 바뀔 때 |
 | `engine::game` | `game/Simulation.*`, `game/SnapshotBuilder.*`, `game/Application.*` | 프레임 흐름·월드 규칙이 바뀔 때 |
 
@@ -92,6 +94,8 @@ render(Dx11) ─▶ core(NonCopyable), D3D11     상위 레이어를 도로 참�
 
 - **새 시스템(물리/애니메이션/컬링)** — `game/`에 클래스를 추가하고 `Application::Run`의 스텝 루프에서 호출한다(고정 `dt`). 병렬화가 필요하면 `JobSystem::ParallelFor`로 겹치지 않는 `[begin,end)` 범위만 쓰고 `Fence`는 단계 경계에서만 기다린다.
 - **콜라이더 붙이기** — `physics::CollisionWorld2D`(또는 `#if ENGINE_WITH_3D` `CollisionWorld3D`)를 `Simulation` 멤버로 두고 `Step()`에서 `Clear`→`Add`→`Step`→`Contacts()`. 탐지만; 응답은 게임 코드. 사용법·레이어·불변 규칙은 [collider-design.md](collider-design.md).
+- **FBX 모델 로드** — `import::LoadModelFromFile(path)` → `import::Model`(메시·머티리얼·스켈레톤·애니메이션). ufbx 는 `import` 안에 갇혀 있다. 포즈 평가는 `anim::AnimationSampler::Evaluate` (고정 스텝). GPU 스키닝 패스(`SkinnedMeshPass3D`)는 설계만 — [model-animation-research.md](model-animation-research.md).
+- **서드파티 추가** — `src/vendor/<lib>/`에 소스 vendor, 벤더 헤더는 그 라이브러리를 쓰는 `.cpp` 안에서만 include, 밖으로는 엔진 타입만. vcxproj 에 소스 추가(필요 시 `CompileAs`/`WarningLevel` per-file).
 - **새 차원 모듈** — `<layer>/core` + `<layer>/x2d` + `<layer>/x3d` 디렉터리, 서로 include 금지, `ENGINE_WITH_3D`로 3D 빌드 제외 가능하게. `render`·`physics`가 예시.
 - **새 위젯** — `ui::Widget`을 상속한다. 기존 위젯 수정 없이(OCP) `Build`(로컬 좌표 → `Quad`), `PointerXxx`(소비 시 `true`)만 구현한다. LSP: 기반 계약(로컬 좌표·`parentOrigin` 기준 배치·소비 반환)을 지킨다.
 - **새 렌더 패스/스테이지** — `render::IRenderPass`(`Name`/`Initialize`/`Execute`/`Release`)를 구현하고 `main.cpp`에서 `renderer.AddRenderPass(...)`로 등록한다(Start 전). 렌더러 코어·기존 패스는 건드리지 않는다(OCP). 그림자·블룸·디버그 라인·포스트프로세스가 여기 해당한다.

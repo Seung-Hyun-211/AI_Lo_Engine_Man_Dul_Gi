@@ -1,0 +1,2 @@
+# Keep vendored third-party sources byte-exact (no line-ending normalization).
+src/vendor/** -text

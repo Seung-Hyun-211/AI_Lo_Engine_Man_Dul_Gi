@@ -107,6 +107,67 @@ namespace engine::math
         return r;
     }
 
+    // Unit quaternion (x, y, z, w). Used for animation keyframe rotations and
+    // for blending poses (nlerp / slerp).
+    struct Quat
+    {
+        float x{};
+        float y{};
+        float z{};
+        float w{ 1.0f };
+
+        [[nodiscard]] static Quat Identity() { return Quat{}; }
+    };
+
+    [[nodiscard]] inline float Dot(Quat a, Quat b) { return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w; }
+
+    [[nodiscard]] inline Quat Normalized(Quat q)
+    {
+        const float length = std::sqrt(Dot(q, q));
+        if (length < 1e-6f) return Quat::Identity();
+        const float inv = 1.0f / length;
+        return { q.x * inv, q.y * inv, q.z * inv, q.w * inv };
+    }
+
+    // Spherical linear interpolation, shortest arc. `t` in [0, 1].
+    [[nodiscard]] inline Quat Slerp(Quat a, Quat b, float t)
+    {
+        float cosom = Dot(a, b);
+        if (cosom < 0.0f) { cosom = -cosom; b = { -b.x, -b.y, -b.z, -b.w }; }
+
+        float sa = 1.0f - t;
+        float sb = t;
+        if (cosom < 0.9995f)
+        {
+            const float omega = std::acos(cosom);
+            const float invSin = 1.0f / std::sin(omega);
+            sa = std::sin(sa * omega) * invSin;
+            sb = std::sin(sb * omega) * invSin;
+        }
+        return Normalized({ a.x * sa + b.x * sb, a.y * sa + b.y * sb,
+                            a.z * sa + b.z * sb, a.w * sa + b.w * sb });
+    }
+
+    // Row-major rotation matrix for a unit quaternion (row-vector convention).
+    [[nodiscard]] inline Mat4 QuatToMat4(Quat q)
+    {
+        const float xx = q.x * q.x, yy = q.y * q.y, zz = q.z * q.z;
+        const float xy = q.x * q.y, xz = q.x * q.z, yz = q.y * q.z;
+        const float wx = q.w * q.x, wy = q.w * q.y, wz = q.w * q.z;
+        Mat4 r{};
+        r.m[0] = 1.0f - 2.0f * (yy + zz); r.m[1] = 2.0f * (xy + wz);       r.m[2] = 2.0f * (xz - wy);
+        r.m[4] = 2.0f * (xy - wz);        r.m[5] = 1.0f - 2.0f * (xx + zz); r.m[6] = 2.0f * (yz + wx);
+        r.m[8] = 2.0f * (xz + wy);        r.m[9] = 2.0f * (yz - wx);        r.m[10] = 1.0f - 2.0f * (xx + yy);
+        return r;
+    }
+
+    // Translation * Rotation * Scale as a single row-major matrix
+    // (applied to a row vector as scale, then rotate, then translate).
+    [[nodiscard]] inline Mat4 ComposeTRS(Vec3 translation, Quat rotation, Vec3 scale)
+    {
+        return Scaling(scale) * QuatToMat4(rotation) * Translation(translation);
+    }
+
     // Left-handed perspective, depth mapped to [0, 1] (D3D convention).
     [[nodiscard]] inline Mat4 PerspectiveFovLH(float fovYRadians, float aspect, float nearZ, float farZ)
     {

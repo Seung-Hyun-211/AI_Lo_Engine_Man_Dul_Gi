@@ -30,7 +30,9 @@ C++20 / Win32 / DirectX 11 기반 2D 게임 엔진 뼈대. 이 파일은 세션�
 7. **2D/3D는 별도 모듈이다.** `math/Math2D.h`↔`Math3D.h`, `render/r2d/`↔`render/r3d/`, `physics/p2d/`↔`physics/p3d/`는 서로 `#include` 하지 않는다. 공유는 각 계층의 core(`math` 공통, `render/RenderPass.h`·`IRenderer.h`, `physics/Collision.h`)로만. 3D 코드는 `ENGINE_WITH_3D` 프리프로세서로 감싸 없으면 빌드에서 완전 제외된다(패스 미등록, 스냅샷에 `scene3d` 없음, `.cpp` 본문 `#if`로 비움). 2D는 baseline(`ENGINE_WITH_2D`, UI가 의존).
 8. 충돌은 **탐지만**. `CollisionWorld*::Step()`은 콜라이더를 움직이지 않는다. 응답(밀어내기·물리)은 이 모듈 밖. `CollisionWorld`는 메인 스레드(시뮬)만 만진다. 세부는 `docs/collider-design.md`.
 
-모듈 지도·프레임 흐름·확장 지점은 `docs/engine-overview.md`, 스레드 계약은 `docs/multithreaded_game_engine_architecture.md`, UI는 `docs/ui-architecture.md`, 시간은 `docs/time-design.md`, 충돌은 `docs/collider-design.md`.
+9. 서드파티는 `src/vendor/`에 소스 vendor (현재 `ufbx` — FBX 로더, MIT/PD, v0.23.0). `ufbx.c`는 C++로 컴파일, 경고 off. ufbx 타입은 `src/import/ModelImporter.cpp` 안에만 — 밖으로는 엔진 타입(`import::Model` 등)만 나간다. 모델/애니메이션 세부는 `docs/model-animation-research.md`.
+
+모듈 지도·프레임 흐름·확장 지점은 `docs/engine-overview.md`, 스레드 계약은 `docs/multithreaded_game_engine_architecture.md`, UI는 `docs/ui-architecture.md`, 시간은 `docs/time-design.md`, 충돌은 `docs/collider-design.md`, 모델·애니메이션은 `docs/model-animation-research.md`.
 
 ## 설계 원칙 — 최우선 (모든 신규/수정 코드에 적용)
 

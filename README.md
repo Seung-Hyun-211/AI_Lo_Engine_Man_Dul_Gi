@@ -33,6 +33,11 @@ src/
     Collision.h            ColliderId / CollisionLayer / Contact
     p2d/Collider2D.h, CollisionWorld2D.*   [2D] Box·Circle, N² 겹침 탐지
     p3d/Collider3D.h, CollisionWorld3D.*   [3D] Box·Sphere, N² 겹침 탐지
+  import/                  FBX -> engine Model  → docs/model-animation-research.md
+    Model.h                ModelMesh / ModelMaterial / Skeleton(Bone) / AnimationClip
+    ModelImporter.*        ufbx 로 로드. 메시·머티리얼·스켈레톤·애니메이션(bake). ufbx 는 여기 갇힘
+  anim/AnimationSampler.*  CPU 포즈 평가: (skeleton + clip + time) -> 본별 skin Mat4
+  vendor/ufbx/             ufbx 0.23.0 (ufbx.h + ufbx.c), MIT/Public Domain
   ui/UI.*                  Widget / UIWindow / Button / TextLine / UIContext
   game/
     Simulation.*           가변 월드. 고정 timestep. 플레이어 + 장애물 + 20k 파티클 + 3D 데모. 충돌 구동
@@ -42,7 +47,7 @@ src/
 
 2D와 3D는 서로 `#include` 하지 않는 별도 모듈이다. `ENGINE_WITH_3D`를 빼면 3D 코드가 빌드에서 완전히 제외되고 2D 전용 exe가 경고 0으로 빌드된다.
 
-자세한 지도·프레임 흐름·확장 지점은 [docs/engine-overview.md](docs/engine-overview.md). 명령 단위 작업 절차는 [docs/command-playbook.md](docs/command-playbook.md). 설계 문서: [time-design](docs/time-design.md) · [collider-design](docs/collider-design.md).
+자세한 지도·프레임 흐름·확장 지점은 [docs/engine-overview.md](docs/engine-overview.md). 명령 단위 작업 절차는 [docs/command-playbook.md](docs/command-playbook.md). 설계 문서: [time-design](docs/time-design.md) · [collider-design](docs/collider-design.md) · [model-animation-research](docs/model-animation-research.md).
 
 ## 스레드 계약
 

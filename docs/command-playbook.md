@@ -18,6 +18,7 @@
 | 2c | "충돌 붙여 / 콜라이더 추가해" | **이미 있음**: `physics/p2d`·`physics/p3d`에 Box/Circle·Box/Sphere + `CollisionWorld*`(N² 탐지). `Simulation`이 소유·매 스텝 구동. 확장은 브로드페이즈·레이캐스트·트리거 enter/exit·응답. 사용법은 `docs/collider-design.md` "사용 방법" | 브로드페이즈(그리드/SAP), 트리거 이벤트 vs "지금 겹침", 응답을 physics에 넣을지 게임에 둘지 | `src/physics/*`, `src/game/Simulation.*` |
 | 3 | "스프라이트(텍스처) 그릴 수 있게 해" | `render/r2d/Sprite2D.h`에 `SpriteDraw`(atlas id + uv rect) 값 타입 추가. 새 `TexturedSpritePass` 또는 `QuadPass2D` 확장. `SnapshotBuilder`가 방출 | 아틀라스 포맷(단일 PNG? 다중?). 좌표계·피벗. 로더를 IO 스레드로 뺄지 | `src/render/r2d/*`, `src/game/SnapshotBuilder.*` |
 | 3b | "렌더 패스/스테이지 추가해 (그림자·블룸·디버그 라인·포스트프로세스)" | `render::IRenderPass` 구현(`Name`/`Initialize`/`Execute`/`Release`). `main.cpp`에서 `renderer.AddRenderPass(std::make_unique<...>())` (Start 전). 필요 데이터는 스냅샷에 값 타입으로 (2D면 `r2d`, 3D면 `r3d`) | 패스 순서(3D 뒤 / 2D 앞 어디). 자체 RT·리소스 필요 여부. 스냅샷에 뭘 실을지 | 새 `src/render/r2d/` 또는 `r3d/`, `src/main.cpp`, 스냅샷 헤더, vcxproj |
+| 3c | "FBX 모델 그려 / 캐릭터 애니메이션" | **로더는 있음**: `import::LoadModelFromFile` → `Model`, `anim::AnimationSampler` 로 포즈 평가. 남은 일: `render/r3d/`에 `SkinnedMeshPass3D`(GPU 스키닝) + `Scene3D`에 `SkinnedDraw` 값 타입 + `SnapshotBuilder` 연결. 상태 머신·블렌딩은 그 다음. 전 과정 설계는 `docs/model-animation-research.md` §5, 사용법은 §7 | 본 팔레트 cbuffer(≤64) vs StructuredBuffer, 실제 FBX 로 winding·스케일 검증, 상태 머신을 game 레이어에 둘지 | `src/render/r3d/*`, `src/game/SnapshotBuilder.*`, (샘플 에셋) |
 | 4 | "실제 게임 시작하자 / 씬·엔티티 만들어" | `src/game/`에 엔티티 표현(초기엔 AoS `vector<Entity>`), 씬/스테이트 개념. `Simulation`의 데모 페이로드(플레이어+파티클+회전 큐브)를 실제 콘텐츠로 교체하거나 분리. `SnapshotBuilder`가 엔티티 → `MeshDraw`/`Quad` | 장르·핵심 루프(2D인지 3D인지). 엔티티 모델(컴포넌트? 단순 struct?). 데모 페이로드 유지 여부 | `src/game/Simulation.*`, `src/game/SnapshotBuilder.*`, 새 `src/game/*` |
 | 4b | "3D 카메라 조작 붙여 (WASD·마우스 등)" | `Simulation`에 카메라 상태(위치·yaw·pitch). `Application::BuildPlayerIntent` 옆에 카메라 intent. `SnapshotBuilder::BuildCamera`가 궤도 대신 그 상태로 view 생성 | FPS / 오빗 / 고정. 감도·역전 옵션 위치 | `src/game/Simulation.*`, `src/game/Application.*`, `src/game/SnapshotBuilder.cpp` |
 | 5 | "게임패드/다른 입력 지원해" | `input::InputState`에 상태+질의 추가. `platform`에 소스(XInput 등). `Application::BuildPlayerIntent`가 통합 | 지원 장치(XInput? RawInput?). 데드존·매핑 노출 위치 | `src/input/InputState.h`, `src/platform/*`, `src/game/Application.*` |
@@ -37,5 +38,6 @@
 - 충돌은 탐지만. `CollisionWorld`는 시뮬(메인 스레드)만. 응답은 physics 밖.
 - SOLID 우선: 새 타입은 `= delete` 복사 방지, 소유는 `unique_ptr`, raw는 비소유, 다형성은 인터페이스.
 - 데드 코드 남기지 않기. 벤치마크 스텁은 코드에 명시.
+- 서드파티는 `src/vendor/`에 소스 vendor, 벤더 타입은 그걸 쓰는 `.cpp` 안에만 (밖으로는 엔진 타입).
 - **설계 문서를 만들면 "사용 방법(How to use)" 항목 필수.**
-- 상세 계약: `docs/engine-overview.md`, `multithreaded_game_engine_architecture.md`, `ui-architecture.md`, `time-design.md`, `collider-design.md`.
+- 상세 계약: `docs/engine-overview.md`, `multithreaded_game_engine_architecture.md`, `ui-architecture.md`, `time-design.md`, `collider-design.md`, `model-animation-research.md`.
