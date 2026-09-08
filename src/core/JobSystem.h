@@ -3,6 +3,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstddef>
+#include <exception>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -12,12 +13,21 @@
 
 namespace engine::core
 {
+    // Conservative default: keep two logical processors free for the Main and
+    // Render threads plus the OS and GPU driver. Measured, not linear-scaling;
+    // see docs/multithreaded_game_engine_architecture.md. Clamped to [1, 14].
+    [[nodiscard]] std::size_t RecommendedWorkerCount();
+
     class JobFence
     {
     public:
         JobFence() = default;
+
+        // Blocks until every job behind this fence has finished. If any job threw,
+        // the first captured exception is rethrown here on the waiting thread.
+        // Call only at frame-phase boundaries.
         void Wait() const;
-        bool IsComplete() const;
+        [[nodiscard]] bool IsComplete() const;
 
     private:
         struct State
@@ -25,6 +35,10 @@ namespace engine::core
             std::atomic_size_t remaining{};
             std::mutex mutex;
             std::condition_variable completed;
+            // First exception thrown by any job in this batch. Guarded by
+            // errorMutex because several workers may fail concurrently.
+            std::mutex errorMutex;
+            std::exception_ptr error;
         };
 
         explicit JobFence(std::shared_ptr<State> state) : m_state(std::move(state)) {}

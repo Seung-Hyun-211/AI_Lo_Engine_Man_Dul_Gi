@@ -1,6 +1,7 @@
 #pragma once
 
-#include "render/RenderSnapshot.h"
+#include "core/NonCopyable.h"
+#include "render/IRenderer.h"
 
 #include <Windows.h>
 #include <condition_variable>
@@ -18,30 +19,22 @@ struct ID3D11VertexShader;
 struct ID3D11PixelShader;
 struct ID3D11InputLayout;
 struct ID3D11Buffer;
+struct ID3D11BlendState;
 
 namespace engine::render
 {
-    struct FrameSettings
-    {
-        // 0 means no software cap. VSync takes precedence when enabled.
-        std::uint32_t targetFramesPerSecond{ 60 };
-        bool verticalSync{ true };
-    };
-
     // The render thread is the sole owner of all D3D11 work after Start().
-    class Dx11Renderer final
+    class Dx11Renderer final : public IRenderer, private core::NonCopyable
     {
     public:
         Dx11Renderer() = default;
-        ~Dx11Renderer();
-        Dx11Renderer(const Dx11Renderer&) = delete;
-        Dx11Renderer& operator=(const Dx11Renderer&) = delete;
+        ~Dx11Renderer() override;
 
-        void Start(HWND window, std::uint32_t initialWidth, std::uint32_t initialHeight);
-        void SetFrameSettings(FrameSettings settings);
-        void Submit(RenderSnapshot snapshot);
-        void Resize(std::uint32_t width, std::uint32_t height);
-        void Stop();
+        void Start(HWND window, std::uint32_t initialWidth, std::uint32_t initialHeight) override;
+        void SetFrameSettings(FrameSettings settings) override;
+        void Submit(RenderSnapshot snapshot) override;
+        void Resize(std::uint32_t width, std::uint32_t height) override;
+        void Stop() override;
 
     private:
         void RenderLoop(HWND window, std::uint32_t initialWidth, std::uint32_t initialHeight);
@@ -49,7 +42,7 @@ namespace engine::render
         void CreateRenderTarget();
         void CreateSpritePipeline();
         void ResizeBackBuffer(std::uint32_t width, std::uint32_t height);
-        void Render(const RenderSnapshot& snapshot);
+        void Render(const RenderSnapshot& snapshot, const FrameSettings& settings);
 
         std::thread m_thread;
         std::mutex m_mutex;
@@ -72,6 +65,7 @@ namespace engine::render
         ID3D11InputLayout* m_inputLayout{};
         ID3D11Buffer* m_vertexBuffer{};
         ID3D11Buffer* m_constantBuffer{};
+        ID3D11BlendState* m_blendState{};
         std::uint32_t m_width{};
         std::uint32_t m_height{};
     };

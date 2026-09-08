@@ -1,42 +1,62 @@
-# Cpp Window Game
+# AI Lo Engine — 2D DX11 게임 엔진 뼈대
 
-Small Windows 2D game foundation using **C++20, Win32, and DirectX 11**.
+**C++20 / Win32 / DirectX 11** 기반 2D 게임 엔진의 프로젝트 루트. 특정 게임은 아직 없고, 게임을 얹을 수 있는 **구조와 프레임 흐름**만 구현되어 있다.
 
-## Run
+## 실행
 
-Open `CppWindowGame.vcxproj` with Visual Studio 2022, select **Debug | x64**, then press `F5`.
+Visual Studio 2022로 `CppWindowGame.vcxproj`를 열고 **Debug | x64** 선택 후 `F5`.
+툴셋 v143, `LanguageStandard=stdcpp20`, `WarningLevel=Level4`. 링크: `d3d11.lib;dxgi.lib;d3dcompiler.lib`. 인클루드 루트 `src`.
 
-## Current features
-
-- Win32 game window and non-blocking game loop
-- Main Thread와 Render Thread가 분리된 프레임 구조
-- Render Thread가 DX11 device, immediate context, swap chain, resize, `Present`를 단독 소유
-- 최신 프레임 한 개만 보관하는 mailbox: 렌더가 늦어도 게임 스레드는 오래된 프레임을 쌓지 않음
-- 값 기반 `RenderSnapshot`: 렌더러가 가변 게임 객체를 직접 읽지 않음
-- Delta-time movement (stable movement speed across frame rates)
-- DirectX 11 swap chain and resize-safe rendering
-- A cyan 64×64 player square rendered by a tiny shader pipeline
-- Arrow-key movement, normalized diagonal speed, and window-boundary clamping
-- A retained UI tree: in-game window, interactive Start button, and text lines
-
-## Thread contract
+## 모듈 구조
 
 ```text
-Main Thread: Win32 message → Input → Update → RenderSnapshot → Submit
-                                                         ↓
-Render Thread:                   latest-frame mailbox → DX11 draw → Present
+src/
+  main.cpp                 진입점. Dx11Renderer 를 만들어 IRenderer 로 Application 에 주입
+  math/Math.h              Vec2 / Rect / Color 공용 기하 타입
+  core/
+    JobSystem.*            워커 풀 + Job + Fence (예외 안전). ParallelFor
+    Time.h                 FrameClock(clamp 된 delta), FixedTimestep(고정 스텝 누적)
+    NonCopyable.h          소유 타입 공통 base
+  platform/Win32Window.*   OS 창 + WndProc → IWindowEventSink 로 이벤트 전달
+  input/InputState.h       이번 프레임 키/마우스 상태 + 에지 질의(Pressed/Released)
+  render/
+    IRenderer.h            렌더러 추상 (Start/SetFrameSettings/Submit/Resize/Stop) + FrameSettings
+    RenderSnapshot.h       값 기반 스냅샷: worldQuads + uiQuads (Quad 배열)
+    Dx11Renderer.*         렌더 스레드. device/swapchain/Present 단독 소유. 알파 블렌딩
+  ui/UI.*                  Widget / UIWindow / Button / TextLine / UIContext
+  game/
+    Simulation.*           가변 월드. 고정 timestep. 플레이어 + 20k 파티클(JobSystem 스텁)
+    SnapshotBuilder.*      Simulation + UIContext → RenderSnapshot
+    Application.*           조립·프레임 지휘. IWindowEventSink 구현
 ```
 
-`src/main.cpp`은 입력과 시뮬레이션만 처리한다. DX11 API 호출은 `src/render/Dx11Renderer.cpp`의 Render Thread에만 있다. 다음 JobSystem은 simulation 완료 Fence 뒤에 snapshot을 생성하는 위치에 연결하면 된다.
+자세한 지도·프레임 흐름·확장 지점은 [docs/engine-overview.md](docs/engine-overview.md). 명령 단위 작업 절차는 [docs/command-playbook.md](docs/command-playbook.md).
 
-전체 멀티스레드 계약과 로드맵은 [docs/multithreaded_game_engine_architecture.md](docs/multithreaded_game_engine_architecture.md)에 있다.
+## 스레드 계약
 
-## Suggested next milestones
+```text
+Main Thread (Application::Run):
+  Win32 message → InputState/UIContext → FixedTimestep → Simulation::Step → Job Fence
+               → SnapshotBuilder → RenderSnapshot ──IRenderer::Submit──┐
+                                                                        ▼
+Render Thread (Dx11Renderer::RenderLoop): latest-frame mailbox → DX11 draw → Present
+```
 
-1. Load a PNG texture and draw it instead of the colored square.
-2. Add a `Vector2` type and separate `Input`, `Graphics`, and `Player` classes into files.
-3. Add sprite animation, a camera, tile maps, and AABB collisions.
+- 메인 스레드는 D3D11 API를 호출하지 않는다. 모든 DX11 호출은 `src/render/Dx11Renderer.cpp`(렌더 스레드)에만 있다.
+- 스레드 경계는 값 기반 `RenderSnapshot`만 넘어간다. 렌더러는 최신 스냅샷 1개만 보관하고 오래된 미렌더 프레임은 버린다.
+- 창 resize 요청은 메인에서 전달하되 `ResizeBuffers`는 렌더 스레드만 호출한다.
+- Job 예외는 `WorkerLoop`가 잡아 `JobFence::Wait()` 지점에서 재전파한다(데드락 없음).
 
-## UI design
+전체 계약과 로드맵은 [docs/multithreaded_game_engine_architecture.md](docs/multithreaded_game_engine_architecture.md).
 
-The proposed UI layer for in-game windows, buttons, and text is documented in [docs/ui-architecture.md](docs/ui-architecture.md). It keeps UI widgets independent from DirectX so the renderer can later move from DX11 to DX12.
+## 설계 원칙
+
+객체지향 설계와 SOLID를 최우선으로 한다. 각 모듈은 변경 이유가 하나(SRP)이고, `Application`은 조립만 한다. 상위 레이어는 구현이 아니라 추상(`IRenderer`, `IWindowEventSink`)에 의존한다(DIP). 위젯·렌더 프리미티브는 기존 타입 수정 없이 확장한다(OCP). 복사 방지(`NonCopyable`), 소유권은 `unique_ptr`, raw 포인터는 비소유 관찰용.
+
+## 현재 데모 (게임 아님)
+
+방향키로 움직이는 시안색 사각형, 반투명 UI 패널 + `START` 버튼 + 상태 텍스트, 그리고 매 고정 스텝 `ParallelFor`로 도는 20,000개 파티클(앞 2,048개만 그림 — 나머지는 JobSystem 처리량 스텁). 실제 게임 로직은 아직 없다.
+
+## UI 설계
+
+인게임 창·버튼·텍스트의 UI 계층은 [docs/ui-architecture.md](docs/ui-architecture.md)에 문서화되어 있다. 위젯은 `Quad` 방출에만 의존하므로 DX11 → DX12 교체 시에도 UI 코드는 유지된다.

@@ -46,9 +46,10 @@ namespace
         float x = origin.x;
         for (const char character : text)
         {
+            const std::array<unsigned char, 7> glyph = Glyph(character);
             for (int row = 0; row < 7; ++row)
             {
-                const unsigned char bits = Glyph(character)[row];
+                const unsigned char bits = glyph[row];
                 for (int column = 0; column < 5; ++column)
                     if ((bits & (1u << (4 - column))) != 0)
                         AddQuad(output, { x + column * scale, origin.y + row * scale, scale, scale }, color);
@@ -149,8 +150,8 @@ namespace engine::ui
         m_status = status.get();
         m_root->AddChild(std::move(status));
     }
-    void UIContext::PointerMove(Vec2 position) { m_root->PointerMove(position, {}); }
-    void UIContext::PointerDown(Vec2 position) { m_root->PointerDown(position, {}); }
-    void UIContext::PointerUp(Vec2 position) { m_root->PointerUp(position, {}); }
+    bool UIContext::PointerMove(Vec2 position) { return m_root->PointerMove(position, {}); }
+    bool UIContext::PointerDown(Vec2 position) { return m_root->PointerDown(position, {}); }
+    bool UIContext::PointerUp(Vec2 position) { return m_root->PointerUp(position, {}); }
     void UIContext::Build(std::vector<Quad>& output) const { m_root->Build(output, {}); }
 }

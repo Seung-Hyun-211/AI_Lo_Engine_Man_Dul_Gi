@@ -24,25 +24,25 @@ Application
 
 월드는 먼저 렌더링하고 UI는 마지막에 렌더링한다. 따라서 UI는 항상 월드 위에 표시된다.
 
-## 디렉터리 제안
+## 디렉터리: 목표와 현재
 
 ```text
 src/
-  platform/NativeWindow.h
-  input/Input.h
-  graphics/Graphics.h
-  graphics/UIRenderer.h
-  ui/UIContext.h
-  ui/UIScreen.h
-  ui/Widget.h
-  ui/UIWindow.h
-  ui/Button.h
-  ui/TextLine.h
-  ui/UIStyle.h
-  ui/UILayout.h
+  platform/Win32Window.h    [구현됨] NativeWindow 역할. IWindowEventSink 로 이벤트 전달
+  input/InputState.h        [구현됨] 마우스/키보드 이번 프레임 상태 + 에지 질의
+  ui/UI.h / UI.cpp          [구현됨] Widget · UIWindow · Button · TextLine · UIContext 를 한 파일에
+  render/RenderSnapshot.h   [구현됨] UI 는 여기의 값 타입 Quad 만 방출한다
+  ─────────────────────────────────────────────────────────────
+  graphics/UIRenderer.h     [미구현] DrawFilledRect/DrawText/PushClipRect 경계. 현재는 Quad 직접 방출로 대체
+  ui/UIScreen.h             [미구현] 화면 단위 트리 / 화면 전환
+  ui/UIStyle.h, ui/UILayout.h [미구현] Measure/Arrange, VerticalStack
 ```
 
+위젯 수가 늘거나 텍스트가 glyph atlas로 가면 `UI.cpp`를 `Widget`/`UIWindow`/`Button`/`TextLine`/`UIContext` 파일로 분리한다. 지금은 한 파일로도 SRP가 유지된다(각 타입의 책임이 분명하고 서로 독립적).
+
 ## 핵심 자료형
+
+`Vec2` / `Rect` / `Color`는 `src/math/Math.h`의 `engine::math`에 있고 `engine::ui`는 `using`으로 그대로 재사용한다(UI 전용 기하 어휘를 따로 두지 않는다). `UIStyle` / `Visibility` / 정렬 enum은 아직 미도입이다.
 
 ```cpp
 struct Vec2 { float x, y; };
@@ -145,6 +145,21 @@ Win32 message → Input::BeginFrame
 
 `UIContext`는 현재 화면 하나만 활성화하고, 화면 전환 요청은 프레임 끝에 적용한다. 이벤트 처리 중 UI 트리를 즉시 파괴하지 않으므로 안전하다.
 
+### 현재 구현의 입력 경로
+
+위 순서는 목표다. 지금은 `Measure`/`Arrange`/`UIScreen`이 없어 다음과 같이 동작한다.
+
+```text
+Win32Window (WM_MOUSE*) → IWindowEventSink → Application
+  · UIContext::PointerDown/Move/Up(pos) 즉시 호출, bool 반환 = "UI가 소비함"
+  · 좌클릭을 UI가 소비하면 그 이벤트는 InputState 로 전달되지 않는다 (게임 입력 스킵)
+  · hover(PointerMove)는 배타적이지 않다: UI hover 갱신 + 게임도 커서 위치 획득
+Application::Run 프레임 루프:
+  InputState::BeginFrame → PumpMessages → Simulation::Step → SnapshotBuilder(UIContext::Build) → Submit
+```
+
+`Button::OnClick`은 down과 up이 같은 버튼 안에서 일어날 때만 호출된다(드래그 중 오클릭 방지). 눌림 상태를 정리하려고 up 이벤트는 소비 여부와 무관하게 항상 위젯 트리에 전달한다.
+
 ## UIRenderer 경계
 
 UI 위젯은 DX11 API를 직접 호출하지 않는다. `UIRenderer`만 GPU 리소스를 다룬다.
@@ -183,11 +198,11 @@ uiContext.SetScreen(std::move(menu));
 
 ## 구현 순서
 
-1. `Vec2`, `Rect`, `Color`, `UIStyle`와 `UIRenderer::DrawFilledRect`를 만든다.
-2. 자식 소유·bounds·render traversal만 가진 `Widget`과 `UIWindow`를 만든다.
-3. `Input`에 마우스 위치, 좌/우 버튼의 pressed/down/released 상태를 추가한다.
-4. hit test와 `Button` 상태 전이를 구현하고 `onClick`을 검증한다.
-5. bitmap font atlas과 `TextLine`을 추가한다.
-6. `VerticalStack`, clipping, keyboard focus, UI 화면 전환을 추가한다.
+1. **완료(변형):** `Vec2`/`Rect`/`Color`는 `engine::math`에. `UIStyle`·`UIRenderer` 경계 대신 위젯이 `Quad`를 직접 방출한다.
+2. **완료:** 자식 소유·bounds·render traversal을 가진 `Widget`과 `UIWindow`.
+3. **완료:** `InputState`에 마우스 위치, 좌/우/중 버튼의 down/pressed/released, 키 down/pressed/released.
+4. **완료:** hit test(앞에 그린 자식부터 역순), `Button` normal/hover/pressed 전이, `onClick`(down·up 동일 버튼 내부). `UIContext::PointerXxx`가 소비 여부를 `bool`로 반환.
+5. **완료(임시):** 내장 5×7 ASCII 비트맵 폰트 + `TextLine`. glyph atlas는 로컬라이제이션 시 교체.
+6. **미구현:** `VerticalStack`, clipping(`PushClipRect`), keyboard focus, `UIScreen` 화면 전환.
 
 IME, 여러 줄 편집, 접근성, 반응형 레이아웃은 `TextBox` 같은 입력 위젯을 만들 때 별도 단계로 다룬다. 현재의 `TextLine`은 표시 전용이다.

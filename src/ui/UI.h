@@ -1,5 +1,6 @@
 #pragma once
 
+#include "math/Math.h"
 #include "render/RenderSnapshot.h"
 
 #include <functional>
@@ -10,16 +11,10 @@
 
 namespace engine::ui
 {
-    struct Vec2 { float x{}, y{}; };
-    struct Rect
-    {
-        float x{}, y{}, width{}, height{};
-        [[nodiscard]] bool Contains(Vec2 point) const
-        {
-            return point.x >= x && point.x < x + width && point.y >= y && point.y < y + height;
-        }
-    };
-    struct Color { float r{}, g{}, b{}, a{ 1.0f }; };
+    // The UI works in the shared math types; no separate geometry vocabulary.
+    using math::Color;
+    using math::Rect;
+    using math::Vec2;
 
     // Widgets use local coordinates. The parent turns them into screen-space
     // render commands, keeping UI independent from Direct3D and the render thread.
@@ -79,9 +74,11 @@ namespace engine::ui
     {
     public:
         UIContext();
-        void PointerMove(Vec2 position);
-        void PointerDown(Vec2 position);
-        void PointerUp(Vec2 position);
+        // Each returns true when the UI consumed the event, so the caller can
+        // keep it out of gameplay input for this frame.
+        bool PointerMove(Vec2 position);
+        bool PointerDown(Vec2 position);
+        bool PointerUp(Vec2 position);
         void Build(std::vector<engine::render::Quad>& output) const;
     private:
         std::unique_ptr<UIWindow> m_root;

@@ -1,16 +1,35 @@
 #include "core/JobSystem.h"
 
 #include <algorithm>
+#include <exception>
 #include <stdexcept>
+#include <thread>
 #include <utility>
 
 namespace engine::core
 {
+    std::size_t RecommendedWorkerCount()
+    {
+        const unsigned int logicalProcessors = std::thread::hardware_concurrency();
+        const std::size_t reserved = logicalProcessors > 2 ? logicalProcessors - 2 : 1;
+        return std::clamp<std::size_t>(reserved, 1, 14);
+    }
+
     void JobFence::Wait() const
     {
         if (!m_state) return;
-        std::unique_lock lock(m_state->mutex);
-        m_state->completed.wait(lock, [this] { return m_state->remaining.load(std::memory_order_acquire) == 0; });
+        {
+            std::unique_lock lock(m_state->mutex);
+            m_state->completed.wait(lock, [this] { return m_state->remaining.load(std::memory_order_acquire) == 0; });
+        }
+        // Re-raise a job failure on the frame thread that waited for it, so a
+        // throwing job surfaces as a normal exception instead of a deadlock.
+        std::exception_ptr error;
+        {
+            std::scoped_lock lock(m_state->errorMutex);
+            error = m_state->error;
+        }
+        if (error) std::rethrow_exception(error);
     }
 
     bool JobFence::IsComplete() const
@@ -87,7 +106,19 @@ namespace engine::core
                 m_queue.pop();
             }
 
-            job.run();
+            // A job that throws must never skip the fence decrement below, or the
+            // frame thread waits forever. Capture the first failure; JobFence::Wait
+            // rethrows it once the batch completes.
+            try
+            {
+                job.run();
+            }
+            catch (...)
+            {
+                std::scoped_lock lock(job.fence->errorMutex);
+                if (!job.fence->error) job.fence->error = std::current_exception();
+            }
+
             if (job.fence->remaining.fetch_sub(1, std::memory_order_acq_rel) == 1)
             {
                 std::scoped_lock lock(job.fence->mutex);

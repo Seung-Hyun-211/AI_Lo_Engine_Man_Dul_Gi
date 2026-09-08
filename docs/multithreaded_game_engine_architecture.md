@@ -12,15 +12,17 @@
 ## 스레드 역할
 
 ```text
-Main Thread: Win32 메시지 → Input → Simulation → Job Fence → RenderSnapshot
-                                                               ↓ Submit
-Render Thread:                            latest-frame mailbox → DX11 → Present
-Job Workers:                              연속 데이터 청크의 독립 update
+Main Thread (Application::Run):
+  Win32 메시지 → InputState/UIContext → FixedTimestep → Simulation::Step → Job Fence
+              → SnapshotBuilder → RenderSnapshot
+                                                               ↓ IRenderer::Submit
+Render Thread (Dx11Renderer::RenderLoop): latest-frame mailbox → DX11 → Present
+Job Workers (JobSystem):                  연속 데이터 청크의 독립 update
 향후 IO Thread:                           파일 read/decode → 안전한 완료 큐
 향후 Audio Thread:                        실시간 오디오 콜백/명령 소비
 ```
 
-- **Main**은 입력, 게임 상태 전이, Job 제출과 완료 경계를 소유한다. D3D11 호출은 금지한다.
+- **Main**은 입력, 게임 상태 전이, Job 제출과 완료 경계를 소유한다. D3D11 호출은 금지한다. `src/game/Application.cpp`이 이 루프를 들고 있다.
 - **Render**는 device, immediate context, swap chain, back buffer, resize, draw, `Present`의 유일한 소유자다.
 - **Audio**는 실시간 경로에서 잠금, 할당, 파일 I/O를 하지 않는다.
 - **IO**는 CPU 디코드 결과를 완료 큐에 넣고, GPU 리소스 생성은 Render Thread의 안전 지점에서 한다.
@@ -29,13 +31,20 @@ Job Workers:                              연속 데이터 청크의 독립 upda
 
 | 항목 | 구현 위치 | 상태 |
 |---|---|---|
-| Main / Render 분리 | `src/main.cpp`, `src/render/Dx11Renderer.*` | 완료 |
-| 최신 프레임 mailbox | `Dx11Renderer::Submit` | 완료 |
-| VSync / 목표 FPS | `FrameSettings` | 완료 |
+| Main / Render 분리 | `src/game/Application.*`, `src/render/Dx11Renderer.*` | 완료 |
+| 렌더러 추상화 (DIP) | `src/render/IRenderer.h` — `Start/SetFrameSettings/Submit/Resize/Stop` | 완료. `main.cpp`만 구상 타입 인지 |
+| 최신 프레임 mailbox | `Dx11Renderer::Submit` (1슬롯) | 완료 |
+| VSync / 목표 FPS | `FrameSettings` (`IRenderer.h`) | 완료 |
 | ThreadPool, Job, Fence | `src/core/JobSystem.*` | 초기 구현 완료 |
-| 연속 데이터 + chunked parallel-for | `std::vector<MovingParticle>` | 검증용 초기 구현 |
-| SpriteBatch / texture atlas | - | 다음 단계 |
+| Job 예외 안전성 | `WorkerLoop` try/catch → `exception_ptr` → `JobFence::Wait()` 재전파 | 완료 |
+| 고정 timestep 누적기 | `src/core/Time.h` (`FrameClock`, `FixedTimestep`) | 완료. `Application` 프레임 루프에서 사용 |
+| 연속 데이터 + chunked parallel-for | `Simulation::Step` — `std::vector<Particle>` 20k advect | 검증용 스텁 |
+| 시뮬 결과 → 스냅샷 연결 | `SnapshotBuilder` → `RenderSnapshot::worldQuads` | 부분 완료 (앞 2,048개 샘플만 그림, 나머지는 벤치마크 부하) |
+| 스냅샷 일반화 (OCP) | `RenderSnapshot` = `worldQuads` + `uiQuads` (`Quad` 배열) | 완료. 렌더러에 게임 개념 하드코딩 없음 |
+| SpriteBatch / texture atlas / `SpriteDraw` | - | 다음 단계 |
 | IO, Audio, work stealing | - | 이후 측정 후 도입 |
+
+모듈 지도와 프레임 흐름은 [engine-overview.md](engine-overview.md)에 있다.
 
 ## 프레임 설정
 
@@ -66,8 +75,9 @@ renderer.SetFrameSettings({
 ## 연속 메모리와 ParallelFor
 
 ```cpp
-std::vector<MovingParticle> particles;
-jobs.ParallelFor(0, particles.size(), 2048, UpdateChunk).Wait();
+// src/game/Simulation.cpp
+std::vector<Particle> m_particles;              // 연속, AoS
+m_jobs.ParallelFor(0, m_particles.size(), 2'048, UpdateChunk).Wait();
 ```
 
 각 워커는 겹치지 않는 연속 `[begin, end)` 범위만 쓴다. 청크 크기는 2,048~16,384 객체 또는 약 0.1~0.5 ms 작업 시간을 시작점으로 두고 프로파일링한다. 작업 비용 편차가 크면 청크를 줄인다.
@@ -93,6 +103,7 @@ Main: ParallelFor 제출 → Worker가 독립 range update → Fence 완료 → 
 
 - `JobFence::Wait()`는 프레임 단계 경계에서만 사용한다.
 - Job이 참조한 메모리는 Fence 완료 전까지 살아 있어야 한다.
+- Job이 예외를 던지면 `WorkerLoop`가 잡아 `exception_ptr`로 보관하고 fence는 정상 감소시킨다. 첫 예외는 해당 배치의 `JobFence::Wait()` 지점에서 대기 스레드로 재전파된다. `Wait()`를 부르지 않는 fire-and-forget 잡의 예외는 관측되지 않는다.
 - 현재는 mutex/condition-variable 기반 단일 큐다. 큐 경합이 실제 병목일 때만 worker별 deque와 work stealing을 추가한다.
 
 ## 스냅샷과 동기화 규칙
@@ -120,10 +131,12 @@ Main: ParallelFor 제출 → Worker가 독립 range update → Fence 완료 → 
 
 ## 로드맵
 
-1. **현재:** Main–Render 분리, frame settings, JobSystem, 연속 데이터 ParallelFor.
-2. `MovingParticle` 결과를 `RenderSnapshot`의 `SpriteDraw` 배열로 옮긴다.
-3. Render Thread에 dynamic vertex buffer + texture atlas 기반 SpriteBatch를 추가한다.
+1. **완료:** Main–Render 분리, frame settings, JobSystem(+예외 안전성), 연속 데이터 ParallelFor, `IRenderer` 추상화, `Game` god class → 모듈 분해, `FixedTimestep`.
+2. **진행 중:** 시뮬 결과를 `RenderSnapshot`으로 연결. 지금은 `Particle` → `worldQuads`(색 사각형) 샘플. 다음: 텍스처용 `SpriteDraw`(atlas id + uv rect) 값 타입을 `RenderSnapshot`에 추가.
+3. Render Thread에 dynamic vertex buffer + texture atlas 기반 SpriteBatch를 추가한다. (현재는 프레임당 `Map(WRITE_DISCARD)` 1회 + 단일 `Draw`.)
 4. 생성/파괴·이벤트의 워커별 명령 버퍼와 병합 단계를 추가한다.
-5. 고정 timestep 물리, 애니메이션, 컬링을 독립 Job으로 옮긴다.
+5. 고정 timestep 물리, 애니메이션, 컬링을 독립 Job으로 옮긴다. (`FixedTimestep`은 준비됨; 물리/애니메이션 잡은 미구현.)
 6. CPU/GPU profiler와 frame-time HUD를 추가해 worker 수·청크 크기를 측정한다.
 7. 측정 근거가 생길 때 SoA/SIMD, work stealing, IO/Audio 전용 스레드를 추가한다.
+
+아직 없는 것: 시뮬/렌더 파이프라이닝(메인이 매 프레임 `ParallelFor(...).Wait()`로 완전 블록), 더블 버퍼링, 스냅샷 사이 렌더 보간, UI 클리핑, `FLIP_DISCARD` 스왑 효과.
