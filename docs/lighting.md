@@ -8,8 +8,8 @@
 
 ```cpp
 struct DirectionalLight {
-    math::Vec3  direction{ 0.35f, -0.55f, 0.75f };  // 빛이 진행하는 방향(월드), 정규화 불필요
-    math::Color color{ 1.0f, 0.96f, 0.88f, 1.0f };  // rgb = 색, a = 세기
+    math::Vec3  direction{ 0.0f, -0.70711f, 0.70711f };  // 정면 상단 45도(빛 진행방향, 월드), 정규화 불필요
+    math::Color color{ 1.0f, 0.96f, 0.88f, 1.0f };       // rgb = 색, a = 세기
 };
 struct AmbientLight {
     math::Color color{ 0.17f, 0.18f, 0.22f, 1.0f };  // 모든 면에 더해지는 균일 필

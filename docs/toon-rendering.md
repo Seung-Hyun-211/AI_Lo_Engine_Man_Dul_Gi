@@ -35,7 +35,8 @@
 
 - 두께: `outline.hlsl` 의 `outlineWidth` (b2 cbuffer). 클립공간에서 `w` 로 스케일 → 거리와 무관하게 화면상 일정 두께. 현재 값 `kOutlineWidth = 0.004f` (`ModelMeshPass3D.cpp`).
 - 상태: `m_outlineRasterizer` = `D3D11_CULL_FRONT`.
-- 한계: hard normal(UV seam)에서 껍질이 갈라질 수 있음. Unity-chan 은 대체로 smooth 라 무난. 정 문제면 임포트 시 법선 스무딩 필요.
+- **스무딩**: 헐 팽창에 원본 정점 법선이 아니라 `import::BuildSmoothNormals` 로 만든 **위치 기준 welded·면적가중 평균 법선**을 쓴다. hard normal(UV seam)에서 껍질이 갈라져 각지는 걸 막아 외곽선이 부드럽게 이어진다. `ModelMeshPass3D` 가 서브메시마다 `pos + smoothNormal`(stride 24) 헐 VB 를 만들고(인덱스는 모델과 공유), 아웃라인 패스가 그걸로 그린다.
+- 더: 서브픽셀 계단은 스왑체인 MSAA 나 포스트 AA 로 (미구현).
 
 대안(선택 안 함): 포스트프로세스 엣지 검출(오프스크린 RT 필요), 림/프레넬(1패스, 두께 불균일). [command-playbook](command-playbook.md) 3g 참조.
 
@@ -71,7 +72,7 @@
 | 필드 | 기본 | 의미 |
 |---|---:|---|
 | `thresholdDegrees` | 90 | 이 각도 초과에서만 라인 |
-| `minHalfWidth` / `maxHalfWidth` | 0.004 / 0.020 | 임계각/180°에서의 반폭(모델 공간 m) |
+| `minHalfWidth` / `maxHalfWidth` | 0.00133 / 0.00667 | 임계각/180°에서의 반폭(모델 공간 m). 기존 3배에서 1/3 로 낮춤 |
 | `saturationScale` | 0.65 | <1 채도 낮춤 |
 | `valueScale` | 0.80 | <1 어둡게 (AO 느낌) |
 | `surfaceOffset` | 0.0015 | 표면에서 띄우는 거리(z-fight 방지) |

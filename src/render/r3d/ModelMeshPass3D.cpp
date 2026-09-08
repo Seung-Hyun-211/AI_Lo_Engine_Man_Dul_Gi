@@ -193,6 +193,25 @@ namespace engine::render
             D3D11_SUBRESOURCE_DATA indexInit{ mesh.indices.data(), 0, 0 };
             ThrowIfFailed(device->CreateBuffer(&indexDesc, &indexInit, &sub.indexBuffer), "CreateBuffer (model index) failed");
 
+            // Hull geometry for the silhouette outline: same order/count as the
+            // model vertices (so the index buffer is shared) but position +
+            // *smoothed* normal, so the ring does not split at hard-normal seams.
+            const std::vector<math::Vec3> smoothNormals = import::BuildSmoothNormals(mesh);
+            std::vector<float> hull;
+            hull.reserve(mesh.vertices.size() * 6);
+            for (std::size_t i = 0; i < mesh.vertices.size(); ++i)
+            {
+                const math::Vec3& p = mesh.vertices[i].position;
+                const math::Vec3& n = smoothNormals[i];
+                hull.insert(hull.end(), { p.x, p.y, p.z, n.x, n.y, n.z });
+            }
+            D3D11_BUFFER_DESC hullDesc{};
+            hullDesc.ByteWidth = static_cast<UINT>(sizeof(float) * hull.size());
+            hullDesc.Usage = D3D11_USAGE_IMMUTABLE;
+            hullDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+            D3D11_SUBRESOURCE_DATA hullInit{ hull.data(), 0, 0 };
+            ThrowIfFailed(device->CreateBuffer(&hullDesc, &hullInit, &sub.hullVertexBuffer), "CreateBuffer (hull) failed");
+
             // Interior crease lines for this submesh.
             const import::TgaImage* creaseTex = tga != nullptr && tga->ok ? tga : nullptr;
             const std::vector<import::CreaseVertex> creases = import::BuildCreaseLines(mesh, creaseTex, material, {});
@@ -338,8 +357,9 @@ namespace engine::render
             device->VSSetConstantBuffers(2, 1, &m_outlineConstants);
             for (const SubMesh& sub : m_subMeshes)
             {
-                const UINT stride = sub.vertexStride, offset = 0;
-                device->IASetVertexBuffers(0, 1, &sub.vertexBuffer, &stride, &offset);
+                if (sub.hullVertexBuffer == nullptr) continue;
+                const UINT stride = 6 * sizeof(float), offset = 0;   // pos + smoothed normal
+                device->IASetVertexBuffers(0, 1, &sub.hullVertexBuffer, &stride, &offset);
                 device->IASetIndexBuffer(sub.indexBuffer, DXGI_FORMAT_R32_UINT, 0);
                 device->DrawIndexed(sub.indexCount, 0, 0);
             }
@@ -395,6 +415,7 @@ namespace engine::render
         for (SubMesh& sub : m_subMeshes)
         {
             SafeRelease(sub.vertexBuffer);
+            SafeRelease(sub.hullVertexBuffer);
             SafeRelease(sub.indexBuffer);
             sub.texture = nullptr;
         }

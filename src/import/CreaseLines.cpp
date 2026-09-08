@@ -186,4 +186,45 @@ namespace engine::import
 
         return out;
     }
+
+    std::vector<math::Vec3> BuildSmoothNormals(const ModelMesh& mesh, float weldEpsilon)
+    {
+        std::vector<math::Vec3> result(mesh.vertices.size(), math::Vec3{ 0.0f, 1.0f, 0.0f });
+        if (mesh.indices.size() < 3) return result;
+
+        const float invWeld = weldEpsilon > 0.0f ? 1.0f / weldEpsilon : 1.0e4f;
+
+        std::unordered_map<std::int64_t, std::uint32_t> weldMap;
+        weldMap.reserve(mesh.vertices.size());
+        std::vector<std::uint32_t> weldOf(mesh.vertices.size(), 0);
+        for (std::size_t i = 0; i < mesh.vertices.size(); ++i)
+        {
+            const std::int64_t key = WeldKey(mesh.vertices[i].position, invWeld);
+            weldOf[i] = weldMap.try_emplace(key, static_cast<std::uint32_t>(weldMap.size())).first->second;
+        }
+
+        // Accumulate un-normalised (area-weighted) face normals per welded id.
+        std::vector<math::Vec3> accum(weldMap.size(), math::Vec3{});
+        const std::size_t triCount = mesh.indices.size() / 3;
+        for (std::size_t t = 0; t < triCount; ++t)
+        {
+            const std::uint32_t i0 = mesh.indices[t * 3 + 0];
+            const std::uint32_t i1 = mesh.indices[t * 3 + 1];
+            const std::uint32_t i2 = mesh.indices[t * 3 + 2];
+            const math::Vec3 faceNormal = math::Cross(
+                mesh.vertices[i1].position - mesh.vertices[i0].position,
+                mesh.vertices[i2].position - mesh.vertices[i0].position);
+            accum[weldOf[i0]] = accum[weldOf[i0]] + faceNormal;
+            accum[weldOf[i1]] = accum[weldOf[i1]] + faceNormal;
+            accum[weldOf[i2]] = accum[weldOf[i2]] + faceNormal;
+        }
+
+        for (std::size_t i = 0; i < mesh.vertices.size(); ++i)
+        {
+            const math::Vec3 n = accum[weldOf[i]];
+            const float len = math::Length(n);
+            result[i] = len > 1.0e-9f ? n * (1.0f / len) : mesh.vertices[i].normal;
+        }
+        return result;
+    }
 }

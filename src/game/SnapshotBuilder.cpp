@@ -35,9 +35,9 @@ namespace engine::game
         render::Lighting BuildLighting()
         {
             render::Lighting lighting{};
-            // 3/4 key from front-upper-right so the camera-facing side reads;
-            // warm tint, modest ambient fill so nothing goes fully black.
-            lighting.key.direction = { 0.35f, -0.55f, 0.75f };
+            // Key from straight in front, 45 degrees up (front-top 3/4). Travel
+            // direction: down and into the scene, no left/right bias.
+            lighting.key.direction = { 0.0f, -0.70711f, 0.70711f };
             lighting.key.color = { 1.0f, 0.96f, 0.88f, 1.0f };   // rgb, a = intensity
             lighting.ambient.color = { 0.17f, 0.18f, 0.22f, 1.0f };
             return lighting;

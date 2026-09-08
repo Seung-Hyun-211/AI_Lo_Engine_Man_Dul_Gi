@@ -18,12 +18,14 @@ struct VSOut { float4 pos : SV_POSITION; };
 VSOut VSMain(VSIn input)
 {
     VSOut output;
-    float4 worldPos = mul(float4(input.pos, 1.0f), world);
-    float4 clip = mul(worldPos, viewProj);
 
-    // Offset in clip space along the (approx) projected normal, scaled by w so
-    // the ring keeps a constant width on screen regardless of distance.
+    // input.nrm is a SMOOTHED normal (built per-position in ModelMeshPass3D), so
+    // the inflated shell stays continuous across hard-normal seams instead of
+    // tearing into facets - that is what makes the outline read smooth.
     float3 worldNrm = normalize(mul(float4(input.nrm, 0.0f), world).xyz);
+    float4 clip = mul(mul(float4(input.pos, 1.0f), world), viewProj);
+
+    // Offset along the projected normal, scaled by w -> ~constant screen width.
     float2 clipNrm = normalize(mul(float4(worldNrm, 0.0f), viewProj).xy);
     clip.xy += clipNrm * outlineWidth * clip.w;
 

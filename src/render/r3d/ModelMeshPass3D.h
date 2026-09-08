@@ -41,7 +41,8 @@ namespace engine::render
     private:
         struct SubMesh
         {
-            ID3D11Buffer* vertexBuffer{};
+            ID3D11Buffer* vertexBuffer{};       // ModelVertex, stride 64 (cel pass)
+            ID3D11Buffer* hullVertexBuffer{};   // pos + smoothed normal, stride 24 (outline pass)
             ID3D11Buffer* indexBuffer{};
             std::uint32_t indexCount{};
             std::uint32_t vertexStride{};
