@@ -183,8 +183,15 @@ namespace engine::game
 
     void Application::OnClose()
     {
-        // Nothing extra to do: DefWindowProc destroys the window, WM_DESTROY
-        // posts WM_QUIT, and PumpMessages ends the loop. Hook kept for a future
-        // "unsaved changes?" prompt.
+        // Sliders/checkboxes already mutate m_settings live; only the disk
+        // write was deferred to CloseSettings(). Flush it here too so closing
+        // the window (X button / Alt+F4) while Settings is still open doesn't
+        // silently drop the change - this is the app's exit pipeline (see
+        // docs/scene-flow-design.md "종료 파이프라인"; JobSystem/Dx11Renderer/
+        // Win32Window each already tear themselves down via their own
+        // destructor, called after Run() returns).
+        m_settings.Save(core::kSettingsFilePath);
+        // DefWindowProc destroys the window, WM_DESTROY posts WM_QUIT, and
+        // PumpMessages ends the loop - no other shutdown step needed here.
     }
 }

@@ -85,7 +85,22 @@ SettingsScreen(NEXT 버튼) → Settings.resolutionIndex 갱신
 
 기존 "사용자가 창 테두리를 드래그" 경로와 완전히 동일한 파이프라인을 탄다 — 새 코드 경로를 만들지 않고 기존 리사이즈 처리를 재사용했다(OCP).
 
-## 5. 사용 방법 (How to use)
+## 5. 종료 파이프라인
+
+앱을 닫는 세 경로(Title의 QUIT 버튼 → `Win32Window::RequestClose`, 창 X 버튼, Alt+F4) 전부 같은 Win32 시퀀스로 모인다: `WM_CLOSE` → `IWindowEventSink::OnClose`(`Application::OnClose`) → (반환 후) `DefWindowProcW`가 `DestroyWindow` → `WM_DESTROY` → `PostQuitMessage` → 다음 프레임 `PumpMessages`가 `false`를 반환 → `Application::Run`의 루프가 끝난다.
+
+무엇이, 어디서 정리되는지:
+
+| 무엇 | 언제 | 어떻게 |
+|---|---|---|
+| 설정 저장 | `Application::OnClose` | `m_settings.Save(...)` — 슬라이더/체크박스가 `m_settings`는 이미 실시간으로 갱신해 두므로, 여기선 디스크에 쓰기만 하면 된다. Settings 오버레이를 정식으로 안 닫고 창을 바로 닫아도 반영됨(전엔 안 됐음 — 이번에 고침) |
+| 렌더 스레드·GPU 리소스 | `Run()`이 반환한 뒤 `Application` 소멸 시 `m_renderer`(참조라 소유 안 함 — 실제 소유자는 `main.cpp`의 `Dx11Renderer` 지역 변수)가 소멸하며 `Stop()`: 패스 `Release()` → 셰이더/섀도우/씬 타깃 해제 → 백버퍼/스왑체인/컨텍스트/디바이스 `Release()`, 전부 렌더 스레드 안에서 | 이미 완비돼 있었음(`Dx11Renderer::RenderLoop` 꼬리, `~Dx11Renderer` → `Stop()`) — 이번에 손댄 곳 아님 |
+| JobSystem 워커 스레드 | `Application` 소멸 시 `m_jobs` 소멸자 | `m_running=false` + `notify_all` + 전체 `join` — 이미 완비 |
+| OS 창(HWND) | `Application` 소멸 시 `m_window` 소멸자 | `DestroyWindow`(아직 안 지워졌으면) — 이미 완비 |
+
+**이번에 고친 건 "설정 저장" 한 줄뿐이다** — 나머지(렌더러/JobSystem/창)는 이미 RAII로 안전하게 정리되고 있었다(확인만 했고 설계 변경 없음).
+
+## 6. 사용 방법 (How to use)
 
 ### 새 화면 추가하기
 
@@ -97,8 +112,13 @@ SettingsScreen(NEXT 버튼) → Settings.resolutionIndex 갱신
 
 버튼 클릭 콜백 안에서 `EnterXxx()`/`OpenXxx()`를 부르면 된다 — Title의 START 버튼(`this] { EnterInGame(); }`)이 예시. 키 입력 조건(ESC처럼)은 `Application::OnKey`에 추가한다.
 
+### 종료 시 저장할 것 추가하기(세이브 데이터 등)
+
+`Application::OnClose()`에 한 줄 추가한다 — `m_settings.Save(...)`가 예시. 여기서 하는 일은 반드시 **동기·즉시 완료**여야 한다(디스크 쓰기 정도; 네트워크 호출 금지) — `DefWindowProcW`가 이 함수 반환 직후 창을 부수기 시작한다.
+
 ### 하지 말 것
 
 - `UIContext`에 "이게 Title 화면이다" 같은 게임 개념을 넣지 않는다 — `SetScreen`/`SetOverlay`는 어떤 위젯 트리든 받는다.
 - 오버레이가 열려 있는데 `Simulation::Step`을 부르지 않는다(위 게이팅 조건 유지).
 - 화면 전환 함수 밖에서 `m_state`를 직접 대입하지 않는다 — `EnterTitle`/`EnterInGame`이 상태와 화면 트리를 항상 같이 바꾼다는 불변식이 깨진다.
+- `OnClose()`에 렌더 스레드나 D3D11을 건드리는 코드를 넣지 않는다 — 이 함수는 메인 스레드(창 프로시저)에서 돈다. GPU 정리는 이미 `Dx11Renderer::Stop()`이 렌더 스레드 안에서 한다(§5).
