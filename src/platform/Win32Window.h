@@ -18,6 +18,9 @@ namespace engine::platform
 
         virtual void OnKey(int virtualKey, bool down) = 0;
         virtual void OnMouseMove(math::Vec2 position) = 0;
+        // Relative mouse motion (raw input), delivered only while the pointer is
+        // locked (SetPointerLocked(true)). Absolute OnMouseMove keeps firing too.
+        virtual void OnMouseDelta(math::Vec2 delta) = 0;
         // button: 0 = left, 1 = right, 2 = middle.
         virtual void OnMouseButton(int button, bool down) = 0;
         virtual void OnFocusLost() = 0;
@@ -64,6 +67,12 @@ namespace engine::platform
         // -> PumpMessages returns false). Main thread only.
         void RequestClose();
 
+        // Locks the pointer for mouse-look: hides the cursor, recenters it, and
+        // clips it to the client area, and starts delivering raw relative motion
+        // through IWindowEventSink::OnMouseDelta. Automatically suspended while
+        // the window is not foreground and re-applied on focus. Main thread only.
+        void SetPointerLocked(bool locked);
+
         [[nodiscard]] HWND Handle() const { return m_window; }
         [[nodiscard]] int Width() const { return m_width; }
         [[nodiscard]] int Height() const { return m_height; }
@@ -71,11 +80,15 @@ namespace engine::platform
     private:
         static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
         LRESULT HandleMessage(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
+        // Reconciles the actual cursor lock with m_pointerLockDesired + focus.
+        void ApplyPointerLock();
 
         HWND m_window{};
         int m_width{};
         int m_height{};
         IWindowEventSink* m_sink{};
         bool m_quit{};
+        bool m_pointerLockDesired{};   // what the app asked for via SetPointerLocked
+        bool m_pointerLockActive{};    // currently hiding + clipping the cursor
     };
 }

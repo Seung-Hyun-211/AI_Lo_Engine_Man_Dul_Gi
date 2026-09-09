@@ -32,7 +32,7 @@ C++20 / Win32 / DirectX 11 기반 2D 게임 엔진 뼈대. 이 파일은 세션�
 
 9. 서드파티는 `src/vendor/`에 소스 vendor (현재 `ufbx` — FBX 로더, MIT/PD, v0.23.0). `ufbx.c`는 C++로 컴파일, 경고 off. ufbx 타입은 `src/import/ModelImporter.cpp` 안에만 — 밖으로는 엔진 타입(`import::Model` 등)만 나간다. 모델/애니메이션 세부는 `docs/model-animation-research.md`.
 
-모듈별 상세: `docs/engine-overview.md`(지도), `multithreaded_game_engine_architecture.md`(스레드), `ui-architecture.md`, `scene-flow-design.md`(Title/InGame/Settings 씬 상태), `game-settings.md`(설정 카탈로그), `synopsis.md`(게임 시놉시스, 초안), `entity-lifecycle-design.md`(엔티티 식별·생존주기 뼈대), `time-design.md`, `collider-design.md`, `model-animation-research.md`, `animation-design.md`(2D/3D 애니메이션 통합 설계 + 연구 필요 항목), `shader-pipeline.md`(셰이더 로딩), `toon-rendering.md`(셀·아웃라인·크리즈), `lighting.md`(조명), `msaa.md`(AA), `shadows.md`(그림자).
+모듈별 상세: `docs/engine-overview.md`(지도), `multithreaded_game_engine_architecture.md`(스레드), `ui-architecture.md`, `scene-flow-design.md`(Title/InGame/Settings 씬 상태), `game-settings.md`(설정 카탈로그), `synopsis.md`(게임 시놉시스, 초안), `entity-lifecycle-design.md`(엔티티 식별·생존주기 뼈대), `demo-scene.md`(unity_chan 캐릭터 컨트롤러 + 팔로우 카메라 데모), `time-design.md`, `collider-design.md`, `model-animation-research.md`, `animation-design.md`(2D/3D 애니메이션 통합 설계 + 연구 필요 항목), `shader-pipeline.md`(셰이더 로딩), `toon-rendering.md`(셀·아웃라인·크리즈), `lighting.md`(조명), `msaa.md`(AA), `shadows.md`(그림자).
 
 렌더러 코어는 **멀티샘플 씬 타깃**(`m_sceneColorRtv`/`m_sceneDepthDsv`, 최대 8x)에 그리고 프레임 끝에 백버퍼로 resolve한다. 패스는 백버퍼가 아니라 씬 타깃에 그린다. 세부 `docs/msaa.md`.
 
@@ -61,7 +61,7 @@ C++20 / Win32 / DirectX 11 기반 2D 게임 엔진 뼈대. 이 파일은 세션�
 
 ### 다음 후보 (측정/필요 시)
 
-- 3D 파이프라인은 있음: `math`에 `Vec3`/`Mat4`, `MeshPass3D`(depth·원근·Lambert, 내장 큐브·평면), `QuadPass2D`(2D 오버레이), `IRenderPass` 확장 지점. 다음: 파일 메시 로더, 텍스처, 실사용 카메라 조작, `MeshPass3D` back-face culling(현재 `CULL_NONE`).
+- 3D 파이프라인은 있음: `math`에 `Vec3`/`Mat4`, `MeshPass3D`(depth·원근·Lambert, 내장 큐브·평면), `QuadPass2D`(2D 오버레이), `IRenderPass` 확장 지점. FBX 메시·텍스처·CPU 스키닝·팔로우 카메라 조작(`docs/demo-scene.md`)까지 됨. 다음: 파일 메시 로더 일반화, `MeshPass3D` back-face culling(현재 `CULL_NONE`), 애니메이션 루트 모션·크로스페이드.
 - 텍스처 `SpriteDraw` + SpriteBatch(dynamic VB + atlas) — 로드맵 3.
 - 시뮬/렌더 파이프라이닝·더블 버퍼링(현재 매 프레임 `ParallelFor(...).Wait()` 완전 블록).
 - 고정 timestep 물리/애니메이션 잡 (`FixedTimestep`은 준비됨) — 로드맵 5.

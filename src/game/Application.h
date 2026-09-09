@@ -53,6 +53,7 @@ namespace engine::game
         // platform::IWindowEventSink
         void OnKey(int virtualKey, bool down) override;
         void OnMouseMove(math::Vec2 position) override;
+        void OnMouseDelta(math::Vec2 delta) override;
         void OnMouseButton(int button, bool down) override;
         void OnFocusLost() override;
         void OnResize(int width, int height) override;

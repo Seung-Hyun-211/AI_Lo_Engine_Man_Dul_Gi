@@ -114,6 +114,9 @@ sampler.Evaluate(model.skeleton, model.animations[0], timeSeconds, skin);
 - **CPU LBS**: `ModelMeshPass3D::SkinAndUpload` — 서브메시가 스킨드면(`SubMesh::skinned`, `mesh.skinned && !m_clips.empty()`) 정점/헐 버퍼를 `D3D11_USAGE_DYNAMIC`으로 만들고, `bindVertices`(바인드 포즈 원본, 본 인덱스/가중치 포함)를 소스로 매 프레임 `Map(WRITE_DISCARD)` → `math::TransformPoint/TransformDirection`(신규, `Math3D.h`)으로 최대 4본 가중 평균(§2 LBS 수식) → `Unmap`. 셰이더(`cel.hlsl`/`outline.hlsl`)는 **한 글자도 안 바꿨다** — 버퍼에 이미 스킨된 위치/노멀이 들어있으니 기존 파이프라인이 그대로 그린다. 크리즈 라인은 로드 시 한 번 구운 바인드 포즈 그대로 남는다(§6 한계로 기록).
 - **한 인스턴스만 스킨된다**: `ModelMeshPass3D` 는 원래부터 "one FBX model, loaded once"라 서브메시 VB가 인스턴스당이 아니라 패스당 하나다. `scene.modelDraws.front()` 만 스킨 소스로 쓴다 — 지금 데모가 정확히 그 모양(히어로 1개)이라 문제 없지만, 같은 모델을 여러 마리 서로 다른 애니메이션으로 세우려면 §5.2 의 진짜 GPU 스킨 패스(인스턴스별 본 팔레트만 작게 넘기는 구조)로 가야 한다.
 - **왜 GPU 스키닝(§5.2)이 아니라 이 경로인가**: 이 저장소를 다루는 세션 다수가 Windows/D3D11 툴체인이 없는 원격 환경이라 HLSL 변경을 실행해 검증할 방법이 없다. CPU 스킨은 §5.1 표에서도 "프로토타입/소량"엔 적합하다고 이미 적어뒀던 선택지이고, 셰이더를 전혀 안 건드리므로 회귀 위험이 제일 작다. §5.4 "GPU 스킨 전환"은 여전히 유효한 다음 단계.
+- **스케일 일관성 (`ImportOptions::scale`)**: `BuildMesh` 는 정점을 `scale` 로 줄이는데, 스켈레톤 bind translation·`inverseBind` translation·클립 키 translation 도 **같은 `scale` 로** 맞춰야 한다(`BuildSkeleton`/`FillInverseBind`/`BakeClip`, `LoadAnimationClipsFromFile(…, scale)`). 균일 스케일은 강체 변환에서 회전은 그대로, translation 만 `×scale` — bind 포즈는 `inverseBind·bindGlobal = I` 가 유지되고 애니메이션 포즈만 정점과 같은 단위로 나온다. 안 맞추면 애니메이션이 들어가는 순간 포즈가 메시에서 수십 배로 튕겨나간다(2025-09 데모 버그, 수정됨).
+- **강체 부착 서브메시**: Unity-chan 의 `MTH_DEF`/`EYE_DEF`/`EL_DEF`/`BLW_DEF`/`eye_*`/`head_back` 은 스킨 웨이트가 없고 head 노드에 자식으로 매달려 있다. `BuildMesh` 가 스킨 없는 메시의 가장 가까운 조상 본을 `ModelMesh::attachBone` 에 기록하고, `ModelMeshPass3D` 가 그 서브메시를 `SubMesh::rigidBone` 로 표시해 웨이트 없이 그 본의 스킨 매트릭스 하나로 전 정점을 변환한다(`SkinAndUpload`). 부착 본이 다른 스킨 메시에서 쓰여 `inverseBind` 가 채워져 있어야 정확하다. 안 하면 얼굴만 T포즈 위치에 남는다(2025-09 데모 버그, 수정됨).
+- **클립 선두 프레임 트림**: Unity-chan 클립 take 는 `time_begin` 이 실제 모션보다 한 프레임 앞이라 프레임 0 이 바인드(T)포즈 → 루프·상태 전환마다 1프레임 T포즈 팝. `BakeClip` 이 `Skeleton` 인자를 받아 "모든 트랙의 첫 키가 바인드 로컬 TRS 와 일치" 할 때만 선두 키를 버리고 시간·duration 을 재기준한다(정상적으로 rest 에서 시작하는 클립은 건드리지 않음).
 
 ### 5.3 애니메이션 상태 — 설계, 조건부 재생은 구현됨 (§5.3a)
 
@@ -125,11 +128,11 @@ sampler.Evaluate(model.skeleton, model.animations[0], timeSeconds, skin);
 
 ### 5.3a 조건부 클립 재생 — 실제 구현 (`game::CharacterAnimationState`)
 
-`src/game/CharacterAnimationState.h/.cpp` — "조건이 맞으면 다음으로 넘어간다"만 하는 최소 상태 머신. 지금 조건은 "이 클립을 `holdSeconds` 만큼 재생했다"(순수 타이머) 하나뿐이지만, 나중에 실제 게임 신호(속도>0, 접지 여부, 피격 등)로 바꿔도 `ClipIndex()`/`ClipTime()`만 읽는 호출부(`Simulation::StepDemo3D`, `SnapshotBuilder::BuildScene3D`)는 손댈 필요가 없게 짰다 — 조건과 재생 상태를 분리한 게 이 구조의 핵심.
+`src/game/CharacterAnimationState.h/.cpp` — "상태가 바뀌면 그 상태의 클립으로 스냅한다"만 하는 최소 상태 머신. 조건과 재생 상태를 분리한 게 핵심이라, `ClipIndex()`/`ClipTime()`만 읽는 호출부(`SnapshotBuilder::BuildScene3D`, `ModelMeshPass3D`)는 조건이 뭐든 안 건드린다.
 
-- `Simulation` 이 `#if ENGINE_WITH_3D` 블록에 `CharacterAnimationState m_heroAnimation{ render::kUnityChanClips };` 로 소유, `StepDemo3D` 에서 매 고정 스텝 `Tick(fixedDelta)`.
+- **현재 조건은 게임플레이 신호다** (초기 타이머 라운드로빈은 대체됨): `Simulation::StepCharacter3D` 가 접지 여부 + 평면 속도 + Shift 로 `enum class Locomotion{Wait,Walk,Run,Jump}` 를 정해 매 고정 스텝 `Update(dt, loco)` 호출. `Locomotion→클립` 매핑은 `render/r3d/CharacterAnimationClips.h` 의 `kUnityChan{Wait,Walk,Run,Jump}Clip` 인덱스 상수.
 - `Simulation::HeroAnimClipIndex()/HeroAnimClipTime()` (읽기 전용) → `SnapshotBuilder::BuildScene3D` 가 `ModelDraw::animClipIndex/animClipTime` 에 값으로 복사 → 렌더 스레드가 §5.2a 방식으로 스킨.
-- 데모 동작: `kUnityChanClips` 26개를 순서대로, 각 2.5초씩 라운드로빈 — "로테이션으로 돌아가며 재생"이 정확히 이 라운드로빈이다(모델 자체의 Y축 회전 스핀과는 무관 — 그건 `BuildScene3D`의 기존 `RotationY` 연출).
+- 전체 데모 씬(캐릭터 컨트롤러 + 팔로우 카메라 + 조작키)은 [demo-scene.md](demo-scene.md).
 
 ### 5.4 더 뒤 (측정 후)
 

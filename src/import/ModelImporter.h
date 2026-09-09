@@ -51,7 +51,11 @@ namespace engine::import
     // AnimationSampler holds its bind pose for the whole clip. Independent of
     // LoadModelFromFile - does not build meshes/materials/a skeleton of its
     // own. See docs/model-animation-research.md §5.
+    // `scale` must match the ImportOptions::scale used to load `targetSkeleton`
+    // (the model), so the baked clip translations land in the same units as the
+    // skinned vertices - otherwise animated poses explode away from the mesh.
     [[nodiscard]] AnimationImportResult LoadAnimationClipsFromFile(const std::string& path,
                                                                     const Skeleton& targetSkeleton,
-                                                                    float sampleRate = 30.0f);
+                                                                    float sampleRate = 30.0f,
+                                                                    float scale = 1.0f);
 }

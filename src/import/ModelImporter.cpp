@@ -52,12 +52,29 @@ namespace engine::import
 
         // ---- skeleton -------------------------------------------------------
 
-        // Collects every bone node referenced by any mesh's skin, then orders it
-        // so a parent always precedes its children.
+        // Collects the skeleton, then orders it so a parent always precedes its
+        // children. `boneNodeByIndex` ends up parallel to model.skeleton.bones.
+        //
+        // Two sources: every bone node referenced by a mesh's skin, PLUS every
+        // node the scene marks as a bone (`node->bone`). The second source is
+        // what lets a non-skinned mesh that is merely *parented* under a bone
+        // (Unity-chan's face / eye / mouth parts hang off the head bone) resolve
+        // an attachBone in BuildMesh - the skin clusters alone do not name every
+        // bone in the chain up to that mesh's parent.
         void BuildSkeleton(const ufbx_scene* scene, Model& model,
-                           std::unordered_map<const ufbx_node*, int>& boneIndexOf)
+                           std::unordered_map<const ufbx_node*, int>& boneIndexOf,
+                           std::vector<const ufbx_node*>& boneNodeByIndex, float scale)
         {
             std::vector<const ufbx_node*> boneNodes;
+            auto consider = [&](const ufbx_node* node)
+            {
+                if (node != nullptr && boneIndexOf.find(node) == boneIndexOf.end())
+                {
+                    boneIndexOf.emplace(node, -1);   // mark, index assigned below
+                    boneNodes.push_back(node);
+                }
+            };
+
             for (size_t mi = 0; mi < scene->meshes.count; ++mi)
             {
                 const ufbx_mesh* mesh = scene->meshes.data[mi];
@@ -65,16 +82,12 @@ namespace engine::import
                 {
                     const ufbx_skin_deformer* skin = mesh->skin_deformers.data[di];
                     for (size_t ci = 0; ci < skin->clusters.count; ++ci)
-                    {
-                        const ufbx_node* boneNode = skin->clusters.data[ci]->bone_node;
-                        if (boneNode != nullptr && boneIndexOf.find(boneNode) == boneIndexOf.end())
-                        {
-                            boneIndexOf.emplace(boneNode, -1);   // mark, index assigned below
-                            boneNodes.push_back(boneNode);
-                        }
-                    }
+                        consider(skin->clusters.data[ci]->bone_node);
                 }
             }
+            for (size_t ni = 0; ni < scene->nodes.count; ++ni)
+                if (scene->nodes.data[ni]->bone != nullptr) consider(scene->nodes.data[ni]);
+
             if (boneNodes.empty()) return;
 
             // Sort by node depth so parents come first.
@@ -82,10 +95,12 @@ namespace engine::import
                 [](const ufbx_node* a, const ufbx_node* b) { return a->node_depth < b->node_depth; });
 
             model.skeleton.bones.reserve(boneNodes.size());
+            boneNodeByIndex.reserve(boneNodes.size());
             for (const ufbx_node* node : boneNodes)
             {
                 const int index = static_cast<int>(model.skeleton.bones.size());
                 boneIndexOf[node] = index;
+                boneNodeByIndex.push_back(node);
 
                 Bone bone;
                 bone.name = ToStd(node->name);
@@ -98,7 +113,11 @@ namespace engine::import
                     if (it != boneIndexOf.end() && it->second >= 0) { bone.parent = it->second; break; }
                 }
 
-                bone.bindTranslation = ToVec3(node->local_transform.translation);
+                // Same uniform scale the mesh vertices get (BuildMesh): a bone's
+                // local offset scales with the world, so the skeleton and the
+                // clips below stay in the same units as the skinned vertices.
+                // Rotation and (non-uniform) local scale are unaffected.
+                bone.bindTranslation = ToVec3(node->local_transform.translation) * scale;
                 bone.bindRotation = ToQuat(node->local_transform.rotation);
                 bone.bindScale = ToVec3(node->local_transform.scale);
                 model.skeleton.bones.push_back(std::move(bone));
@@ -113,6 +132,20 @@ namespace engine::import
         {
             const ufbx_skin_deformer* skin = mesh->skin_deformers.count > 0 ? mesh->skin_deformers.data[0] : nullptr;
 
+            // A mesh with no skin may still be rigidly parented under a bone
+            // (Unity-chan's face/eye/mouth parts hang off the head bone). Find
+            // the nearest ancestor node that is a skeleton bone so the renderer
+            // can move the whole mesh with that bone.
+            int attachBone = -1;
+            if (skin == nullptr && mesh->instances.count > 0)
+            {
+                for (const ufbx_node* p = mesh->instances.data[0]->parent; p != nullptr; p = p->parent)
+                {
+                    const auto it = boneIndexOf.find(p);
+                    if (it != boneIndexOf.end() && it->second >= 0) { attachBone = it->second; break; }
+                }
+            }
+
             std::vector<uint32_t> triIndices(std::max<size_t>(mesh->max_face_triangles, 1) * 3);
 
             // One ModelMesh per material part (or a single part if unmaterialised).
@@ -124,6 +157,7 @@ namespace engine::import
                 if (dst.name.empty() && mesh->instances.count > 0)
                     dst.name = ToStd(mesh->instances.data[0]->name);   // name lives on the node
                 dst.skinned = skin != nullptr;
+                dst.attachBone = attachBone;
 
                 const ufbx_mesh_part* part = mesh->material_parts.count > 0 ? &mesh->material_parts.data[pi] : nullptr;
                 dst.materialIndex = -1;
@@ -197,7 +231,7 @@ namespace engine::import
         // in the same FBX) and the retargeted path (LoadAnimationClipsFromFile,
         // clip in a separate bones-only FBX).
         AnimationClip BakeClip(const ufbx_anim_stack* stack, const std::vector<const ufbx_node*>& boneNode,
-                               float sampleRate)
+                               const Skeleton& skeleton, float sampleRate, float scale)
         {
             AnimationClip clip;
             const double begin = stack->time_begin;
@@ -222,17 +256,48 @@ namespace engine::import
                     const ufbx_transform xf = ufbx_evaluate_transform(stack->anim, boneNode[b], time);
                     BoneKey key;
                     key.time = static_cast<float>(time - begin);
-                    key.translation = ToVec3(xf.translation);
+                    key.translation = ToVec3(xf.translation) * scale;   // match the skinned vertices' unit
                     key.rotation = ToQuat(xf.rotation);
                     key.scale = ToVec3(xf.scale);
                     track.keys.push_back(key);
                 }
                 clip.tracks.push_back(std::move(track));
             }
+
+            // Unity-chan clip takes declare time_begin one frame before real
+            // content, so key 0 evaluates to the rest (bind) pose and pops a
+            // 1-frame T-pose at every loop and every state change. Drop that
+            // leading frame - but only if every animated bone's first key really
+            // is its bind pose, so a clip that legitimately starts at rest with
+            // its own keyframe there is left alone.
+            auto matchesBind = [&](const BoneTrack& tr)
+            {
+                const Bone& bn = skeleton.bones[static_cast<std::size_t>(tr.boneIndex)];
+                const BoneKey& k = tr.keys.front();
+                return math::Length(k.translation - bn.bindTranslation) < 1e-4f
+                    && std::abs(math::Dot(k.rotation, bn.bindRotation)) > 0.99995f
+                    && math::Length(k.scale - bn.bindScale) < 1e-3f;
+            };
+            if (!clip.tracks.empty() && clip.tracks.front().keys.size() > 2)
+            {
+                bool allBind = true;
+                for (const BoneTrack& tr : clip.tracks)
+                    if (tr.keys.empty() || !matchesBind(tr)) { allBind = false; break; }
+                if (allBind)
+                {
+                    const float shift = clip.tracks.front().keys[1].time;
+                    for (BoneTrack& tr : clip.tracks)
+                    {
+                        tr.keys.erase(tr.keys.begin());
+                        for (BoneKey& k : tr.keys) k.time -= shift;
+                    }
+                    clip.duration -= shift;
+                }
+            }
             return clip;
         }
 
-        void BuildAnimations(const ufbx_scene* scene, Model& model, float sampleRate)
+        void BuildAnimations(const ufbx_scene* scene, Model& model, float sampleRate, float scale)
         {
             if (model.skeleton.Empty()) return;
 
@@ -258,7 +323,7 @@ namespace engine::import
 
             for (size_t si = 0; si < scene->anim_stacks.count; ++si)
             {
-                AnimationClip clip = BakeClip(scene->anim_stacks.data[si], boneNode, sampleRate);
+                AnimationClip clip = BakeClip(scene->anim_stacks.data[si], boneNode, model.skeleton, sampleRate, scale);
                 if (!clip.tracks.empty()) model.animations.push_back(std::move(clip));
             }
         }
@@ -266,8 +331,11 @@ namespace engine::import
         // ---- inverse bind ----------------------------------------------
 
         void FillInverseBind(const ufbx_scene* scene, Model& model,
-                             const std::unordered_map<const ufbx_node*, int>& boneIndexOf)
+                             const std::unordered_map<const ufbx_node*, int>& boneIndexOf,
+                             const std::vector<const ufbx_node*>& boneNodeByIndex, float scale)
         {
+            std::vector<bool> fromCluster(model.skeleton.bones.size(), false);
+
             for (size_t mi = 0; mi < scene->meshes.count; ++mi)
             {
                 const ufbx_mesh* mesh = scene->meshes.data[mi];
@@ -279,9 +347,32 @@ namespace engine::import
                         const ufbx_skin_cluster* cluster = skin->clusters.data[ci];
                         const auto it = cluster->bone_node != nullptr ? boneIndexOf.find(cluster->bone_node) : boneIndexOf.end();
                         if (it != boneIndexOf.end() && it->second >= 0)
-                            model.skeleton.bones[it->second].inverseBind = ToMat4(cluster->geometry_to_bone);
+                        {
+                            // Rebasing a rigid transform into the uniformly
+                            // scaled space only touches its translation (see
+                            // BuildSkeleton) - keeps inverseBind * bindGlobal
+                            // identity so the bind pose is unchanged.
+                            math::Mat4 ib = ToMat4(cluster->geometry_to_bone);
+                            ib.m[12] *= scale; ib.m[13] *= scale; ib.m[14] *= scale;
+                            model.skeleton.bones[it->second].inverseBind = ib;
+                            fromCluster[static_cast<std::size_t>(it->second)] = true;
+                        }
                     }
                 }
+            }
+
+            // Bones that no skin cluster names (the extra parent/attachment bones
+            // seeded from node->bone): a mesh rigidly parented under one needs
+            // inverseBind = inverse(bone bind world). The character meshes share
+            // an identity geometry transform, so this matches what a cluster's
+            // geometry_to_bone would give for the same bone.
+            for (std::size_t b = 0; b < model.skeleton.bones.size(); ++b)
+            {
+                if (fromCluster[b] || boneNodeByIndex[b] == nullptr) continue;
+                const ufbx_matrix inv = ufbx_matrix_invert(&boneNodeByIndex[b]->node_to_world);
+                math::Mat4 ib = ToMat4(inv);
+                ib.m[12] *= scale; ib.m[13] *= scale; ib.m[14] *= scale;
+                model.skeleton.bones[b].inverseBind = ib;
             }
         }
 
@@ -324,14 +415,15 @@ namespace engine::import
             }
 
             std::unordered_map<const ufbx_node*, int> boneIndexOf;
-            BuildSkeleton(scene, model, boneIndexOf);
-            FillInverseBind(scene, model, boneIndexOf);
+            std::vector<const ufbx_node*> boneNodeByIndex;
+            BuildSkeleton(scene, model, boneIndexOf, boneNodeByIndex, options.scale);
+            FillInverseBind(scene, model, boneIndexOf, boneNodeByIndex, options.scale);
 
             for (size_t mi = 0; mi < scene->meshes.count; ++mi)
                 BuildMesh(scene->meshes.data[mi], model, boneIndexOf, options.scale, model);
 
             if (!options.skipAnimation)
-                BuildAnimations(scene, model, options.animationSampleRate);
+                BuildAnimations(scene, model, options.animationSampleRate, options.scale);
 
             return result;
         }
@@ -371,7 +463,7 @@ namespace engine::import
     }
 
     AnimationImportResult LoadAnimationClipsFromFile(const std::string& path, const Skeleton& targetSkeleton,
-                                                      float sampleRate)
+                                                      float sampleRate, float scale)
     {
         ufbx_load_opts opts{};
         opts.target_axes = ufbx_axes_left_handed_y_up;
@@ -391,7 +483,7 @@ namespace engine::import
         result.ok = true;
         for (size_t si = 0; si < scene->anim_stacks.count; ++si)
         {
-            AnimationClip clip = BakeClip(scene->anim_stacks.data[si], boneNode, sampleRate);
+            AnimationClip clip = BakeClip(scene->anim_stacks.data[si], boneNode, targetSkeleton, sampleRate, scale);
             if (!clip.tracks.empty()) result.clips.push_back(std::move(clip));
         }
         ufbx_free_scene(scene);

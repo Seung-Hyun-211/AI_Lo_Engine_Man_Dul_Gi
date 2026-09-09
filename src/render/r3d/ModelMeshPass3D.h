@@ -64,6 +64,10 @@ namespace engine::render
             // these bind-pose sources; when false they are IMMUTABLE and never
             // touched again after LoadModel, exactly as before skinning existed.
             bool skinned{ false };
+            // >= 0 for a rigidly parented, non-weighted submesh (Unity-chan
+            // face/eyes): every vertex is transformed by this one bone's matrix
+            // instead of a per-vertex weight blend. -1 = normal weighted skin.
+            int rigidBone{ -1 };
             std::vector<import::ModelVertex> bindVertices;     // bind pose; source for the cel pass
             std::vector<math::Vec3> bindSmoothNormals;         // parallel to bindVertices; source for the hull pass
         };

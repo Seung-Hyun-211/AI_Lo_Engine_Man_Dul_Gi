@@ -29,6 +29,16 @@ namespace engine::platform
             rectangle.right - rectangle.left, rectangle.bottom - rectangle.top,
             nullptr, nullptr, instance, this);
         if (m_window == nullptr) throw std::runtime_error("CreateWindowExW failed");
+
+        // Raw mouse input: the source of relative motion for mouse-look. It is
+        // always registered; deltas are only forwarded to the sink while the
+        // pointer is locked (see HandleMessage WM_INPUT).
+        RAWINPUTDEVICE mouse{};
+        mouse.usUsagePage = 0x01;   // generic desktop controls
+        mouse.usUsage = 0x02;       // mouse
+        mouse.dwFlags = 0;
+        mouse.hwndTarget = m_window;
+        RegisterRawInputDevices(&mouse, 1, sizeof(mouse));
     }
 
     Win32Window::~Win32Window()
@@ -63,6 +73,41 @@ namespace engine::platform
     void Win32Window::RequestClose()
     {
         DestroyWindow(m_window);
+    }
+
+    void Win32Window::SetPointerLocked(bool locked)
+    {
+        m_pointerLockDesired = locked;
+        ApplyPointerLock();
+    }
+
+    void Win32Window::ApplyPointerLock()
+    {
+        // Only actually grab the cursor while we are the foreground window, so
+        // Alt+Tab / clicking another app frees the mouse; refocusing re-grabs it.
+        const bool want = m_pointerLockDesired && GetForegroundWindow() == m_window;
+        if (want == m_pointerLockActive) return;
+        m_pointerLockActive = want;
+
+        if (want)
+        {
+            while (ShowCursor(FALSE) >= 0) {}   // hide (ref-counted)
+
+            RECT client{};
+            GetClientRect(m_window, &client);
+            POINT topLeft{ client.left, client.top };
+            POINT bottomRight{ client.right, client.bottom };
+            ClientToScreen(m_window, &topLeft);
+            ClientToScreen(m_window, &bottomRight);
+            SetCursorPos((topLeft.x + bottomRight.x) / 2, (topLeft.y + bottomRight.y) / 2);
+            const RECT screenRect{ topLeft.x, topLeft.y, bottomRight.x, bottomRight.y };
+            ClipCursor(&screenRect);
+        }
+        else
+        {
+            ClipCursor(nullptr);
+            while (ShowCursor(TRUE) < 0) {}
+        }
     }
 
     bool Win32Window::PumpMessages()
@@ -107,8 +152,33 @@ namespace engine::platform
             return 0;
 
         case WM_KILLFOCUS:
+            ApplyPointerLock();   // window no longer foreground -> release the cursor
             if (m_sink != nullptr) m_sink->OnFocusLost();
             return 0;
+
+        case WM_SETFOCUS:
+            ApplyPointerLock();   // re-grab if the app still wants the pointer locked
+            return 0;
+
+        case WM_INPUT:
+        {
+            if (m_sink != nullptr && m_pointerLockActive)
+            {
+                RAWINPUT raw{};
+                UINT size = sizeof(raw);
+                if (GetRawInputData(reinterpret_cast<HRAWINPUT>(lParam), RID_INPUT, &raw, &size,
+                                    sizeof(RAWINPUTHEADER)) != static_cast<UINT>(-1)
+                    && raw.header.dwType == RIM_TYPEMOUSE
+                    && (raw.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE) == 0)
+                {
+                    const LONG dx = raw.data.mouse.lLastX;
+                    const LONG dy = raw.data.mouse.lLastY;
+                    if (dx != 0 || dy != 0)
+                        m_sink->OnMouseDelta({ static_cast<float>(dx), static_cast<float>(dy) });
+                }
+            }
+            return DefWindowProcW(window, message, wParam, lParam);   // required for WM_INPUT cleanup
+        }
 
         case WM_MOUSEMOVE:
             if (m_sink != nullptr)
@@ -139,6 +209,11 @@ namespace engine::platform
             {
                 m_width = LOWORD(lParam);
                 m_height = HIWORD(lParam);
+                if (m_pointerLockActive)   // re-fit the clip rect to the new client area
+                {
+                    m_pointerLockActive = false;
+                    ApplyPointerLock();
+                }
                 if (m_sink != nullptr) m_sink->OnResize(m_width, m_height);
             }
             return 0;

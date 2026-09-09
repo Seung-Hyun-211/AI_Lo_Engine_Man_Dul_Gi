@@ -46,4 +46,13 @@ namespace engine::render
         { "arpose1",   "unitychan_ARpose1.fbx",    2.5f },
         { "arpose2",   "unitychan_ARpose2.fbx",    2.5f },
     } };
+
+    // Locomotion clip picks for the demo character controller: indices into
+    // kUnityChanClips. game::CharacterAnimationState maps its Locomotion enum
+    // through these, so "which clip is 'walk'" stays here in the asset manifest
+    // and not in gameplay code. See docs/demo-scene.md.
+    inline constexpr int kUnityChanWaitClip = 0;    // wait00
+    inline constexpr int kUnityChanWalkClip = 5;    // walk_f  (unitychan_WALK00_F)
+    inline constexpr int kUnityChanRunClip  = 9;    // run_f   (unitychan_RUN00_F)
+    inline constexpr int kUnityChanJumpClip = 12;   // jump00  (unitychan_JUMP00)
 }

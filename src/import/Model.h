@@ -32,6 +32,11 @@ namespace engine::import
         std::vector<std::uint32_t> indices;   // triangle list
         int materialIndex{ -1 };
         bool skinned{ false };
+        // For a non-skinned mesh rigidly parented under a bone node (Unity-chan's
+        // face/eye/mouth parts), the index into Skeleton::bones it hangs off, or
+        // -1. The renderer moves such a mesh with that one bone. Ignored when
+        // `skinned` is true (skin weights drive it instead).
+        int attachBone{ -1 };
     };
 
     struct ModelMaterial

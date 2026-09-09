@@ -57,8 +57,18 @@ namespace engine::game
                 // The world only advances in-game, and not while Settings (or
                 // any future modal) sits on top of it - both read as "paused".
                 if (m_state == GameState::InGame && !m_ui.HasOverlay())
+                {
+#if defined(ENGINE_WITH_3D)
+                    // Mouse-look once per frame (independent of the fixed-step
+                    // count) so it never double-applies or drops a delta. Jump
+                    // is an edge, so latch it the same way - a press on a
+                    // zero-step frame must survive to the next step.
+                    m_simulation.UpdateCameraLook(intent.look);
+                    if (m_input.KeyPressed(VK_SPACE)) m_simulation.QueueJump();
+#endif
                     for (int step = 0; step < steps; ++step)
                         m_simulation.Step(m_timestep.Step(), intent);
+                }
 
                 // Submit every frame even with zero sim steps: the UI overlay may
                 // have changed and still needs to be redrawn.
@@ -79,6 +89,7 @@ namespace engine::game
     void Application::EnterTitle()
     {
         m_state = GameState::Title;
+        m_window.SetPointerLocked(false);
         m_ui.ClearOverlay();
         m_ui.SetScreen(BuildTitleScreen(
             [this] { EnterInGame(); },
@@ -91,10 +102,12 @@ namespace engine::game
         m_state = GameState::InGame;
         m_ui.ClearOverlay();
         m_ui.SetScreen(BuildInGameHud([this] { OpenSettings(); }));
+        m_window.SetPointerLocked(true);   // mouse-look / centre-locked cursor
     }
 
     void Application::OpenSettings()
     {
+        m_window.SetPointerLocked(false);   // give the cursor back for the menu
         m_ui.SetOverlay(BuildSettingsScreen(m_settings, SettingsScreenActions{
             .onVsyncToggled = [this] { ApplyVsync(); },
             .onResolutionChanged = [this] { ApplyResolution(); },
@@ -106,6 +119,7 @@ namespace engine::game
     {
         m_ui.ClearOverlay();
         m_settings.Save(core::kSettingsFilePath);
+        if (m_state == GameState::InGame) m_window.SetPointerLocked(true);
     }
 
     void Application::ApplyVsync()
@@ -122,10 +136,24 @@ namespace engine::game
 
     PlayerIntent Application::BuildPlayerIntent() const
     {
+        // WASD (arrow keys aliased): x = strafe right, y = forward. The
+        // simulation rotates this by the camera yaw before moving the character.
+        const bool right = m_input.KeyDown('D') || m_input.KeyDown(VK_RIGHT);
+        const bool left = m_input.KeyDown('A') || m_input.KeyDown(VK_LEFT);
+        const bool forward = m_input.KeyDown('W') || m_input.KeyDown(VK_UP);
+        const bool back = m_input.KeyDown('S') || m_input.KeyDown(VK_DOWN);
+
         PlayerIntent intent{};
-        intent.move.x = (m_input.KeyDown(VK_RIGHT) ? 1.0f : 0.0f) - (m_input.KeyDown(VK_LEFT) ? 1.0f : 0.0f);
-        intent.move.y = (m_input.KeyDown(VK_DOWN) ? 1.0f : 0.0f) - (m_input.KeyDown(VK_UP) ? 1.0f : 0.0f);
+        intent.move.x = (right ? 1.0f : 0.0f) - (left ? 1.0f : 0.0f);
+        intent.move.y = (forward ? 1.0f : 0.0f) - (back ? 1.0f : 0.0f);
+        intent.look = m_input.MouseDelta();
+        intent.run = m_input.KeyDown(VK_SHIFT);
         return intent;
+    }
+
+    void Application::OnMouseDelta(math::Vec2 delta)
+    {
+        m_input.OnMouseDelta(delta);
     }
 
     void Application::OnKey(int virtualKey, bool down)

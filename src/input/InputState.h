@@ -32,6 +32,7 @@ namespace engine::input
             m_releasedKeys.reset();
             m_pressedButtons.fill(false);
             m_releasedButtons.fill(false);
+            m_mouseDelta = {};
         }
 
         void OnKey(int virtualKey, bool down)
@@ -43,6 +44,10 @@ namespace engine::input
         }
 
         void OnMouseMove(math::Vec2 position) { m_mouse = position; }
+
+        // Relative motion (raw input) accumulated across the frame; used for
+        // mouse-look while the pointer is locked. Cleared by BeginFrame().
+        void OnMouseDelta(math::Vec2 delta) { m_mouseDelta.x += delta.x; m_mouseDelta.y += delta.y; }
 
         void OnMouseButton(int button, bool down)
         {
@@ -58,6 +63,7 @@ namespace engine::input
         {
             m_keys.reset();
             m_buttons.fill(false);
+            m_mouseDelta = {};
         }
 
         [[nodiscard]] bool KeyDown(int virtualKey) const
@@ -74,6 +80,7 @@ namespace engine::input
         }
 
         [[nodiscard]] math::Vec2 MousePosition() const { return m_mouse; }
+        [[nodiscard]] math::Vec2 MouseDelta() const { return m_mouseDelta; }
         [[nodiscard]] bool MouseDown(int button) const
         {
             return button >= 0 && button < kButtonCount && m_buttons[button];
@@ -97,5 +104,6 @@ namespace engine::input
         std::array<bool, kButtonCount> m_releasedButtons{};
 
         math::Vec2 m_mouse{};
+        math::Vec2 m_mouseDelta{};
     };
 }

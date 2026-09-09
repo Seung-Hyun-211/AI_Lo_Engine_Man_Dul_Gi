@@ -16,18 +16,30 @@ namespace engine::game
 #if defined(ENGINE_WITH_3D)
         constexpr float kPi = 3.14159265358979323846f;
 
-        render::CameraView BuildCamera(float elapsed, int viewportWidth, int viewportHeight)
+        // Unity-chan's mesh faces +Z in its local space, same as the engine's
+        // "forward"; if the character ever runs backwards, flip this to kPi.
+        constexpr float kModelYawOffset = 0.0f;
+
+        // Third-person orbit camera: sits behind + above the character at the
+        // yaw/pitch the mouse drives (Simulation::UpdateCameraLook) and always
+        // looks at a point near the character's chest.
+        render::CameraView BuildCamera(const Simulation& simulation, int viewportWidth, int viewportHeight)
         {
             const float aspect = viewportHeight > 0
                 ? static_cast<float>(viewportWidth) / static_cast<float>(viewportHeight)
                 : 1.0f;
 
-            const float angle = elapsed * 0.4f;   // slow orbit, framed on the model at the origin
-            const math::Vec3 eye{ std::sin(angle) * 3.6f, 1.7f, -std::cos(angle) * 3.6f };
-            const math::Vec3 target{ 0.0f, 0.9f, 0.0f };
+            const float yaw = simulation.CameraYaw();
+            const float pitch = simulation.CameraPitch();
+            const float cp = std::cos(pitch), sp = std::sin(pitch);
+            // Unit vector from the focus point toward where the camera looks.
+            const math::Vec3 forward{ cp * std::sin(yaw), sp, cp * std::cos(yaw) };
+
+            const math::Vec3 focus = simulation.CharacterPosition() + math::Vec3{ 0.0f, 1.3f, 0.0f };
+            const math::Vec3 eye = focus - forward * 3.6f;
 
             render::CameraView camera{};
-            camera.view = math::LookAtLH(eye, target, { 0.0f, 1.0f, 0.0f });
+            camera.view = math::LookAtLH(eye, focus, { 0.0f, 1.0f, 0.0f });
             camera.projection = math::PerspectiveFovLH(kPi / 3.0f, aspect, 0.05f, 100.0f);
             return camera;
         }
@@ -71,7 +83,8 @@ namespace engine::game
         void BuildScene3D(render::Scene3D& scene, const Simulation& simulation)
         {
             render::ModelDraw model{};
-            model.world = math::RotationY(simulation.ElapsedTime() * 0.3f);
+            model.world = math::RotationY(simulation.CharacterFacingYaw() + kModelYawOffset)
+                        * math::Translation(simulation.CharacterPosition());
             model.animClipIndex = simulation.HeroAnimClipIndex();
             model.animClipTime = simulation.HeroAnimClipTime();
             scene.modelDraws.push_back(model);
@@ -108,7 +121,7 @@ namespace engine::game
         snapshot.frameNumber = frameNumber;
 
 #if defined(ENGINE_WITH_3D)
-        snapshot.scene3d.camera = BuildCamera(simulation.ElapsedTime(), viewportWidth, viewportHeight);
+        snapshot.scene3d.camera = BuildCamera(simulation, viewportWidth, viewportHeight);
         snapshot.scene3d.lighting = BuildLighting(simulation.ElapsedTime());
         BuildScene3D(snapshot.scene3d, simulation);
 #else

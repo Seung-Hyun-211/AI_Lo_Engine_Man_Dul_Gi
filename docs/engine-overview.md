@@ -110,7 +110,7 @@ render(Dx11) ─▶ core(NonCopyable), D3D11     상위 레이어를 도로 참�
 
 뼈대가 살아있음을 보이기 위한 최소 콘텐츠만 있다. 실제 게임 로직은 없다.
 
-- **3D 씬:** 화면 중앙에 FBX 모델(셀 셰이딩 + 인버티드 헐 아웃라인 + 크리즈 라인 + TGA, 천천히 회전) + 바닥 + 크기별 박스 7개. key 라이트가 좌우로 스윕하며 **캐스트 그림자**(2048² 셰도우맵, PCF)를 드리운다. 세부: [toon-rendering.md](toon-rendering.md) · [lighting.md](lighting.md) · [shadows.md](shadows.md).
+- **3D 씬:** 조작 가능한 unity_chan 캐릭터(셀 셰이딩 + 인버티드 헐 아웃라인 + 크리즈 라인 + TGA) — **WASD 이동 / Space 점프 / Shift 달리기 / 마우스 궤도 카메라**, wait·walk·run·jump 애니메이션 전환. 카메라 yaw 가 WASD 이동 방향을 회전시킨다. 바닥 + 크기별 박스 7개는 그림자 받을 정적 소품. key 라이트가 좌우로 스윕하며 **캐스트 그림자**(2048² 셰도우맵, PCF). 세부·튜닝: [demo-scene.md](demo-scene.md) · [toon-rendering.md](toon-rendering.md) · [lighting.md](lighting.md) · [shadows.md](shadows.md).
 - **비활성:** 기존 3D 큐브/충돌 데모, 2D 오버레이 데모(플레이어·장애물·파티클). `SnapshotBuilder` 의 `kBoxes` / `kDrawLegacy2D` 로 되돌릴 수 있음. UI(패널·버튼)는 유지.
 - **2D 오버레이 (QuadPass2D):** 방향키로 움직이는 사각형 + 고정 장애물 박스 3개. `CollisionWorld2D`(AABB)로 겹침 감지 → 겹치면 플레이어가 주황색(위치 보정은 없음).
 - 20,000개 파티클을 매 고정 스텝 `ParallelFor`로 advect — **JobSystem 처리량 스텁**. 앞 2,048개만 2D 점으로 그린다.

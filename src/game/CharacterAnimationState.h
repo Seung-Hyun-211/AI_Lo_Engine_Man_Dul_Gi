@@ -5,34 +5,47 @@
 
 #include <span>
 
-// Condition-based animation playback, decoupled from what the condition is.
-// See docs/model-animation-research.md §5.3, docs/animation-design.md §1/§5.
+// Gameplay-driven animation playback, decoupled from what drives it.
+// See docs/demo-scene.md, docs/model-animation-research.md §5.3,
+// docs/animation-design.md §1/§5.
 namespace engine::game
 {
-    // Picks which clip index (into a CharacterAnimationClipInfo table) a
-    // character plays and for how long, advancing round-robin whenever
-    // Tick()'s condition holds. The demo condition is "held this clip's
-    // holdSeconds" (see CharacterAnimationClips.h); swap the body of Tick()
-    // for a real gameplay signal (speed > 0, grounded, took damage, ...)
-    // later without touching call sites - they only ever read
-    // ClipIndex()/ClipTime(). Runs on the main/sim thread inside
-    // Simulation::Step (fixed timestep, docs/time-design.md); only the
-    // resulting (clipIndex, clipTime) values cross into the RenderSnapshot.
+    // The locomotion states the demo character can be in. Simulation decides
+    // which one holds each fixed step (grounded + planar speed + run key) and
+    // CharacterAnimationState turns that into a (clipIndex, clipTime) pair -
+    // the only thing that crosses into the RenderSnapshot.
+    enum class Locomotion
+    {
+        Wait,
+        Walk,
+        Run,
+        Jump,
+    };
+
+    // Minimal animation state machine: on a state change it snaps to that
+    // state's clip and restarts the clip clock; otherwise it just advances the
+    // clock (AnimationSampler loops it over the clip duration). No crossfade /
+    // blending yet - that is still design-only (docs/animation-design.md §5).
+    // Runs on the sim thread inside Simulation::Step (fixed timestep).
     class CharacterAnimationState final : private core::NonCopyable
     {
     public:
         explicit CharacterAnimationState(std::span<const render::CharacterAnimationClipInfo> clips)
             : m_clips(clips) {}
 
-        void Tick(float fixedDeltaSeconds);
+        // desired: this fixed step's locomotion state. dt: the fixed step.
+        void Update(float fixedDeltaSeconds, Locomotion desired);
 
         [[nodiscard]] int ClipIndex() const { return m_clipIndex; }
         [[nodiscard]] float ClipTime() const { return m_clipTime; }
+        [[nodiscard]] Locomotion Current() const { return m_current; }
 
     private:
+        [[nodiscard]] static int ClipFor(Locomotion state);
+
         std::span<const render::CharacterAnimationClipInfo> m_clips;   // non-owning; caller's table outlives this
-        int m_clipIndex{ 0 };
+        Locomotion m_current{ Locomotion::Wait };
+        int m_clipIndex{ render::kUnityChanWaitClip };
         float m_clipTime{ 0.0f };
-        float m_holdElapsed{ 0.0f };
     };
 }

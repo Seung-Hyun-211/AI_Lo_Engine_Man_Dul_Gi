@@ -183,7 +183,8 @@ namespace engine::render
             for (const CharacterAnimationClipInfo& entry : kUnityChanClips)
             {
                 import::AnimationImportResult clipResult =
-                    import::LoadAnimationClipsFromFile(m_resolvedDir + "animation/" + entry.fileName, m_skeleton, 30.0f);
+                    import::LoadAnimationClipsFromFile(m_resolvedDir + "animation/" + entry.fileName, m_skeleton,
+                                                       30.0f, options.scale);   // same unit as the skinned mesh
                 if (clipResult.ok)
                 {
                     m_clips.push_back(std::move(clipResult.clips.front()));
@@ -242,10 +243,23 @@ namespace engine::render
 
             // Skinned submeshes get DYNAMIC buffers re-filled every frame by
             // SkinAndUpload() from the bind-pose data kept below; a mesh with no
-            // skin (or a model with no usable clips at all) keeps the original
-            // IMMUTABLE, load-once path untouched.
-            sub.skinned = mesh.skinned && !m_clips.empty();
+            // skin and no bone attachment (or a model with no usable clips at
+            // all) keeps the original IMMUTABLE, load-once path untouched.
+            // `rigidBone >= 0` is a non-weighted mesh that still has to follow
+            // one bone (Unity-chan's face parts hang off the head bone).
+            sub.rigidBone = mesh.skinned ? -1 : mesh.attachBone;
+            sub.skinned = (mesh.skinned || sub.rigidBone >= 0) && !m_clips.empty();
             if (sub.skinned) sub.bindVertices = mesh.vertices;
+
+            // Diagnostic: any submesh printed here with animated=0 keeps its
+            // IMMUTABLE bind-pose buffers and shows (surface + black outline
+            // shell) frozen at the T-pose. If a face/eye part lands here its
+            // FBX node is not parented under a skin-cluster bone - see
+            // BuildMesh's attachBone search in ModelImporter.cpp.
+            OutputDebugStringA(("ModelMeshPass3D:   submesh '" + mesh.name
+                + "' skinned=" + std::to_string(mesh.skinned ? 1 : 0)
+                + " attachBone=" + std::to_string(mesh.attachBone)
+                + " animated=" + std::to_string(sub.skinned ? 1 : 0) + "\n").c_str());
 
             D3D11_BUFFER_DESC vertexDesc{};
             vertexDesc.ByteWidth = static_cast<UINT>(sizeof(import::ModelVertex) * mesh.vertices.size());
@@ -352,10 +366,18 @@ namespace engine::render
         auto* celDst = celOk ? static_cast<import::ModelVertex*>(celMapped.pData) : nullptr;
         auto* hullDst = hullOk ? static_cast<float*>(hullMapped.pData) : nullptr;
 
+        // Rigidly parented mesh: one bone matrix for every vertex, no weights.
+        const bool rigid = sub.rigidBone >= 0
+            && static_cast<std::size_t>(sub.rigidBone) < m_boneScratch.size();
+        const math::Mat4 rigidMat = rigid ? m_boneScratch[static_cast<std::size_t>(sub.rigidBone)]
+                                          : math::Mat4::Identity();
+
         for (std::size_t i = 0; i < sub.bindVertices.size(); ++i)
         {
             const import::ModelVertex& src = sub.bindVertices[i];
-            const math::Mat4 blend = BlendBoneMatrices(src.boneIndices, src.boneWeights, m_boneScratch);
+            const math::Mat4 blend = rigid
+                ? rigidMat
+                : BlendBoneMatrices(src.boneIndices, src.boneWeights, m_boneScratch);
             const math::Vec3 pos = math::TransformPoint(src.position, blend);
 
             if (celDst != nullptr)

@@ -13,10 +13,6 @@ namespace engine::game
         constexpr physics::CollisionLayer kLayerObstacle = 2u;
 
 #if defined(ENGINE_WITH_3D)
-        constexpr std::uint64_t kHeroUser = 1;
-        constexpr std::uint64_t kSatelliteUserBase = 10;
-        constexpr physics::CollisionLayer kLayerHero = 1u;
-        constexpr physics::CollisionLayer kLayerSatellite = 2u;
         constexpr float kPi = 3.14159265358979323846f;
 #endif
     }
@@ -93,7 +89,7 @@ namespace engine::game
 
         StepCollision2D();
 #if defined(ENGINE_WITH_3D)
-        StepDemo3D(fixedDelta);
+        StepCharacter3D(fixedDelta, intent);
 #endif
     }
 
@@ -131,61 +127,76 @@ namespace engine::game
     }
 
 #if defined(ENGINE_WITH_3D)
-    void Simulation::StepDemo3D(float fixedDelta)
+    void Simulation::UpdateCameraLook(math::Vec2 mouseDelta)
     {
-        // Condition-based clip playback (docs/model-animation-research.md §5.3):
-        // round-robins through every Unity-chan clip, holding each for its
-        // table entry's holdSeconds. Only (clipIndex, clipTime) - small values
-        // - cross into the snapshot; ModelMeshPass3D owns the actual clip data
-        // and does the pose evaluation + skinning (see that pass).
-        m_heroAnimation.Tick(fixedDelta);
+        m_cameraYaw += mouseDelta.x * kMouseSensitivity;
+        while (m_cameraYaw > kPi) m_cameraYaw -= 2.0f * kPi;
+        while (m_cameraYaw < -kPi) m_cameraYaw += 2.0f * kPi;
+        // Mouse down (positive y) tilts the view down; not inverted.
+        m_cameraPitch = math::Clamp(m_cameraPitch - mouseDelta.y * kMouseSensitivity,
+                                    kCamPitchMin, kCamPitchMax);
+    }
 
-        // Satellites orbit the hero cube while their radius pulses in and out, so
-        // they periodically enter and leave contact.
-        for (int i = 0; i < kSatelliteCount; ++i)
+    void Simulation::StepCharacter3D(float fixedDelta, const PlayerIntent& intent)
+    {
+        // Move relative to where the camera is looking: the camera's yaw rotates
+        // the WASD axes, so "W" is always "into the screen" regardless of orbit.
+        const float cy = std::cos(m_cameraYaw), sy = std::sin(m_cameraYaw);
+        const math::Vec3 camForward{ sy, 0.0f, cy };   // ground-plane forward of the camera
+        const math::Vec3 camRight{ cy, 0.0f, -sy };
+
+        math::Vec3 wish = camForward * intent.move.y + camRight * intent.move.x;
+        const float wishLen = math::Length(wish);
+        const bool moving = wishLen > 1e-3f;
+        if (moving) wish = wish * (1.0f / wishLen);
+
+        const float speed = intent.run ? kCharRunSpeed : kCharWalkSpeed;
+        if (moving)
         {
-            const float phase = m_elapsed * 0.8f + static_cast<float>(i) * kPi;
-            const float radius = 0.85f + 0.55f * std::sin(m_elapsed * 1.3f + static_cast<float>(i) * 2.0f);
-            m_satelliteCenters[i] = { std::cos(phase) * radius, m_heroCenter.y, std::sin(phase) * radius };
+            m_charPos = m_charPos + wish * (speed * fixedDelta);
+
+            // Turn toward the movement direction along the shortest arc.
+            const float targetYaw = std::atan2(wish.x, wish.z);
+            float delta = targetYaw - m_charFacingYaw;
+            while (delta > kPi) delta -= 2.0f * kPi;
+            while (delta < -kPi) delta += 2.0f * kPi;
+            const float maxTurn = kCharTurnRate * fixedDelta;
+            m_charFacingYaw += math::Clamp(delta, -maxTurn, maxTurn);
         }
 
-        m_collision3d.Clear();
-
-        physics::Collider3D hero{};
-        hero.shape = physics::Collider3D::Shape::Box;
-        hero.center = m_heroCenter;
-        hero.halfExtents = { 0.5f, 0.5f, 0.5f };   // unit cube, spin ignored (static AABB approx)
-        hero.layer = kLayerHero;
-        hero.mask = kLayerSatellite;
-        hero.user = kHeroUser;
-        m_collision3d.Add(hero);
-
-        for (int i = 0; i < kSatelliteCount; ++i)
+        // Jump + gravity against the ground plane y = 0. The request is latched
+        // (QueueJump) and consumed here regardless of grounded state so it never
+        // carries over into a later step.
+        if (m_jumpQueued && m_charGrounded)
         {
-            physics::Collider3D satellite{};
-            satellite.shape = physics::Collider3D::Shape::Sphere;
-            satellite.center = m_satelliteCenters[i];
-            satellite.radius = 0.3f;
-            satellite.layer = kLayerSatellite;
-            satellite.mask = kLayerHero;
-            satellite.user = kSatelliteUserBase + static_cast<std::uint64_t>(i);
-            m_collision3d.Add(satellite);
+            m_charVerticalVel = kCharJumpSpeed;
+            m_charGrounded = false;
         }
-
-        m_collision3d.Step();
-
-        m_satelliteHitsHero.fill(false);
-        for (const physics::Contact& contact : m_collision3d.Contacts())
+        m_jumpQueued = false;
+        if (!m_charGrounded)
         {
-            for (std::uint64_t user : { contact.userA, contact.userB })
+            m_charVerticalVel -= kCharGravity * fixedDelta;
+            m_charPos.y += m_charVerticalVel * fixedDelta;
+            if (m_charPos.y <= 0.0f)
             {
-                if (user >= kSatelliteUserBase &&
-                    user < kSatelliteUserBase + static_cast<std::uint64_t>(kSatelliteCount))
-                {
-                    m_satelliteHitsHero[user - kSatelliteUserBase] = true;
-                }
+                m_charPos.y = 0.0f;
+                m_charVerticalVel = 0.0f;
+                m_charGrounded = true;
             }
         }
+
+        m_charPos.x = math::Clamp(m_charPos.x, -kCharHalfRange, kCharHalfRange);
+        m_charPos.z = math::Clamp(m_charPos.z, -kCharHalfRange, kCharHalfRange);
+
+        // Locomotion -> which clip the animation state plays. Only
+        // (clipIndex, clipTime) crosses into the snapshot; ModelMeshPass3D owns
+        // the clip data and does the pose evaluation + CPU skinning.
+        Locomotion loco;
+        if (!m_charGrounded)  loco = Locomotion::Jump;
+        else if (!moving)     loco = Locomotion::Wait;
+        else if (intent.run) loco = Locomotion::Run;
+        else                 loco = Locomotion::Walk;
+        m_heroAnimation.Update(fixedDelta, loco);
     }
 #endif
 }

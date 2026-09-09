@@ -12,7 +12,6 @@
 
 #if defined(ENGINE_WITH_3D)
 #include "game/CharacterAnimationState.h"
-#include "physics/p3d/CollisionWorld3D.h"
 #endif
 
 namespace engine::game
@@ -21,7 +20,11 @@ namespace engine::game
     // input. Decouples the simulation from InputState.
     struct PlayerIntent
     {
-        math::Vec2 move{};   // each axis in [-1, 1]
+        math::Vec2 move{};   // x = strafe (+ = right), y = forward (+ = forward), each [-1, 1]
+        math::Vec2 look{};   // mouse delta in pixels this frame (x = yaw, y = pitch)
+        bool run{ false };   // run modifier held (Shift)
+        // Jump is not here: it is an edge that must not be lost on a frame that
+        // runs zero fixed steps, so it is latched via Simulation::QueueJump().
     };
 
     // Demo particle: advects at constant velocity, wraps at world edges.
@@ -37,16 +40,39 @@ namespace engine::game
     class Simulation final : private core::NonCopyable
     {
     public:
-        static constexpr float kPlayerSpeed = 300.0f;   // pixels / second
+        static constexpr float kPlayerSpeed = 300.0f;   // pixels / second (legacy 2D overlay)
         static constexpr float kPlayerSize = 64.0f;
         static constexpr std::size_t kParticleCount = 20'000;
         static constexpr int kObstacleCount = 3;
-        static constexpr int kSatelliteCount = 2;
+
+#if defined(ENGINE_WITH_3D)
+        // Demo character controller (docs/demo-scene.md). Metres / seconds.
+        static constexpr float kCharWalkSpeed = 2.2f;
+        static constexpr float kCharRunSpeed = 5.2f;
+        static constexpr float kCharJumpSpeed = 4.6f;   // initial upward velocity
+        static constexpr float kCharGravity = 14.0f;
+        static constexpr float kCharTurnRate = 12.0f;   // rad/s toward the move direction
+        static constexpr float kCharHalfRange = 7.5f;   // stays on the ground slab
+        static constexpr float kMouseSensitivity = 0.0022f;   // rad per pixel of mouse motion
+        static constexpr float kCamPitchMin = -1.15f;   // look down
+        static constexpr float kCamPitchMax = 0.35f;    // look up
+#endif
 
         Simulation(core::JobSystem& jobs, int worldWidth, int worldHeight);
 
         void SetWorldSize(int width, int height);
         void Step(float fixedDelta, const PlayerIntent& intent);
+
+#if defined(ENGINE_WITH_3D)
+        // Mouse-look for the orbit camera. Called once per frame (not per fixed
+        // step) so a frame with 0 or >1 sim steps still turns the camera exactly
+        // once by the accumulated mouse delta.
+        void UpdateCameraLook(math::Vec2 mouseDelta);
+
+        // Latches a jump request until the next fixed step consumes it, so a
+        // Space press on a frame that runs zero steps is not dropped.
+        void QueueJump() { m_jumpQueued = true; }
+#endif
 
         // --- reads for the snapshot builder ---
         [[nodiscard]] float ElapsedTime() const { return m_elapsed; }
@@ -56,10 +82,10 @@ namespace engine::game
         [[nodiscard]] const std::vector<Particle>& Particles() const { return m_particles; }
 
 #if defined(ENGINE_WITH_3D)
-        [[nodiscard]] math::Vec3 HeroCenter() const { return m_heroCenter; }
-        [[nodiscard]] float HeroSpin() const { return m_elapsed; }
-        [[nodiscard]] const std::array<math::Vec3, kSatelliteCount>& SatelliteCenters() const { return m_satelliteCenters; }
-        [[nodiscard]] const std::array<bool, kSatelliteCount>& SatelliteHitsHero() const { return m_satelliteHitsHero; }
+        [[nodiscard]] math::Vec3 CharacterPosition() const { return m_charPos; }   // feet on y = 0
+        [[nodiscard]] float CharacterFacingYaw() const { return m_charFacingYaw; }
+        [[nodiscard]] float CameraYaw() const { return m_cameraYaw; }
+        [[nodiscard]] float CameraPitch() const { return m_cameraPitch; }
         [[nodiscard]] int HeroAnimClipIndex() const { return m_heroAnimation.ClipIndex(); }
         [[nodiscard]] float HeroAnimClipTime() const { return m_heroAnimation.ClipTime(); }
 #endif
@@ -69,7 +95,7 @@ namespace engine::game
         void LayOutObstacles();
         void StepCollision2D();
 #if defined(ENGINE_WITH_3D)
-        void StepDemo3D(float fixedDelta);
+        void StepCharacter3D(float fixedDelta, const PlayerIntent& intent);
 #endif
 
         core::JobSystem& m_jobs;
@@ -84,10 +110,13 @@ namespace engine::game
         physics::CollisionWorld2D m_collision2d;
 
 #if defined(ENGINE_WITH_3D)
-        math::Vec3 m_heroCenter{ 0.0f, 0.9f, 0.0f };
-        std::array<math::Vec3, kSatelliteCount> m_satelliteCenters{};
-        std::array<bool, kSatelliteCount> m_satelliteHitsHero{};
-        physics::CollisionWorld3D m_collision3d;
+        math::Vec3 m_charPos{ 0.0f, 0.0f, 0.0f };   // feet on the ground plane (y = 0)
+        float m_charFacingYaw{ 0.0f };              // radians; 0 faces +Z
+        float m_charVerticalVel{ 0.0f };
+        bool m_charGrounded{ true };
+        bool m_jumpQueued{ false };                 // set by QueueJump(), consumed by the next fixed step
+        float m_cameraYaw{ 0.0f };                  // radians; orbit angle around the character
+        float m_cameraPitch{ -0.28f };             // radians; negative looks down at the character
         CharacterAnimationState m_heroAnimation{ render::kUnityChanClips };
 #endif
     };
