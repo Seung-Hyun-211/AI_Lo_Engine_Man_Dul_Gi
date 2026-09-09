@@ -142,7 +142,7 @@ namespace engine::game
                                            c.r, c.g, c.b, c.a });
         }
 
-        ui.Build(snapshot.uiQuads);
+        ui.Build(snapshot.uiQuads, static_cast<float>(viewportWidth), static_cast<float>(viewportHeight));
         return snapshot;
     }
 }

@@ -94,10 +94,11 @@ render(Dx11) ─▶ core(NonCopyable), D3D11     상위 레이어를 도로 참�
 
 - **새 시스템(물리/애니메이션/컬링)** — `game/`에 클래스를 추가하고 `Application::Run`의 스텝 루프에서 호출한다(고정 `dt`). 병렬화가 필요하면 `JobSystem::ParallelFor`로 겹치지 않는 `[begin,end)` 범위만 쓰고 `Fence`는 단계 경계에서만 기다린다.
 - **콜라이더 붙이기** — `physics::CollisionWorld2D`(또는 `#if ENGINE_WITH_3D` `CollisionWorld3D`)를 `Simulation` 멤버로 두고 `Step()`에서 `Clear`→`Add`→`Step`→`Contacts()`. 탐지만; 응답은 게임 코드. 사용법·레이어·불변 규칙은 [collider-design.md](collider-design.md).
-- **FBX 모델 로드** — `import::LoadModelFromFile(path)` → `import::Model`(메시·머티리얼·스켈레톤·애니메이션). ufbx 는 `import` 안에 갇혀 있다. 포즈 평가는 `anim::AnimationSampler::Evaluate` (고정 스텝). GPU 스키닝 패스(`SkinnedMeshPass3D`)는 설계만 — [model-animation-research.md](model-animation-research.md).
+- **FBX 모델 로드** — `import::LoadModelFromFile(path)` → `import::Model`(메시·머티리얼·스켈레톤·애니메이션). ufbx 는 `import` 안에 갇혀 있다. 포즈 평가는 `anim::AnimationSampler::Evaluate` (고정 스텝). **캐릭터 애니메이션은 지금 CPU 스키닝이다** — `ModelMeshPass3D`가 매 프레임 본 팔레트로 LBS를 CPU에서 계산해 DYNAMIC 정점 버퍼에 `Map/Unmap` 업로드(셰이더는 스킨 관련 코드 없음, `assets/shaders/cel.hlsl` 그대로). **GPU 스키닝(정점 셰이더에서 본 팔레트로 스킨)은 미구현, 설계만** — 새 `SkinnedMeshPass3D` + `StructuredBuffer` 본 팔레트 형태로 [model-animation-research.md](model-animation-research.md) §5.2(원안)·§5.2a(실제 CPU 구현)에 상세.
 - **서드파티 추가** — `src/vendor/<lib>/`에 소스 vendor, 벤더 헤더는 그 라이브러리를 쓰는 `.cpp` 안에서만 include, 밖으로는 엔진 타입만. vcxproj 에 소스 추가(필요 시 `CompileAs`/`WarningLevel` per-file).
 - **새 차원 모듈** — `<layer>/core` + `<layer>/x2d` + `<layer>/x3d` 디렉터리, 서로 include 금지, `ENGINE_WITH_3D`로 3D 빌드 제외 가능하게. `render`·`physics`가 예시.
-- **새 위젯** — `ui::Widget`을 상속한다. 기존 위젯 수정 없이(OCP) `Build`(로컬 좌표 → `Quad`), `PointerXxx`(소비 시 `true`)만 구현한다. LSP: 기반 계약(로컬 좌표·`parentOrigin` 기준 배치·소비 반환)을 지킨다.
+- **새 위젯** — `ui::Widget`을 상속한다. 기존 위젯 수정 없이(OCP) `Build`(로컬 좌표 → `Quad`), `PointerXxx`(소비 시 `true`)만 구현한다. LSP: 기반 계약(로컬 좌표·`parentOrigin` 기준 배치·소비 반환)을 지킨다. `CheckBox`/`Slider`가 예시.
+- **새 화면/씬 상태** — `game/<Screen>.h/.cpp`에 위젯 트리를 만드는 자유 함수(`TitleScreen`/`InGameHud`/`SettingsScreen`이 예시), `Application`이 `UIContext::SetScreen`(전체 교체) 또는 `SetOverlay`(모달)로 꽂는다. `UIContext`는 게임 개념을 모른다(OCP). `GameState` enum에 값 추가 + `Application::Run`의 스텝 게이팅 조건 갱신. 세부 `docs/scene-flow-design.md`.
 - **새 렌더 패스/스테이지** — `render::IRenderPass`(`Name`/`Initialize(device, ShaderLibrary&)`/`Execute`/`Release`)를 구현하고 `main.cpp`에서 `renderer.AddRenderPass(...)`로 등록한다(Start 전). 셰이더는 `assets/shaders/<name>.hlsl` + `shaders.Get(device, "<name>", layout, count)`. 렌더러 코어·기존 패스는 안 건드린다(OCP). 세부는 [shader-pipeline.md](shader-pipeline.md).
 - **셰이더 수정** — `assets/shaders/*.hlsl` 편집·저장 → 실행 중이면 다음 프레임에 핫리로드. 공통 코드는 `common3d.hlsli`.
 - **새 렌더 프리미티브** — `render/RenderSnapshot.h`에 값 타입을 추가하고(예: 텍스처용 `SpriteDraw`) 그것을 소비하는 패스를 만든다. 렌더러 코어에 게임 개념(`playerX` 등)을 하드코딩하지 않는다.

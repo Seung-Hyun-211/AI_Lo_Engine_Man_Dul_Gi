@@ -32,7 +32,7 @@ C++20 / Win32 / DirectX 11 기반 2D 게임 엔진 뼈대. 이 파일은 세션�
 
 9. 서드파티는 `src/vendor/`에 소스 vendor (현재 `ufbx` — FBX 로더, MIT/PD, v0.23.0). `ufbx.c`는 C++로 컴파일, 경고 off. ufbx 타입은 `src/import/ModelImporter.cpp` 안에만 — 밖으로는 엔진 타입(`import::Model` 등)만 나간다. 모델/애니메이션 세부는 `docs/model-animation-research.md`.
 
-모듈별 상세: `docs/engine-overview.md`(지도), `multithreaded_game_engine_architecture.md`(스레드), `ui-architecture.md`, `time-design.md`, `collider-design.md`, `model-animation-research.md`, `animation-design.md`(2D/3D 애니메이션 통합 설계 + 연구 필요 항목), `shader-pipeline.md`(셰이더 로딩), `toon-rendering.md`(셀·아웃라인·크리즈), `lighting.md`(조명), `msaa.md`(AA), `shadows.md`(그림자).
+모듈별 상세: `docs/engine-overview.md`(지도), `multithreaded_game_engine_architecture.md`(스레드), `ui-architecture.md`, `scene-flow-design.md`(Title/InGame/Settings 씬 상태), `game-settings.md`(설정 카탈로그), `synopsis.md`(게임 시놉시스, 초안), `time-design.md`, `collider-design.md`, `model-animation-research.md`, `animation-design.md`(2D/3D 애니메이션 통합 설계 + 연구 필요 항목), `shader-pipeline.md`(셰이더 로딩), `toon-rendering.md`(셀·아웃라인·크리즈), `lighting.md`(조명), `msaa.md`(AA), `shadows.md`(그림자).
 
 렌더러 코어는 **멀티샘플 씬 타깃**(`m_sceneColorRtv`/`m_sceneDepthDsv`, 최대 8x)에 그리고 프레임 끝에 백버퍼로 resolve한다. 패스는 백버퍼가 아니라 씬 타깃에 그린다. 세부 `docs/msaa.md`.
 
@@ -75,8 +75,11 @@ C++20 / Win32 / DirectX 11 기반 2D 게임 엔진 뼈대. 이 파일은 세션�
 - ~~`IDXGIFactory::MakeWindowAssociation` 미호출~~ — 완료. `DXGI_MWA_NO_ALT_ENTER`로 Alt+Enter를 앱이 소유.
 - 스왑 효과가 레거시 `DXGI_SWAP_EFFECT_DISCARD`. Win10+는 `FLIP_DISCARD` 권장 — SpriteBatch 단계에서 함께 전환.
 - 메인 스레드가 `ParallelFor(...).Wait()`로 매 프레임 완전 블록. 시뮬/렌더 파이프라이닝·더블 버퍼링 없음.
-- UI 클리핑(`PushClipRect`) 미구현. `TextLine`이 창 밖으로 넘칠 수 있음. UI 문서가 코드보다 앞서 있다(`Measure`/`Arrange`/`VerticalStack`/`UIScreen` 등 미구현).
+- UI 클리핑(`PushClipRect`) 미구현. `TextLine`이 창 밖으로 넘칠 수 있음. `Measure`/`Arrange`/`VerticalStack`은 여전히 미구현(좌표를 손으로 배치). 화면 전환(`UIScreen`)은 이제 구현됨 — `UIContext::SetScreen`/`SetOverlay`, `docs/scene-flow-design.md`.
+- `ui::Slider`에 진짜 입력 캡처가 없다 — 드래그 종료(`PointerUp`)가 형제 위젯에 먼저 소비되면 그 프레임엔 드래그가 안 풀릴 수 있음(수직 스택처럼 위젯이 안 겹치면 발생 안 함). `docs/ui-architecture.md` "각 위젯의 책임" 참고.
+- 설정 항목 중 볼륨(마스터/음악/효과음)·마우스 감도/반전은 UI·영속화는 있지만 적용 대상이 없음(오디오 서브시스템, 마우스 카메라 모두 미구현) — 값만 저장된다. `docs/game-settings.md` §1.
 - `InputState`: 한 프레임 안에서 같은 키가 down→up 하면 `KeyPressed`/`KeyReleased` 둘 다 참(의도됨), 단 최종 held 상태만 다음 프레임에 남는다.
+- **캐릭터 애니메이션은 GPU 스키닝이 아니라 CPU 스키닝이다.** `ModelMeshPass3D`가 매 프레임 본 팔레트로 LBS를 CPU에서 계산해 DYNAMIC 정점 버퍼에 `Map/Unmap`. 셰이더(`cel.hlsl`/`outline.hlsl`)엔 스킨 관련 코드가 전혀 없다 — `assets/shaders/`에 bone/skin 관련 HLSL 없음(확인됨). GPU 스킨(새 `SkinnedMeshPass3D` + `StructuredBuffer` 본 팔레트, `docs/model-animation-research.md` §5.2)은 여전히 설계만이고, 인스턴스를 여럿(각자 다른 애니메이션) 세우려면 그게 필요하다. 실제 구현은 §5.2a.
 
 ## 코드 스타일
 

@@ -52,6 +52,18 @@ namespace engine::platform
         // has been seen (the caller should exit its loop).
         [[nodiscard]] bool PumpMessages();
 
+        // Resizes the window so its client area becomes clientWidth x
+        // clientHeight (e.g. from a Settings resolution change). Main thread
+        // only - same rule as every other window call. SetWindowPos delivers
+        // WM_SIZE synchronously on this thread, so it reaches
+        // IWindowEventSink::OnResize exactly like a user dragging the border;
+        // callers don't need a separate code path for it.
+        void RequestResize(int clientWidth, int clientHeight);
+
+        // Starts the normal Win32 close sequence (WM_DESTROY -> PostQuitMessage
+        // -> PumpMessages returns false). Main thread only.
+        void RequestClose();
+
         [[nodiscard]] HWND Handle() const { return m_window; }
         [[nodiscard]] int Width() const { return m_width; }
         [[nodiscard]] int Height() const { return m_height; }

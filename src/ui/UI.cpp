@@ -1,5 +1,6 @@
 #include "ui/UI.h"
 
+#include <algorithm>
 #include <array>
 #include <cctype>
 
@@ -36,7 +37,11 @@ namespace
         case 'Y': return { 17,17,10,4,4,4,4 }; case 'Z': return { 31,1,2,4,8,16,31 };
         case '0': return { 14,17,19,21,25,17,14 }; case '1': return { 4,12,4,4,4,4,14 };
         case '2': return { 14,17,1,2,4,8,31 }; case '3': return { 30,1,1,14,1,1,30 };
+        case '4': return { 2,6,10,18,31,2,2 }; case '5': return { 31,16,30,1,1,17,14 };
+        case '6': return { 6,8,16,30,17,17,14 }; case '7': return { 31,1,2,4,8,8,8 };
+        case '8': return { 14,17,17,14,17,17,14 }; case '9': return { 14,17,17,15,1,2,12 };
         case ':': return { 0,4,4,0,4,4,0 }; case '-': return { 0,0,0,31,0,0,0 };
+        case '.': return { 0,0,0,0,0,12,12 }; case '%': return { 25,26,4,8,19,0,0 };
         default: return { 0,0,0,0,0,0,0 };
         }
     }
@@ -134,24 +139,104 @@ namespace engine::ui
         return clicked;
     }
 
-    UIContext::UIContext()
+    void CheckBox::Build(std::vector<Quad>& output, Vec2 parentOrigin) const
     {
-        m_root = std::make_unique<UIWindow>();
-        m_root->SetBounds({ 20, 20, 332, 170 });
-        auto title = std::make_unique<TextLine>("CPP WINDOW GAME");
-        title->SetBounds({ 16, 16, 0, 0 }); title->pixelScale = 2.0f;
-        m_root->AddChild(std::move(title));
-        auto button = std::make_unique<Button>("START");
-        button->SetBounds({ 16, 52, 300, 42 });
-        button->onClick = [this] { m_status->SetText("STATUS: RUNNING"); };
-        m_root->AddChild(std::move(button));
-        auto status = std::make_unique<TextLine>("STATUS: READY");
-        status->SetBounds({ 16, 116, 0, 0 }); status->pixelScale = 2.0f;
-        m_status = status.get();
-        m_root->AddChild(std::move(status));
+        const Rect bounds = AbsoluteBounds(parentOrigin);
+        constexpr float kBoxSize = 20.0f;
+        const Rect box{ bounds.x, bounds.y + (bounds.height - kBoxSize) * 0.5f, kBoxSize, kBoxSize };
+        const Color boxColor = m_pressed ? Color{ .16f,.48f,.76f,1 } : m_hovered ? Color{ .14f,.34f,.56f,1 } : Color{ .10f,.22f,.36f,1 };
+        AddQuad(output, box, boxColor);
+        AddQuad(output, { box.x, box.y, box.width, 1 }, { .70f,.88f,1,1 });
+        AddQuad(output, { box.x, box.y + box.height - 1, box.width, 1 }, { .70f,.88f,1,1 });
+        AddQuad(output, { box.x, box.y, 1, box.height }, { .70f,.88f,1,1 });
+        AddQuad(output, { box.x + box.width - 1, box.y, 1, box.height }, { .70f,.88f,1,1 });
+        if (checked) AddQuad(output, { box.x + 4, box.y + 4, box.width - 8, box.height - 8 }, { .30f,.85f,.55f,1 });
+        AddText(output, m_label, { bounds.x + kBoxSize + 12, bounds.y + (bounds.height - 14) * 0.5f }, 2.0f, { .92f,.96f,1,1 });
     }
-    bool UIContext::PointerMove(Vec2 position) { return m_root->PointerMove(position, {}); }
-    bool UIContext::PointerDown(Vec2 position) { return m_root->PointerDown(position, {}); }
-    bool UIContext::PointerUp(Vec2 position) { return m_root->PointerUp(position, {}); }
-    void UIContext::Build(std::vector<Quad>& output) const { m_root->Build(output, {}); }
+    bool CheckBox::PointerMove(Vec2 position, Vec2 parentOrigin)
+    {
+        m_hovered = AbsoluteBounds(parentOrigin).Contains(position);
+        return m_hovered;
+    }
+    bool CheckBox::PointerDown(Vec2 position, Vec2 parentOrigin)
+    {
+        m_pressed = AbsoluteBounds(parentOrigin).Contains(position);
+        return m_pressed;
+    }
+    bool CheckBox::PointerUp(Vec2 position, Vec2 parentOrigin)
+    {
+        const bool clicked = m_pressed && AbsoluteBounds(parentOrigin).Contains(position);
+        m_pressed = false;
+        if (clicked)
+        {
+            checked = !checked;
+            if (onChanged) onChanged(checked);
+        }
+        return clicked;
+    }
+
+    void Slider::Build(std::vector<Quad>& output, Vec2 parentOrigin) const
+    {
+        const Rect bounds = AbsoluteBounds(parentOrigin);
+        constexpr float kTrackHeight = 6.0f;
+        constexpr float kHandleWidth = 14.0f;
+        const Rect track{ bounds.x, bounds.y + (bounds.height - kTrackHeight) * 0.5f, bounds.width, kTrackHeight };
+        AddQuad(output, track, { .10f,.13f,.20f,1 });
+        const float range = m_max - m_min;
+        const float t = range > 1e-6f ? (value - m_min) / range : 0.0f;
+        const float handleX = bounds.x + t * std::max(0.0f, bounds.width - kHandleWidth);
+        AddQuad(output, { bounds.x, track.y, handleX - bounds.x + kHandleWidth * 0.5f, kTrackHeight }, { .30f,.60f,.85f,1 });
+        AddQuad(output, { handleX, bounds.y, kHandleWidth, bounds.height }, m_dragging ? Color{ .55f,.80f,1,1 } : Color{ .40f,.65f,.92f,1 });
+    }
+    bool Slider::PointerMove(Vec2 position, Vec2 parentOrigin)
+    {
+        if (m_dragging) { SetFromPointerX(position.x, parentOrigin); return true; }
+        return AbsoluteBounds(parentOrigin).Contains(position);
+    }
+    bool Slider::PointerDown(Vec2 position, Vec2 parentOrigin)
+    {
+        if (!AbsoluteBounds(parentOrigin).Contains(position)) return false;
+        m_dragging = true;
+        SetFromPointerX(position.x, parentOrigin);
+        return true;
+    }
+    bool Slider::PointerUp(Vec2 /*position*/, Vec2 /*parentOrigin*/)
+    {
+        if (!m_dragging) return false;
+        m_dragging = false;
+        return true;
+    }
+    void Slider::SetFromPointerX(float x, Vec2 parentOrigin)
+    {
+        const Rect bounds = AbsoluteBounds(parentOrigin);
+        const float t = bounds.width > 1e-6f ? std::clamp((x - bounds.x) / bounds.width, 0.0f, 1.0f) : 0.0f;
+        value = m_min + t * (m_max - m_min);
+        if (onChanged) onChanged(value);
+    }
+
+    bool UIContext::PointerMove(Vec2 position)
+    {
+        if (m_overlay) return m_overlay->PointerMove(position, {});
+        return m_screen ? m_screen->PointerMove(position, {}) : false;
+    }
+    bool UIContext::PointerDown(Vec2 position)
+    {
+        if (m_overlay) return m_overlay->PointerDown(position, {});
+        return m_screen ? m_screen->PointerDown(position, {}) : false;
+    }
+    bool UIContext::PointerUp(Vec2 position)
+    {
+        if (m_overlay) return m_overlay->PointerUp(position, {});
+        return m_screen ? m_screen->PointerUp(position, {}) : false;
+    }
+    void UIContext::Build(std::vector<Quad>& output, float viewportWidth, float viewportHeight) const
+    {
+        if (m_screen) m_screen->Build(output, {});
+        if (m_overlay)
+        {
+            // Dim the screen behind the modal overlay so it reads as inactive.
+            AddQuad(output, { 0, 0, viewportWidth, viewportHeight }, { 0, 0, 0, 0.45f });
+            m_overlay->Build(output, {});
+        }
+    }
 }
