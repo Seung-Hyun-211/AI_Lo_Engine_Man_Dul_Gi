@@ -31,6 +31,7 @@ anim/
 | `anim::AnimationSampler`(CPU 포즈 평가, LBS 준비) | ✅ 구현됨 |
 | `SkinnedMeshPass3D`(GPU 스키닝 렌더 패스) | ❌ 설계만 |
 | 크로스페이드/애디티브/본 마스크/상태 머신/루트 모션 | ❌ 설계만 |
+| 텍스처 베이킹 애니메이션(본 행렬 텍스처 / VAT, 군중용) | ❌ 연구·설계만 — `model-animation-research.md` §5.5 |
 
 이 문서가 추가하는 것은 하나: 상태 머신을 만들 때 **3D 전용으로 새로 짜지 말고** §3의 제네릭 `anim::core::AnimatorController<TClip>`을 3D 클립 타입으로 인스턴스화해서 쓴다(2D와 구조를 맞춰 나중에 로직 두 벌을 유지하지 않도록).
 

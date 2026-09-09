@@ -115,6 +115,39 @@ sampler.Evaluate(model.skeleton, model.animations[0], timeSeconds, skin);
 - 애니메이션 LOD: 먼 캐릭터는 sampleRate/본 수 축소, 아주 멀면 스키닝 생략.
 - 듀얼 쿼터니언 스키닝(팔꿈치 캔디랩 방지) — ufbx 가 `dq_weight` 제공.
 
+### 5.5 텍스처 베이킹 애니메이션 — 연구 (미구현)
+
+§5.2~5.3 은 인스턴스마다 CPU `AnimationSampler::Evaluate` + 본 팔레트(cbuffer/StructuredBuffer) 업로드를 전제로 한다. **인스턴스 수가 많아지면**(군중, 배경 캐릭터, 다수 소환수) 이 CPU 평가·업로드 자체가 병목이 된다. 클립을 오프라인/로드 시점에 **텍스처로 구워두면** 런타임은 텍스처 샘플 한 번으로 포즈를 얻는다 — 라이선스·포맷 조사가 필요한 §4(Live2D/Spine)와 달리 순수 엔진 내부 기법이라 조사 없이 바로 설계 가능.
+
+두 갈래가 있고 이 엔진에 걸리는 대상이 다르다.
+
+| | 본 행렬 텍스처 (Bone Matrix Texture) | 버텍스 애니메이션 텍스처 (VAT, Vertex Animation Texture) |
+|---|---|---|
+| 굽는 것 | 프레임별 **본 팔레트 행렬**(`AnimationSampler::Evaluate` 결과 그대로) | 프레임별 **최종 정점 위치(+법선)** |
+| 런타임 계산 | 버텍스 셰이더에서 기존 LBS 그대로 수행, 팔레트만 cbuffer 대신 텍스처 `Load` | 없음 — 텍스처 값이 곧 최종 정점 위치. 스키닝 수식 자체가 셰이더에서 사라짐 |
+| 텍스처 크기 | (본 수) × (프레임 수) × 4텍셀(4×4 행렬 = `float4` 4개) — 본 수(수십~수백)에만 비례 | (정점 수) × (프레임 수) × 1~2텍셀 — **정점 수**에 비례, 고밀도 메시엔 큼 |
+| 비강체 변형(천/근육/시뮬레이션) | LBS 한계 그대로(본 기반만) | 어떤 변형이든 구울 수 있음(모프 타겟, 오프라인 시뮬레이션 결과도) |
+| 적합한 대상 | 본 수 적은 캐릭터가 **인스턴스 많을 때**(군중) | 캐릭터든 식생이든 **정점 수 적당 + 인스턴스 아주 많을 때**, 또는 스키닝으로 못 만드는 변형 |
+| 이 엔진에서의 우선순위 | 3e(캐릭터 소수, 수십 본)엔 §5.2 로 충분 — 군중 요구가 생기면 검토 | 배경/군중 전용, 지금 로드맵엔 없음(§4.4 아트 파이프라인 결정과 별개로 "필요해지면") |
+
+**데이터 경로(둘 다 공통 원칙)**: 굽기는 `anim::AnimationSampler::Evaluate` 를 프레임 수만큼 반복 호출하는 CPU 작업 — 매 프레임이 아니라 **모델 로드 시 1회**(또는 오프라인 툴, `tools/fbx_probe.cpp` 처럼)이므로 고정 스텝·렌더 스레드 규칙과 충돌 없다. 텍스처 실제 생성(`ID3D11Device::CreateTexture2D`)은 불변 규칙 1·2에 따라 **렌더 스레드만** 한다 — 구운 픽셀 데이터(값 배열)만 넘기고, 리소스 생성은 그쪽에서.
+
+- **레이아웃(본 행렬 텍스처)**: `DXGI_FORMAT_R32G32B32A32_FLOAT`, 폭 = 본 수 × 4(행 4개를 `float4` 4장으로), 높이 = 프레임 수. 버텍스 셰이더가 `boneIndex`·`frameIndex` 로 4개 텍셀을 `Load` 해 4×4 행렬 재구성 후 기존 LBS(§5.2 HLSL)에 그대로 대입.
+- **레이아웃(VAT)**: 폭 = 정점 수, 높이 = 프레임 수, `DXGI_FORMAT_R16G16B16A16_FLOAT`(위치) [+ 법선용 두 번째 텍스처]. 버텍스 셰이더가 `SV_VertexID`·`frameIndex` 로 `Load`, 스키닝 없이 바로 world 변환.
+- **프레임 보간**: 포인트 필터로 정수 프레임만 쓰거나(스텝 애니메이션, 저비용), 두 프레임을 `Load` 후 셰이더에서 `lerp`(부드럽지만 텍셀 2배 페치).
+- **정밀도**: 로컬(모델) 공간 좌표로 구워야(월드는 인스턴스 트랜스폼으로 별도 적용) 좌표 범위가 작아 16비트 float 오차가 적다 — LBS도 이미 모델 공간 계산이라 같은 가정.
+- **인스턴싱과의 결합**: 인스턴스당 스냅샷에 실을 값이 `vector<Mat4> bonePalette`(수백 본이면 KB 단위, §5.2)에서 **`float animTime` 하나**로 줄어든다 — 인스턴스가 많을수록 이 차이가 커진다. `render/r3d/Scene3D.h` 에 값 타입 스케치:
+  ```cpp
+  struct TexturedAnimDraw {
+      MeshHandle mesh;
+      TextureHandle animTexture;   // 본 행렬 텍스처 또는 VAT, 모델 로드 시 굽고 등록
+      math::Mat4 world;
+      float animTime;              // 프레임 인덱스로 변환은 셰이더/등록 시 sampleRate로
+      math::Color tint;
+  };
+  ```
+- **판단할 것(실사용 시점)**: 본 행렬 텍스처 vs VAT는 양자택일이 아니라 대상이 다름(캐릭터 군중 vs 정점 단위 변형) — 실제로 군중이 필요해질 때 결정. 로드 시점 굽기(단순, 시작 시간 ↑) vs 오프라인 툴 산출물 커밋(복잡, 시작 시간 절약) 도 그때 판단.
+
 ## 6. 현재 상태 / 검증 필요
 
 | | 상태 |
@@ -128,6 +161,7 @@ sampler.Evaluate(model.skeleton, model.animations[0], timeSeconds, skin);
 | `ModelMeshPass3D` — **정적** 렌더 (바인드 포즈, 스키닝 없음) + **텍스처** | ✅ FBX 를 시작 시 로드해 immutable VB/IB 생성. `import::LoadTga`(uncompressed TGA 24/32bpp) 로 디퓨즈 텍스처 로드 → SRV + linear-wrap 샘플러, 셰이더에서 샘플(V flip + alpha cutout). 머티리얼→파일은 FBX ref basename `.tga` 우선, 없으면 이름 테이블(Unity-chan: body→body_01.tga 등). `main.cpp` 에서 `AddRenderPass`. 스키닝은 다음 |
 | `SkinnedMeshPass3D` (GPU 스키닝) | ❌ 설계만 (§5.2) — `ModelMeshPass3D` 에 본 팔레트 + 스킨 셰이더 추가하는 형태 |
 | 상태 머신 / 블렌딩 / 루트 모션 | ❌ 설계만 (§5.3) |
+| 텍스처 베이킹 애니메이션 (본 행렬 텍스처 / VAT) | ❌ 연구·설계만 (§5.5) — 군중/다수 인스턴스용, 캐릭터 소수면 §5.2 로 충분 |
 
 관찰: Unity-chan FBX 는 단위가 **cm** (키 ≈156 유닛). `ImportOptions::scale = 0.01` 로 미터화. 텍스처 경로는 원본 `.psd` 참조 (stale) — 실제 `.tga` 는 FBX 옆에. 에셋 경로 해석기는 별도 과제.
 
@@ -181,6 +215,21 @@ sampler.EvaluateBindPose(model.skeleton, skinMatrices);
 3. 시작 시 `pass->RegisterModel(model)` → `MeshHandle`.
 4. `SnapshotBuilder` 가 `Scene3D::skinnedDraws.push_back({ handle, worldMatrix, skinMatrices, tint })`.
 
+### 텍스처 베이킹 애니메이션 사용 (구현 후, 인스턴스가 많을 때만)
+
+```cpp
+// 모델 로드 직후, 1회 (매 프레임 아님)
+std::vector<float> bakedPixels;
+for (int frame = 0; frame < frameCount; ++frame) {
+    sampler.Evaluate(model.skeleton, clip, frame / sampleRate, skinMatrices);
+    AppendToBoneMatrixTexturePixels(skinMatrices, bakedPixels);  // 본 행렬 텍스처 레이아웃(§5.5)
+}
+// bakedPixels(값 배열)를 렌더 스레드로 넘겨 CreateTexture2D — 렌더 스레드만 D3D11 호출
+
+// 매 프레임 스냅샷 (인스턴스당 float 하나만)
+scene3d.texturedAnimDraws.push_back({ meshHandle, animTextureHandle, worldMatrix, m_animTime, tint });
+```
+
 ### 하지 말 것
 
 - 렌더/잡 스레드에서 `ModelImporter`·`AnimationSampler` 호출 (메인/시뮬 스레드 전용, 값만 스냅샷으로).
@@ -188,3 +237,5 @@ sampler.EvaluateBindPose(model.skeleton, skinMatrices);
 - `Step()` 밖에서 애니메이션 시간 전진 (고정 timestep 규칙).
 - 매 프레임 `LoadModelFromFile` (로드는 1회, 결과 `Model` 보관).
 - 검증 전 스킨드 패스에 back-face culling 켜기 (winding 미확인).
+- 인스턴스가 적을 때(수십 이하) 텍스처 베이킹부터 만들지 않는다 — §5.2 cbuffer/StructuredBuffer 팔레트로 충분하고, 텍스처 베이킹은 군중 규모에서만 이득이 실측된다.
+- 렌더 스레드가 아닌 곳에서 베이킹 텍스처 `CreateTexture2D` 호출(불변 규칙 1·2 — 굽는 CPU 계산과 텍스처 리소스 생성을 분리해서 지킨다).
