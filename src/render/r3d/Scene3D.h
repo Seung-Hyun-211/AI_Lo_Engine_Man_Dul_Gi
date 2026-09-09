@@ -37,13 +37,20 @@ namespace engine::render
         math::Mat4 projection{ math::Mat4::Identity() };
     };
 
-    // One instance of the model that ModelMeshPass3D loaded at startup. Drawn as
-    // static geometry (bind pose) with the same directional light as MeshDraw.
-    // Skinning comes later - see docs/model-animation-research.md.
+    // One instance of the model that ModelMeshPass3D loaded at startup, with
+    // the same directional light as MeshDraw. `animClipIndex < 0` (the
+    // default) draws the bind pose; otherwise ModelMeshPass3D samples that
+    // clip (its own index into the clips it loaded - see
+    // render/r3d/CharacterAnimationClips.h) at `animClipTime` seconds and
+    // CPU-skins the mesh before drawing. See docs/model-animation-research.md
+    // §5.2/5.3 - only one instance is skinned per pass (one shared vertex
+    // buffer set, "loaded once at startup").
     struct ModelDraw
     {
         math::Mat4 world{ math::Mat4::Identity() };
         math::Color tint{ 1.0f, 1.0f, 1.0f, 1.0f };
+        int animClipIndex{ -1 };
+        float animClipTime{ 0.0f };
     };
 
     // The 3D half of a RenderSnapshot.

@@ -19,6 +19,7 @@
     <ClCompile Include="src\core\AssetPaths.cpp" />
     <ClCompile Include="src\core\JobSystem.cpp" />
     <ClCompile Include="src\game\Application.cpp" />
+    <ClCompile Include="src\game\CharacterAnimationState.cpp" />
     <ClCompile Include="src\game\Simulation.cpp" />
     <ClCompile Include="src\game\SnapshotBuilder.cpp" />
     <ClCompile Include="src\import\CreaseLines.cpp" />
@@ -45,6 +46,7 @@
     <ClInclude Include="src\core\NonCopyable.h" />
     <ClInclude Include="src\core\Time.h" />
     <ClInclude Include="src\game\Application.h" />
+    <ClInclude Include="src\game\CharacterAnimationState.h" />
     <ClInclude Include="src\game\Simulation.h" />
     <ClInclude Include="src\game\SnapshotBuilder.h" />
     <ClInclude Include="src\import\CreaseLines.h" />
@@ -67,6 +69,7 @@
     <ClInclude Include="src\render\RenderSnapshot.h" />
     <ClInclude Include="src\render\r2d\QuadPass2D.h" />
     <ClInclude Include="src\render\r2d\Sprite2D.h" />
+    <ClInclude Include="src\render\r3d\CharacterAnimationClips.h" />
     <ClInclude Include="src\render\r3d\FrameConstants.h" />
     <ClInclude Include="src\render\r3d\Lighting.h" />
     <ClInclude Include="src\render\r3d\MeshPass3D.h" />

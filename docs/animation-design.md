@@ -1,6 +1,6 @@
 # 애니메이션 설계 (Animation Design) — 2D/3D 통합 지도, 설계만
 
-이 문서는 **설계만** 다룬다(구현 없음). 목적: 애니메이션을 2D/3D로 명확히 분리하고, 바로 설계 가능한 항목과 별도 조사가 먼저 필요한 항목(Live2D/Spine류)을 구분한다.
+이 문서 자체는 지도/설계 문서다(2D 프레임 애니메이션·`anim::core`·Live2D/Spine 연구 항목은 여전히 미구현). 목적: 애니메이션을 2D/3D로 명확히 분리하고, 바로 설계 가능한 항목과 별도 조사가 먼저 필요한 항목(Live2D/Spine류)을 구분한다. 3D 스켈레탈 쪽은 실제 구현이 들어갔다 — Unity-chan 클립 재생(CPU 스키닝 + 조건부 라운드로빈)은 `docs/model-animation-research.md` §5.2a/§5.3a 참고, 아래 §1 표에 요약.
 
 관련 기존 문서: `docs/model-animation-research.md`(3D 스켈레탈 — 상세 설계 완료, 이 문서는 요약만 하고 중복 작성하지 않음), `docs/collider-design.md`·`docs/engine-overview.md`(2D/3D 분리 선례).
 
@@ -29,8 +29,9 @@ anim/
 | 구성요소 | 상태 |
 |---|---|
 | `anim::AnimationSampler`(CPU 포즈 평가, LBS 준비) | ✅ 구현됨 |
-| `SkinnedMeshPass3D`(GPU 스키닝 렌더 패스) | ❌ 설계만 |
-| 크로스페이드/애디티브/본 마스크/상태 머신/루트 모션 | ❌ 설계만 |
+| Unity-chan 클립 재생 (CPU 스키닝 + 조건부 라운드로빈) | ✅ 구현됨 — `model-animation-research.md` §5.2a/§5.3a. `SkinnedMeshPass3D`(§5.2 원안, GPU 스킨 새 패스)가 아니라 기존 `ModelMeshPass3D` 를 CPU 스킨으로 확장한 형태 |
+| `SkinnedMeshPass3D`(GPU 스키닝 전용 새 패스, §5.2 원안) | ❌ 설계만 — 인스턴스 여럿을 각자 다른 애니메이션으로 세울 때 필요 |
+| 크로스페이드/애디티브/본 마스크/루트 모션 | ❌ 설계만 |
 | 텍스처 베이킹 애니메이션(본 행렬 텍스처 / VAT, 군중용) | ❌ 연구·설계만 — `model-animation-research.md` §5.5 |
 
 이 문서가 추가하는 것은 하나: 상태 머신을 만들 때 **3D 전용으로 새로 짜지 말고** §3의 제네릭 `anim::core::AnimatorController<TClip>`을 3D 클립 타입으로 인스턴스화해서 쓴다(2D와 구조를 맞춰 나중에 로직 두 벌을 유지하지 않도록).

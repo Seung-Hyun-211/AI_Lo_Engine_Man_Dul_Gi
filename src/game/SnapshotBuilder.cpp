@@ -72,6 +72,8 @@ namespace engine::game
         {
             render::ModelDraw model{};
             model.world = math::RotationY(simulation.ElapsedTime() * 0.3f);
+            model.animClipIndex = simulation.HeroAnimClipIndex();
+            model.animClipTime = simulation.HeroAnimClipTime();
             scene.modelDraws.push_back(model);
 
             render::MeshDraw ground{};
