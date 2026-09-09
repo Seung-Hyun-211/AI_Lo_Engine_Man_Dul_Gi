@@ -2,6 +2,7 @@
 
 #include "core/JobSystem.h"
 #include "core/NonCopyable.h"
+#include "core/Settings.h"
 #include "core/Time.h"
 #include "game/Simulation.h"
 #include "game/SnapshotBuilder.h"
@@ -18,6 +19,17 @@
 
 namespace engine::game
 {
+    // The player's persona through the app: Title (menu, no simulation) or
+    // InGame (the demo world stepping). Settings is not a state of its own -
+    // it's a modal UIContext overlay reachable from either (docs/scene-flow-design.md),
+    // so adding it didn't need a third enumerator. Extend here (Loading,
+    // Paused, Result, ...) the same way if a real game needs more states.
+    enum class GameState
+    {
+        Title,
+        InGame,
+    };
+
     // Composition root and frame conductor. It owns the engine's systems and
     // wires them together, but delegates every real responsibility:
     //   Win32Window     - the OS window and its messages
@@ -26,6 +38,7 @@ namespace engine::game
     //   Simulation      - the mutable world, stepped at a fixed rate
     //   SnapshotBuilder - world + UI -> value-only RenderSnapshot
     //   IRenderer       - an abstract renderer (DX11 today, DX12 tomorrow)
+    //   Settings        - persisted user options (docs/game-settings.md)
     //
     // Application itself only sequences them and translates window events into
     // input, so its single reason to change is "the frame flow changed".
@@ -48,8 +61,23 @@ namespace engine::game
     private:
         [[nodiscard]] PlayerIntent BuildPlayerIntent() const;
 
+        // Scene transitions: swap the UIContext's screen and update m_state.
+        void EnterTitle();
+        void EnterInGame();
+        // Settings overlay: layered on top of whichever screen is active.
+        void OpenSettings();
+        void CloseSettings();
+        // The two Settings fields with an effect outside the Settings struct
+        // itself; everything else SettingsScreen mutates directly (see there).
+        void ApplyVsync();
+        void ApplyResolution();
+
         render::IRenderer& m_renderer;
         core::JobSystem m_jobs;
+        // Loaded before m_window so the very first window size already
+        // reflects the saved resolution instead of opening at a hardcoded
+        // size and only matching Settings after the user touches it.
+        core::Settings m_settings;
         platform::Win32Window m_window;
         input::InputState m_input;
         ui::UIContext m_ui;
@@ -57,6 +85,7 @@ namespace engine::game
         SnapshotBuilder m_snapshotBuilder;
         core::FrameClock m_clock;
         core::FixedTimestep m_timestep;
+        GameState m_state{ GameState::Title };
 
         std::uint64_t m_frameNumber{};
         math::Vec2 m_pointerPosition{};

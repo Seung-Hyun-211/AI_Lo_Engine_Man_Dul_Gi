@@ -9,6 +9,7 @@
 #include "import/ModelImporter.h"
 #include "import/TgaImage.h"
 #include "math/Math3D.h"
+#include "render/r3d/CharacterAnimationClips.h"
 #include "render/r3d/FrameConstants.h"
 #include "render/shader/ShaderLibrary.h"
 
@@ -41,6 +42,28 @@ namespace
     void SafeRelease(T*& object)
     {
         if (object != nullptr) { object->Release(); object = nullptr; }
+    }
+
+    // Weighted sum of up to kMaxBoneInfluences bone matrices - linear blend
+    // skinning's "S = sum_i w_i * boneMatrix[i]" (docs/model-animation-research.md §2).
+    // An out-of-range bone index (shouldn't happen; ModelImporter clamps at
+    // import) or a palette shorter than expected is simply skipped, same as
+    // zero weight.
+    engine::math::Mat4 BlendBoneMatrices(const std::uint32_t (&indices)[engine::import::kMaxBoneInfluences],
+                                          const float (&weights)[engine::import::kMaxBoneInfluences],
+                                          const std::vector<engine::math::Mat4>& boneMatrices)
+    {
+        engine::math::Mat4 blend{};
+        for (float& c : blend.m) c = 0.0f;
+        for (int i = 0; i < engine::import::kMaxBoneInfluences; ++i)
+        {
+            const float w = weights[i];
+            if (w <= 0.0f) continue;
+            const std::uint32_t b = indices[i];
+            if (b >= boneMatrices.size()) continue;
+            for (int c = 0; c < 16; ++c) blend.m[c] += boneMatrices[b].m[c] * w;
+        }
+        return blend;
     }
 
     std::string ToLower(std::string s)
@@ -137,7 +160,7 @@ namespace engine::render
     {
         import::ImportOptions options;
         options.scale = 0.01f;          // Unity-chan (and many FBX) are in centimetres
-        options.skipAnimation = true;   // static draw for now
+        options.skipAnimation = true;   // this FBX carries mesh + skeleton only; clips are separate files, loaded below
 
         const std::string dir = m_modelPath.substr(0, m_modelPath.find_last_of("/\\") + 1);
 
@@ -151,6 +174,31 @@ namespace engine::render
         {
             OutputDebugStringA(("ModelMeshPass3D: could not load '" + m_modelPath + "': " + result.error + "\n").c_str());
             return;
+        }
+
+        m_skeleton = result.model.skeleton;
+        if (!m_skeleton.Empty())
+        {
+            int loaded = 0;
+            for (const CharacterAnimationClipInfo& entry : kUnityChanClips)
+            {
+                import::AnimationImportResult clipResult =
+                    import::LoadAnimationClipsFromFile(m_resolvedDir + "animation/" + entry.fileName, m_skeleton, 30.0f);
+                if (clipResult.ok)
+                {
+                    m_clips.push_back(std::move(clipResult.clips.front()));
+                    ++loaded;
+                }
+                else
+                {
+                    m_clips.emplace_back();   // keep index aligned with kUnityChanClips
+                    OutputDebugStringA(("ModelMeshPass3D: animation clip '" + std::string(entry.fileName)
+                        + "' failed: " + clipResult.error + "\n").c_str());
+                }
+            }
+            OutputDebugStringA(("ModelMeshPass3D: loaded " + std::to_string(loaded) + "/"
+                + std::to_string(kUnityChanClips.size()) + " animation clips\n").c_str());
+            if (loaded == 0) m_clips.clear();   // nothing plays; fall back to the static bind-pose path entirely
         }
 
         // Decoded textures, kept only for the duration of the load (crease line
@@ -192,10 +240,18 @@ namespace engine::render
             const import::TgaImage* tga = getTga(fileName);
             sub.texture = tga != nullptr ? CreateTextureSrv(device, fileName, *tga) : nullptr;
 
+            // Skinned submeshes get DYNAMIC buffers re-filled every frame by
+            // SkinAndUpload() from the bind-pose data kept below; a mesh with no
+            // skin (or a model with no usable clips at all) keeps the original
+            // IMMUTABLE, load-once path untouched.
+            sub.skinned = mesh.skinned && !m_clips.empty();
+            if (sub.skinned) sub.bindVertices = mesh.vertices;
+
             D3D11_BUFFER_DESC vertexDesc{};
             vertexDesc.ByteWidth = static_cast<UINT>(sizeof(import::ModelVertex) * mesh.vertices.size());
-            vertexDesc.Usage = D3D11_USAGE_IMMUTABLE;
+            vertexDesc.Usage = sub.skinned ? D3D11_USAGE_DYNAMIC : D3D11_USAGE_IMMUTABLE;
             vertexDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+            vertexDesc.CPUAccessFlags = sub.skinned ? D3D11_CPU_ACCESS_WRITE : 0;
             D3D11_SUBRESOURCE_DATA vertexInit{ mesh.vertices.data(), 0, 0 };
             ThrowIfFailed(device->CreateBuffer(&vertexDesc, &vertexInit, &sub.vertexBuffer), "CreateBuffer (model vertex) failed");
 
@@ -210,6 +266,7 @@ namespace engine::render
             // model vertices (so the index buffer is shared) but position +
             // *smoothed* normal, so the ring does not split at hard-normal seams.
             const std::vector<math::Vec3> smoothNormals = import::BuildSmoothNormals(mesh);
+            if (sub.skinned) sub.bindSmoothNormals = smoothNormals;
             std::vector<float> hull;
             hull.reserve(mesh.vertices.size() * 6);
             for (std::size_t i = 0; i < mesh.vertices.size(); ++i)
@@ -220,8 +277,9 @@ namespace engine::render
             }
             D3D11_BUFFER_DESC hullDesc{};
             hullDesc.ByteWidth = static_cast<UINT>(sizeof(float) * hull.size());
-            hullDesc.Usage = D3D11_USAGE_IMMUTABLE;
+            hullDesc.Usage = sub.skinned ? D3D11_USAGE_DYNAMIC : D3D11_USAGE_IMMUTABLE;
             hullDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+            hullDesc.CPUAccessFlags = sub.skinned ? D3D11_CPU_ACCESS_WRITE : 0;
             D3D11_SUBRESOURCE_DATA hullInit{ hull.data(), 0, 0 };
             ThrowIfFailed(device->CreateBuffer(&hullDesc, &hullInit, &sub.hullVertexBuffer), "CreateBuffer (hull) failed");
 
@@ -232,7 +290,7 @@ namespace engine::render
                 creaseVerts.push_back({ v.position.x, v.position.y, v.position.z,
                                         v.color.r, v.color.g, v.color.b, v.color.a });
 
-            m_subMeshes.push_back(sub);
+            m_subMeshes.push_back(std::move(sub));
         }
 
         if (!creaseVerts.empty())
@@ -250,7 +308,73 @@ namespace engine::render
         for (const SubMesh& s : m_subMeshes) if (s.texture != nullptr) ++textured;
         OutputDebugStringA(("ModelMeshPass3D: loaded '" + m_modelPath + "' ("
             + std::to_string(m_subMeshes.size()) + " submeshes, " + std::to_string(textured) + " textured, "
-            + std::to_string(m_creaseVertexCount / 6) + " crease segments)\n").c_str());
+            + std::to_string(m_creaseVertexCount / 6) + " crease segments, "
+            + std::to_string(m_clips.size()) + " animation clips)\n").c_str());
+    }
+
+    // Samples this frame's clip (or the bind pose) into m_boneScratch and
+    // re-skins every skinned submesh. Called once per frame from whichever of
+    // Execute()/RenderShadow() runs first (the shadow pass usually does) - see
+    // m_lastSkinnedFrame at both call sites.
+    void ModelMeshPass3D::UpdateSkinningForFrame(ID3D11DeviceContext* context, const Scene3D& scene)
+    {
+        if (m_skeleton.Empty() || m_clips.empty() || scene.modelDraws.empty()) return;
+
+        const ModelDraw& draw = scene.modelDraws.front();
+        const bool hasClip = draw.animClipIndex >= 0
+            && static_cast<std::size_t>(draw.animClipIndex) < m_clips.size()
+            && !m_clips[static_cast<std::size_t>(draw.animClipIndex)].tracks.empty();
+
+        if (hasClip)
+            m_animSampler.Evaluate(m_skeleton, m_clips[static_cast<std::size_t>(draw.animClipIndex)],
+                                    draw.animClipTime, m_boneScratch);
+        else
+            m_animSampler.EvaluateBindPose(m_skeleton, m_boneScratch);
+
+        for (SubMesh& sub : m_subMeshes) SkinAndUpload(context, sub);
+    }
+
+    // CPU linear-blend-skins `sub` from its bind-pose source vectors into its
+    // (DYNAMIC) GPU buffers using m_boneScratch. Runs on the render thread,
+    // which already owns these buffers and the D3D11 Map/Unmap calls (rule 1);
+    // only the small (clipIndex, clipTime) selection came from the sim thread
+    // via the snapshot (rule 3) - see docs/model-animation-research.md §5.2.
+    void ModelMeshPass3D::SkinAndUpload(ID3D11DeviceContext* context, SubMesh& sub) const
+    {
+        if (!sub.skinned) return;
+
+        D3D11_MAPPED_SUBRESOURCE celMapped{};
+        D3D11_MAPPED_SUBRESOURCE hullMapped{};
+        const bool celOk = SUCCEEDED(context->Map(sub.vertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &celMapped));
+        const bool hullOk = sub.hullVertexBuffer != nullptr
+            && SUCCEEDED(context->Map(sub.hullVertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &hullMapped));
+
+        auto* celDst = celOk ? static_cast<import::ModelVertex*>(celMapped.pData) : nullptr;
+        auto* hullDst = hullOk ? static_cast<float*>(hullMapped.pData) : nullptr;
+
+        for (std::size_t i = 0; i < sub.bindVertices.size(); ++i)
+        {
+            const import::ModelVertex& src = sub.bindVertices[i];
+            const math::Mat4 blend = BlendBoneMatrices(src.boneIndices, src.boneWeights, m_boneScratch);
+            const math::Vec3 pos = math::TransformPoint(src.position, blend);
+
+            if (celDst != nullptr)
+            {
+                celDst[i] = src;   // copies uv + bone fields too (unused by the shader, but keeps the stride intact)
+                celDst[i].position = pos;
+                celDst[i].normal = math::Normalized(math::TransformDirection(src.normal, blend));
+            }
+            if (hullDst != nullptr)
+            {
+                const math::Vec3 n = math::Normalized(math::TransformDirection(sub.bindSmoothNormals[i], blend));
+                float* out = hullDst + i * 6;
+                out[0] = pos.x; out[1] = pos.y; out[2] = pos.z;
+                out[3] = n.x; out[4] = n.y; out[5] = n.z;
+            }
+        }
+
+        if (celOk) context->Unmap(sub.vertexBuffer, 0);
+        if (hullOk) context->Unmap(sub.hullVertexBuffer, 0);
     }
 
     void ModelMeshPass3D::Initialize(ID3D11Device* device, ShaderLibrary& shaders)
@@ -340,6 +464,13 @@ namespace engine::render
         if (scene.modelDraws.empty()) return;
 
         ID3D11DeviceContext* device = context.context;
+
+        // Re-skin once per frame (the shadow pass usually gets here first).
+        if (context.snapshot->frameNumber != m_lastSkinnedFrame)
+        {
+            UpdateSkinningForFrame(device, scene);
+            m_lastSkinnedFrame = context.snapshot->frameNumber;
+        }
 
         FrameConstantsGpu frame{};
         FillFrameConstants(scene.camera, scene.lighting, frame);
@@ -437,6 +568,14 @@ namespace engine::render
         if (scene.modelDraws.empty()) return;
 
         ID3D11DeviceContext* device = context.context;
+
+        // Re-skin once per frame (this pass usually runs before Execute()).
+        if (context.snapshot->frameNumber != m_lastSkinnedFrame)
+        {
+            UpdateSkinningForFrame(device, scene);
+            m_lastSkinnedFrame = context.snapshot->frameNumber;
+        }
+
         device->IASetInputLayout(m_shadowShader->inputLayout);
         device->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         device->VSSetShader(m_shadowShader->vs, nullptr, 0);
@@ -477,6 +616,11 @@ namespace engine::render
         m_creaseShader = nullptr;
         m_shadowShader = nullptr;
         m_creaseVertexCount = 0;
+
+        m_skeleton = {};
+        m_clips.clear();
+        m_boneScratch.clear();
+        m_lastSkinnedFrame = ~0ull;
 
         SafeRelease(m_creaseVertexBuffer);
         SafeRelease(m_whiteTexture);

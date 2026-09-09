@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <string>
+#include <vector>
 
 // FBX -> engine Model, backed by the vendored ufbx library (src/vendor/ufbx).
 // ufbx is fully contained in ModelImporter.cpp; callers only see engine types.
@@ -34,4 +35,23 @@ namespace engine::import
 
     [[nodiscard]] ImportResult LoadModelFromFile(const std::string& path, const ImportOptions& options = {});
     [[nodiscard]] ImportResult LoadModelFromMemory(const void* data, std::size_t size, const ImportOptions& options = {});
+
+    struct AnimationImportResult
+    {
+        bool ok{ false };
+        std::string error;         // human-readable when !ok
+        std::vector<AnimationClip> clips;
+    };
+
+    // Loads only animation curves from an FBX that carries no skinned mesh of
+    // its own - the shape Unity-chan ships each clip in (one bones-only FBX
+    // per clip, under assets/models/unitychan/animation/). Tracks are
+    // retargeted onto `targetSkeleton` by bone name: a bone with no matching
+    // node in this file is simply absent from that clip's track list, and
+    // AnimationSampler holds its bind pose for the whole clip. Independent of
+    // LoadModelFromFile - does not build meshes/materials/a skeleton of its
+    // own. See docs/model-animation-research.md §5.
+    [[nodiscard]] AnimationImportResult LoadAnimationClipsFromFile(const std::string& path,
+                                                                    const Skeleton& targetSkeleton,
+                                                                    float sampleRate = 30.0f);
 }

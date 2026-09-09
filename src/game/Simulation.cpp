@@ -131,8 +131,15 @@ namespace engine::game
     }
 
 #if defined(ENGINE_WITH_3D)
-    void Simulation::StepDemo3D(float /*fixedDelta*/)
+    void Simulation::StepDemo3D(float fixedDelta)
     {
+        // Condition-based clip playback (docs/model-animation-research.md §5.3):
+        // round-robins through every Unity-chan clip, holding each for its
+        // table entry's holdSeconds. Only (clipIndex, clipTime) - small values
+        // - cross into the snapshot; ModelMeshPass3D owns the actual clip data
+        // and does the pose evaluation + skinning (see that pass).
+        m_heroAnimation.Tick(fixedDelta);
+
         // Satellites orbit the hero cube while their radius pulses in and out, so
         // they periodically enter and leave contact.
         for (int i = 0; i < kSatelliteCount; ++i)

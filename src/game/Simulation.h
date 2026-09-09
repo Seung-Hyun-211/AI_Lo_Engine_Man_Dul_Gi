@@ -11,6 +11,7 @@
 #include <vector>
 
 #if defined(ENGINE_WITH_3D)
+#include "game/CharacterAnimationState.h"
 #include "physics/p3d/CollisionWorld3D.h"
 #endif
 
@@ -59,6 +60,8 @@ namespace engine::game
         [[nodiscard]] float HeroSpin() const { return m_elapsed; }
         [[nodiscard]] const std::array<math::Vec3, kSatelliteCount>& SatelliteCenters() const { return m_satelliteCenters; }
         [[nodiscard]] const std::array<bool, kSatelliteCount>& SatelliteHitsHero() const { return m_satelliteHitsHero; }
+        [[nodiscard]] int HeroAnimClipIndex() const { return m_heroAnimation.ClipIndex(); }
+        [[nodiscard]] float HeroAnimClipTime() const { return m_heroAnimation.ClipTime(); }
 #endif
 
     private:
@@ -85,6 +88,7 @@ namespace engine::game
         std::array<math::Vec3, kSatelliteCount> m_satelliteCenters{};
         std::array<bool, kSatelliteCount> m_satelliteHitsHero{};
         physics::CollisionWorld3D m_collision3d;
+        CharacterAnimationState m_heroAnimation{ render::kUnityChanClips };
 #endif
     };
 }

@@ -190,6 +190,48 @@ namespace engine::import
 
         // ---- animation ---------------------------------------------------
 
+        // Bakes one anim stack to fixed-rate keys for every bone that has a
+        // matching node in `boneNode` (parallel to the target skeleton's bone
+        // list - a null entry means "this file doesn't animate that bone").
+        // Shared by the self-contained path (BuildAnimations, skeleton + clip
+        // in the same FBX) and the retargeted path (LoadAnimationClipsFromFile,
+        // clip in a separate bones-only FBX).
+        AnimationClip BakeClip(const ufbx_anim_stack* stack, const std::vector<const ufbx_node*>& boneNode,
+                               float sampleRate)
+        {
+            AnimationClip clip;
+            const double begin = stack->time_begin;
+            const double end = stack->time_end;
+            clip.duration = static_cast<float>(end - begin);
+            if (clip.duration <= 0.0f) return clip;
+
+            clip.name = ToStd(stack->name);
+            clip.sampleRate = sampleRate;
+
+            const float dt = sampleRate > 0.0f ? 1.0f / sampleRate : 1.0f / 30.0f;
+            const int steps = std::max(1, static_cast<int>(std::ceil(clip.duration / dt)));
+            for (size_t b = 0; b < boneNode.size(); ++b)
+            {
+                if (boneNode[b] == nullptr) continue;
+                BoneTrack track;
+                track.boneIndex = static_cast<int>(b);
+                track.keys.reserve(static_cast<size_t>(steps) + 1);
+                for (int k = 0; k <= steps; ++k)
+                {
+                    const double time = begin + std::min(static_cast<double>(k) * dt, static_cast<double>(clip.duration));
+                    const ufbx_transform xf = ufbx_evaluate_transform(stack->anim, boneNode[b], time);
+                    BoneKey key;
+                    key.time = static_cast<float>(time - begin);
+                    key.translation = ToVec3(xf.translation);
+                    key.rotation = ToQuat(xf.rotation);
+                    key.scale = ToVec3(xf.scale);
+                    track.keys.push_back(key);
+                }
+                clip.tracks.push_back(std::move(track));
+            }
+            return clip;
+        }
+
         void BuildAnimations(const ufbx_scene* scene, Model& model, float sampleRate)
         {
             if (model.skeleton.Empty()) return;
@@ -214,41 +256,9 @@ namespace engine::import
                 }
             }
 
-            const float dt = sampleRate > 0.0f ? 1.0f / sampleRate : 1.0f / 30.0f;
-
             for (size_t si = 0; si < scene->anim_stacks.count; ++si)
             {
-                const ufbx_anim_stack* stack = scene->anim_stacks.data[si];
-                const double begin = stack->time_begin;
-                const double end = stack->time_end;
-                const float duration = static_cast<float>(end - begin);
-                if (duration <= 0.0f) continue;
-
-                AnimationClip clip;
-                clip.name = ToStd(stack->name);
-                clip.duration = duration;
-                clip.sampleRate = sampleRate;
-
-                const int steps = std::max(1, static_cast<int>(std::ceil(duration / dt)));
-                for (size_t b = 0; b < model.skeleton.bones.size(); ++b)
-                {
-                    if (boneNode[b] == nullptr) continue;
-                    BoneTrack track;
-                    track.boneIndex = static_cast<int>(b);
-                    track.keys.reserve(static_cast<size_t>(steps) + 1);
-                    for (int k = 0; k <= steps; ++k)
-                    {
-                        const double time = begin + std::min(static_cast<double>(k) * dt, static_cast<double>(duration));
-                        const ufbx_transform xf = ufbx_evaluate_transform(stack->anim, boneNode[b], time);
-                        BoneKey key;
-                        key.time = static_cast<float>(time - begin);
-                        key.translation = ToVec3(xf.translation);
-                        key.rotation = ToQuat(xf.rotation);
-                        key.scale = ToVec3(xf.scale);
-                        track.keys.push_back(key);
-                    }
-                    clip.tracks.push_back(std::move(track));
-                }
+                AnimationClip clip = BakeClip(scene->anim_stacks.data[si], boneNode, sampleRate);
                 if (!clip.tracks.empty()) model.animations.push_back(std::move(clip));
             }
         }
@@ -357,6 +367,40 @@ namespace engine::import
 
         ImportResult result = BuildModel(scene, options);
         ufbx_free_scene(scene);
+        return result;
+    }
+
+    AnimationImportResult LoadAnimationClipsFromFile(const std::string& path, const Skeleton& targetSkeleton,
+                                                      float sampleRate)
+    {
+        ufbx_load_opts opts{};
+        opts.target_axes = ufbx_axes_left_handed_y_up;
+        opts.target_unit_meters = 1.0f;
+
+        ufbx_error error{};
+        ufbx_scene* scene = ufbx_load_file(path.c_str(), &opts, &error);
+        if (scene == nullptr) return { false, ToStd(error.description), {} };
+
+        // Bone lookup by name only - this file has no skin deformer to walk,
+        // just the bone node hierarchy the animation curves are attached to.
+        std::vector<const ufbx_node*> boneNode(targetSkeleton.bones.size(), nullptr);
+        for (size_t b = 0; b < targetSkeleton.bones.size(); ++b)
+            boneNode[b] = ufbx_find_node(scene, targetSkeleton.bones[b].name.c_str());
+
+        AnimationImportResult result;
+        result.ok = true;
+        for (size_t si = 0; si < scene->anim_stacks.count; ++si)
+        {
+            AnimationClip clip = BakeClip(scene->anim_stacks.data[si], boneNode, sampleRate);
+            if (!clip.tracks.empty()) result.clips.push_back(std::move(clip));
+        }
+        ufbx_free_scene(scene);
+
+        if (result.clips.empty())
+        {
+            result.ok = false;
+            result.error = "no animation stack in '" + path + "' matched any bone of the target skeleton";
+        }
         return result;
     }
 }

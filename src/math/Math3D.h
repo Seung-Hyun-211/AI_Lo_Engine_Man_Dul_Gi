@@ -93,6 +93,26 @@ namespace engine::math
         return r;
     }
 
+    // Transforms a point (w=1) by `m`, row-vector convention (`p * m`).
+    [[nodiscard]] inline Vec3 TransformPoint(Vec3 p, const Mat4& m)
+    {
+        return {
+            p.x * m.m[0] + p.y * m.m[4] + p.z * m.m[8]  + m.m[12],
+            p.x * m.m[1] + p.y * m.m[5] + p.z * m.m[9]  + m.m[13],
+            p.x * m.m[2] + p.y * m.m[6] + p.z * m.m[10] + m.m[14],
+        };
+    }
+
+    // Transforms a direction (w=0, translation ignored) by `m`.
+    [[nodiscard]] inline Vec3 TransformDirection(Vec3 v, const Mat4& m)
+    {
+        return {
+            v.x * m.m[0] + v.y * m.m[4] + v.z * m.m[8],
+            v.x * m.m[1] + v.y * m.m[5] + v.z * m.m[9],
+            v.x * m.m[2] + v.y * m.m[6] + v.z * m.m[10],
+        };
+    }
+
     // Left-handed view matrix (D3D convention).
     [[nodiscard]] inline Mat4 LookAtLH(Vec3 eye, Vec3 target, Vec3 up)
     {

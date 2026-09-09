@@ -1,20 +1,26 @@
 #include "game/Application.h"
 
+#include "game/InGameHud.h"
+#include "game/SettingsScreen.h"
+#include "game/TitleScreen.h"
+
 namespace engine::game
 {
     namespace
     {
         constexpr wchar_t kWindowTitle[] = L"AI Lo Engine - DX11 2D skeleton";
-        constexpr int kInitialWidth = 1280;
-        constexpr int kInitialHeight = 720;
     }
 
     Application::Application(HINSTANCE instance, render::IRenderer& renderer)
         : m_renderer(renderer)
         , m_jobs(core::RecommendedWorkerCount())
-        , m_window(instance, { kWindowTitle, kInitialWidth, kInitialHeight })
+        , m_settings(core::Settings::LoadOrDefault(core::kSettingsFilePath))
+        , m_window(instance, { kWindowTitle,
+                                core::kResolutionPresets[static_cast<std::size_t>(m_settings.resolutionIndex)].width,
+                                core::kResolutionPresets[static_cast<std::size_t>(m_settings.resolutionIndex)].height })
         , m_simulation(m_jobs, m_window.Width(), m_window.Height())
     {
+        EnterTitle();
     }
 
     int Application::Run()
@@ -23,7 +29,7 @@ namespace engine::game
         m_renderer.Start(m_window.Handle(),
                          static_cast<std::uint32_t>(m_window.Width()),
                          static_cast<std::uint32_t>(m_window.Height()));
-        m_renderer.SetFrameSettings({ .targetFramesPerSecond = 60, .verticalSync = true });
+        m_renderer.SetFrameSettings({ .targetFramesPerSecond = 60, .verticalSync = m_settings.vsync });
         m_window.Show();
 
         // The render thread borrows the window's HWND, so it must be stopped
@@ -48,8 +54,11 @@ namespace engine::game
                 const float delta = m_clock.Tick();
                 const PlayerIntent intent = BuildPlayerIntent();
                 const int steps = m_timestep.Advance(delta);
-                for (int step = 0; step < steps; ++step)
-                    m_simulation.Step(m_timestep.Step(), intent);
+                // The world only advances in-game, and not while Settings (or
+                // any future modal) sits on top of it - both read as "paused".
+                if (m_state == GameState::InGame && !m_ui.HasOverlay())
+                    for (int step = 0; step < steps; ++step)
+                        m_simulation.Step(m_timestep.Step(), intent);
 
                 // Submit every frame even with zero sim steps: the UI overlay may
                 // have changed and still needs to be redrawn.
@@ -67,6 +76,50 @@ namespace engine::game
         return 0;
     }
 
+    void Application::EnterTitle()
+    {
+        m_state = GameState::Title;
+        m_ui.ClearOverlay();
+        m_ui.SetScreen(BuildTitleScreen(
+            [this] { EnterInGame(); },
+            [this] { OpenSettings(); },
+            [this] { m_window.RequestClose(); }));
+    }
+
+    void Application::EnterInGame()
+    {
+        m_state = GameState::InGame;
+        m_ui.ClearOverlay();
+        m_ui.SetScreen(BuildInGameHud([this] { OpenSettings(); }));
+    }
+
+    void Application::OpenSettings()
+    {
+        m_ui.SetOverlay(BuildSettingsScreen(m_settings, SettingsScreenActions{
+            .onVsyncToggled = [this] { ApplyVsync(); },
+            .onResolutionChanged = [this] { ApplyResolution(); },
+            .onClose = [this] { CloseSettings(); },
+        }));
+    }
+
+    void Application::CloseSettings()
+    {
+        m_ui.ClearOverlay();
+        m_settings.Save(core::kSettingsFilePath);
+    }
+
+    void Application::ApplyVsync()
+    {
+        m_renderer.SetFrameSettings({ .targetFramesPerSecond = 60, .verticalSync = m_settings.vsync });
+    }
+
+    void Application::ApplyResolution()
+    {
+        const core::Resolution resolution =
+            core::kResolutionPresets[static_cast<std::size_t>(m_settings.resolutionIndex)];
+        m_window.RequestResize(resolution.width, resolution.height);
+    }
+
     PlayerIntent Application::BuildPlayerIntent() const
     {
         PlayerIntent intent{};
@@ -77,6 +130,12 @@ namespace engine::game
 
     void Application::OnKey(int virtualKey, bool down)
     {
+        if (down && virtualKey == VK_ESCAPE)
+        {
+            if (m_ui.HasOverlay()) CloseSettings();
+            else if (m_state == GameState::InGame) OpenSettings();
+            return;   // consumed by the menu, not gameplay
+        }
         m_input.OnKey(virtualKey, down);
     }
 
@@ -124,8 +183,15 @@ namespace engine::game
 
     void Application::OnClose()
     {
-        // Nothing extra to do: DefWindowProc destroys the window, WM_DESTROY
-        // posts WM_QUIT, and PumpMessages ends the loop. Hook kept for a future
-        // "unsaved changes?" prompt.
+        // Sliders/checkboxes already mutate m_settings live; only the disk
+        // write was deferred to CloseSettings(). Flush it here too so closing
+        // the window (X button / Alt+F4) while Settings is still open doesn't
+        // silently drop the change - this is the app's exit pipeline (see
+        // docs/scene-flow-design.md "종료 파이프라인"; JobSystem/Dx11Renderer/
+        // Win32Window each already tear themselves down via their own
+        // destructor, called after Run() returns).
+        m_settings.Save(core::kSettingsFilePath);
+        // DefWindowProc destroys the window, WM_DESTROY posts WM_QUIT, and
+        // PumpMessages ends the loop - no other shutdown step needed here.
     }
 }

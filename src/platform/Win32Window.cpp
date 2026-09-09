@@ -51,6 +51,20 @@ namespace engine::platform
         UpdateWindow(m_window);
     }
 
+    void Win32Window::RequestResize(int clientWidth, int clientHeight)
+    {
+        RECT rectangle{ 0, 0, clientWidth, clientHeight };
+        const auto style = static_cast<DWORD>(GetWindowLongPtrW(m_window, GWL_STYLE));
+        AdjustWindowRect(&rectangle, style, FALSE);
+        SetWindowPos(m_window, nullptr, 0, 0, rectangle.right - rectangle.left, rectangle.bottom - rectangle.top,
+                    SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+
+    void Win32Window::RequestClose()
+    {
+        DestroyWindow(m_window);
+    }
+
     bool Win32Window::PumpMessages()
     {
         MSG message{};
