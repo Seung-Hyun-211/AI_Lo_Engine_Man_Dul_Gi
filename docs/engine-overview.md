@@ -99,6 +99,7 @@ render(Dx11) ─▶ core(NonCopyable), D3D11     상위 레이어를 도로 참�
 - **새 차원 모듈** — `<layer>/core` + `<layer>/x2d` + `<layer>/x3d` 디렉터리, 서로 include 금지, `ENGINE_WITH_3D`로 3D 빌드 제외 가능하게. `render`·`physics`가 예시.
 - **새 위젯** — `ui::Widget`을 상속한다. 기존 위젯 수정 없이(OCP) `Build`(로컬 좌표 → `Quad`), `PointerXxx`(소비 시 `true`)만 구현한다. LSP: 기반 계약(로컬 좌표·`parentOrigin` 기준 배치·소비 반환)을 지킨다. `CheckBox`/`Slider`가 예시.
 - **새 화면/씬 상태** — `game/<Screen>.h/.cpp`에 위젯 트리를 만드는 자유 함수(`TitleScreen`/`InGameHud`/`SettingsScreen`이 예시), `Application`이 `UIContext::SetScreen`(전체 교체) 또는 `SetOverlay`(모달)로 꽂는다. `UIContext`는 게임 개념을 모른다(OCP). `GameState` enum에 값 추가 + `Application::Run`의 스텝 게이팅 조건 갱신. 세부 `docs/scene-flow-design.md`.
+- **새 엔티티 종류** — `core::EntityId`로 식별하고, 데이터는 단순 struct 배열(지금 `Particle`처럼, 조합이 없으면 `EntityId`도 불필요) 또는 컴포넌트 테이블(`EntityId`→행, 조합이 다양하면) 중 맞는 쪽을 고른다 — `core::EntityRegistry`는 생존만 관리하고 데이터는 안 갖는다(SRP). 세부·예시 코드 `docs/entity-lifecycle-design.md`.
 - **새 렌더 패스/스테이지** — `render::IRenderPass`(`Name`/`Initialize(device, ShaderLibrary&)`/`Execute`/`Release`)를 구현하고 `main.cpp`에서 `renderer.AddRenderPass(...)`로 등록한다(Start 전). 셰이더는 `assets/shaders/<name>.hlsl` + `shaders.Get(device, "<name>", layout, count)`. 렌더러 코어·기존 패스는 안 건드린다(OCP). 세부는 [shader-pipeline.md](shader-pipeline.md).
 - **셰이더 수정** — `assets/shaders/*.hlsl` 편집·저장 → 실행 중이면 다음 프레임에 핫리로드. 공통 코드는 `common3d.hlsli`.
 - **새 렌더 프리미티브** — `render/RenderSnapshot.h`에 값 타입을 추가하고(예: 텍스처용 `SpriteDraw`) 그것을 소비하는 패스를 만든다. 렌더러 코어에 게임 개념(`playerX` 등)을 하드코딩하지 않는다.

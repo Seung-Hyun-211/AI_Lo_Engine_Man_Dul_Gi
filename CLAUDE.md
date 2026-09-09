@@ -32,7 +32,7 @@ C++20 / Win32 / DirectX 11 기반 2D 게임 엔진 뼈대. 이 파일은 세션�
 
 9. 서드파티는 `src/vendor/`에 소스 vendor (현재 `ufbx` — FBX 로더, MIT/PD, v0.23.0). `ufbx.c`는 C++로 컴파일, 경고 off. ufbx 타입은 `src/import/ModelImporter.cpp` 안에만 — 밖으로는 엔진 타입(`import::Model` 등)만 나간다. 모델/애니메이션 세부는 `docs/model-animation-research.md`.
 
-모듈별 상세: `docs/engine-overview.md`(지도), `multithreaded_game_engine_architecture.md`(스레드), `ui-architecture.md`, `scene-flow-design.md`(Title/InGame/Settings 씬 상태), `game-settings.md`(설정 카탈로그), `synopsis.md`(게임 시놉시스, 초안), `time-design.md`, `collider-design.md`, `model-animation-research.md`, `animation-design.md`(2D/3D 애니메이션 통합 설계 + 연구 필요 항목), `shader-pipeline.md`(셰이더 로딩), `toon-rendering.md`(셀·아웃라인·크리즈), `lighting.md`(조명), `msaa.md`(AA), `shadows.md`(그림자).
+모듈별 상세: `docs/engine-overview.md`(지도), `multithreaded_game_engine_architecture.md`(스레드), `ui-architecture.md`, `scene-flow-design.md`(Title/InGame/Settings 씬 상태), `game-settings.md`(설정 카탈로그), `synopsis.md`(게임 시놉시스, 초안), `entity-lifecycle-design.md`(엔티티 식별·생존주기 뼈대), `time-design.md`, `collider-design.md`, `model-animation-research.md`, `animation-design.md`(2D/3D 애니메이션 통합 설계 + 연구 필요 항목), `shader-pipeline.md`(셰이더 로딩), `toon-rendering.md`(셀·아웃라인·크리즈), `lighting.md`(조명), `msaa.md`(AA), `shadows.md`(그림자).
 
 렌더러 코어는 **멀티샘플 씬 타깃**(`m_sceneColorRtv`/`m_sceneDepthDsv`, 최대 8x)에 그리고 프레임 끝에 백버퍼로 resolve한다. 패스는 백버퍼가 아니라 씬 타깃에 그린다. 세부 `docs/msaa.md`.
 
