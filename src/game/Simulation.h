@@ -169,6 +169,9 @@ namespace engine::game
         [[nodiscard]] const std::vector<Actor>& Actors() const { return m_actors; }
         [[nodiscard]] const core::ObjectPool<SimAgent>& SimAgents() const { return m_agents; }
         [[nodiscard]] const LookRayResult& LookRay() const { return m_lookRay; }
+        // Per pool slot: 1 if this crowd member overlapped another this step
+        // (CollisionWorld3D broadphase). Indexed by slot; sized to the pool.
+        [[nodiscard]] const std::vector<std::uint8_t>& AgentTouching() const { return m_agentTouch; }
 #endif
 
     private:
@@ -214,8 +217,9 @@ namespace engine::game
         core::ObjectPool<SimAgent> m_agents;       // scene 2: wandering crowd on the lower field
         std::vector<core::ObjectPool<SimAgent>::Handle> m_agentHandles;   // one per live crowd member (for the churn pass)
         std::size_t m_agentChurnCursor{ 0 };       // round-robin index into m_agentHandles
-        physics::CollisionWorld3D m_collision3d;   // scene 2: crowd colliders, rebuilt each step (raycast target)
+        physics::CollisionWorld3D m_collision3d;   // scene 2: crowd colliders, rebuilt each step (raycast + broadphase)
         LookRayResult m_lookRay;                   // scene 2: last player look-ray result (render-only)
+        std::vector<std::uint8_t> m_agentTouch;    // scene 2: per pool slot, 1 = overlapped another this step
         float m_cameraYaw{ 0.0f };                 // radians; orbit angle around the player
         float m_cameraPitch{ -0.28f };            // radians; negative looks down at the player
 #endif

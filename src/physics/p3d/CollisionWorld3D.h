@@ -33,8 +33,10 @@ namespace engine::physics
         math::Vec3    normal{};
     };
 
-    // 3D counterpart of CollisionWorld2D. Same contract, same brute-force
-    // broadphase. Built only when ENGINE_WITH_3D is defined.
+    // 3D counterpart of CollisionWorld2D. Same contract. Step() uses a uniform
+    // grid broadphase (rebuilt from the current colliders); the raycasts are
+    // still a linear scan (grid acceleration is roadmap D3b). Built only when
+    // ENGINE_WITH_3D is defined.
     class CollisionWorld3D final : private core::NonCopyable
     {
     public:
@@ -56,10 +58,39 @@ namespace engine::physics
         void RaycastAll(const Ray3D& ray, std::vector<RayHit3D>& outHits) const;        // every hit, distance-sorted
 
     private:
+        // Uniform-grid broadphase (implementation detail of Step()). Rebuilt
+        // lazily when a mutation set m_gridDirty. Cell size adapts to the mean
+        // collider extent; total cell count is capped (cell size grows to fit).
+        void RebuildGrid() const;
+        // Half-open cell index range [x0,x1] x [y0,y1] x [z0,z1] the collider's
+        // world AABB covers, clamped to the grid.
+        void CellRange(const Collider3D& c, int& x0, int& y0, int& z0,
+                       int& x1, int& y1, int& z1) const;
+        [[nodiscard]] std::size_t CellIndex(int x, int y, int z) const
+        {
+            return (static_cast<std::size_t>(z) * static_cast<std::size_t>(m_gridNy)
+                    + static_cast<std::size_t>(y)) * static_cast<std::size_t>(m_gridNx)
+                    + static_cast<std::size_t>(x);
+        }
+#if !defined(NDEBUG)
+        // Debug-only: the grid broadphase must produce exactly the brute-force
+        // contact set. Called under assert() from Step().
+        [[nodiscard]] bool ContactsMatchBruteForce() const;
+#endif
+
         std::vector<Collider3D> m_colliders;
         std::vector<ColliderId> m_ids;
         std::unordered_map<ColliderId, std::size_t> m_indexOf;
         std::vector<Contact> m_contacts;
         ColliderId m_nextId{ 1 };
+
+        mutable bool m_gridDirty{ true };
+        mutable math::Vec3 m_gridOrigin{};
+        mutable float m_gridCell{ 1.0f };
+        mutable int m_gridNx{ 0 }, m_gridNy{ 0 }, m_gridNz{ 0 };
+        mutable std::vector<std::vector<std::uint32_t>> m_cells;   // cell -> collider indices
+        mutable std::vector<std::uint64_t> m_pairStamp;            // per-collider "seen this i" marker
+        mutable std::uint64_t m_stamp{ 0 };
+        mutable std::uint32_t m_stepCounter{ 0 };
     };
 }

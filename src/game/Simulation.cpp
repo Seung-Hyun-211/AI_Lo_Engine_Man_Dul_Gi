@@ -477,6 +477,17 @@ namespace engine::game
                 m_lookRay.normal = hit->normal;
                 m_lookRay.agentSlot = static_cast<std::uint32_t>(hit->user);
             }
+
+            // Crowd-vs-crowd overlaps via the uniform-grid broadphase. Purely
+            // for the demo tint - a real game would drive separation / damage
+            // off this. `user` on each collider is the pool slot index.
+            m_collision3d.Step();
+            m_agentTouch.assign(m_agents.Capacity(), 0);
+            for (const physics::Contact& contact : m_collision3d.Contacts())
+            {
+                if (contact.userA < m_agentTouch.size()) m_agentTouch[contact.userA] = 1;
+                if (contact.userB < m_agentTouch.size()) m_agentTouch[contact.userB] = 1;
+            }
         }
     }
 #endif

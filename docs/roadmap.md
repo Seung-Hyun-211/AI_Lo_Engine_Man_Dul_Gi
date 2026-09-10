@@ -14,7 +14,7 @@
 |---|---|---|---|
 | 렌더 | MSAA 씬타깃, 셀+아웃라인+크리즈, 방향광 1개 + 단일 셰도우맵, MeshPass3D(큐브/평면 + **인스턴스드 드로우** + 프러스텀·거리 컬), QuadPass2D, 디버그 드로우 패스 | SpritePass2D + 아틀라스(무압축), ModelMeshPass3D(정적+CPU스키닝) | 포인트/스팟광, CSM, 투명 정렬, 인스턴스 LOD/빌보드, sRGB 파이프라인, 메시 LOD |
 | 애니메이션 | CPU LBS 스키닝, 클립 리타깃, Locomotion→클립 스냅, 재생 모드(Once/PingPong), 크로스페이드(로컬 TRS lerp), 파라메트릭 점프 | 2D 프레임 애니(설계만) | **루트 모션, GPU 스키닝, IK, 블렌드 트리** |
-| 물리/충돌 | Box/Sphere 탐지, layer/mask, Contacts, 레이캐스트 2D·3D(Closest/Any/All) + 데모 씬 2 `Simulation` 연동 | — | **브로드페이즈, 스윕/CCD, 캡슐, 트리거 enter/exit 이벤트, 재사용 캐릭터 컨트롤러** |
+| 물리/충돌 | Box/Sphere 탐지, layer/mask, Contacts, 3D 균일 그리드 브로드페이즈, 레이캐스트 2D·3D(Closest/Any/All) + 데모 씬 2 `Simulation` 연동 | — | **레이캐스트 그리드 가속(D3b), 2D 브로드페이즈, 스윕/CCD, 캡슐, 트리거 enter/exit 이벤트, 재사용 캐릭터 컨트롤러** |
 | 에셋 | FBX+스키닝, 이미지 디코드 seam, atlas_pack v1(무압축) | — | BC7 압축, AssetRegistry, 비동기 로더, 핫리로드(아틀라스/모델), 글리프 아틀라스 |
 | 게임 프레임워크 | 씬 상태(Title/InGame/Settings), 고정 스텝 + time scale, EntityId 뼈대, `core::ObjectPool<T>`, 오디오 최소 믹서(XAudio2) | ScrollList v1 | **오디오 스트리밍/3D음, 세이브, 이벤트 버스, 프리팹/직렬화, 게임 루프(장르 미정)** |
 | 입력 | 키보드/마우스/휠 | — | 게임패드(XInput), 리바인딩, 액션맵 레이어 |
@@ -134,7 +134,7 @@ if (auto hit = world.RaycastClosest(down)) { actor.pos.y = hit->point.y; actor.g
 
 | 항목 | 왜 | 문서 |
 |---|---|---|
-| 브로드페이즈(균일 그리드 or BVH) | N² 충돌은 엔티티 수십 개에서 한계. 레이캐스트도 이걸로 가속 | `collider-design.md` |
+| ~~브로드페이즈(균일 그리드)~~ ✅ 3D `Step()` | N² 탈출. 남음: 레이캐스트 DDA 가속(D3b), 2D, BVH | `collider-design.md` |
 | 재사용 캐릭터 컨트롤러 컴포넌트(move-and-slide) | 지금 `Simulation::StepOneActor` 에 하드코딩 — 재사용/조립 불가 | 새 `game/CharacterController` |
 | ~~오디오 서브시스템(XAudio2 최소 믹서)~~ ✅ → 스트리밍/3D음/OGG 후속 | 볼륨 슬라이더 살아남 | `docs/audio-design.md` §6 |
 | winding 검증 + back-face cull | 지금 전 3D 패스가 `CULL_NONE` (`engine-conventions.md` §10) | `engine-conventions.md` |
@@ -171,8 +171,8 @@ if (auto hit = world.RaycastClosest(down)) { actor.pos.y = hit->point.y; actor.g
 | # | 항목 | 왜 (디펜스) | 기존 표 |
 |---|---|---|---|
 | ~~D1~~ ✅ | **레이캐스트 + 범위 질의 + 디버그 드로우** | 타워가 사거리 안 적을 고르고, 투사체가 다수를 맞춘다 | §2.2 (구현 — 2D·3D + `Simulation` 연동 완료) |
-| D2 | **다수 엔티티 풀 + `core::ObjectPool<T>`** — ✅ `ObjectPool` 구현·크라우드 이주(AoS), SoA 승격(`game/AgentStore`)은 측정 게이트 | 수백~수천 적/투사체를 개별 `new` 없이 스폰·재사용 | `src/core/ObjectPool.h`, **`instanced-rendering.md` §6**, `scrollable-list-and-pool.md` §1.1 |
-| D3 | **브로드페이즈(균일 그리드)** | 다수 대 다수 충돌·타겟 질의 — 선형 스캔 N² 불가 | P1, `instanced-rendering.md` §6.4 |
+| ~~D2~~ ✅ | **다수 엔티티 풀 + `core::ObjectPool<T>`** (AoS. SoA 승격은 측정 게이트) | 수백~수천 적/투사체를 개별 `new` 없이 스폰·재사용 | `src/core/ObjectPool.h`, **`instanced-rendering.md` §6** |
+| ~~D3~~ ✅ (Step) | **브로드페이즈(균일 그리드)** — 3D `Step()` 완료. 레이캐스트 DDA 가속(D3b)만 남음 | 다수 대 다수 충돌·타겟 질의 — 선형 스캔 N² 불가 | `collider-design.md` "브로드페이즈" |
 | D4 | **인스턴싱 렌더** — ✅ 인스턴스드 드로우 + 프러스텀·거리 컬 + 거리 LOD 2단계(그림자 컷)(§8-1·2·3). 빌보드/중간 티어·`AgentStore` 남음 | 같은 메시 수천 개를 draw call 소수로 | **`instanced-rendering.md`** (§3~§5, 구현순서 §8) |
 | D5 | **웨이브/스폰 + HP/데미지 + 목표 지점·패배 판정** | 게임 루프 자체 | 새 `game/` 시스템 |
 | ~~D6~~ ✅ | 오디오 최소 믹서 | 타격·스폰·경보음 + 설정 슬라이더 살리기 | `audio-design.md` (최소 구현) |
@@ -190,12 +190,12 @@ if (auto hit = world.RaycastClosest(down)) { actor.pos.y = hit->point.y; actor.g
 
 착수 순서 제안: **1·2·3 완료 → (4 결정) → 5**.
 
-**현재 위치 (2026-09 기준)**: D1 ✅(2D·3D 레이캐스트 + `Simulation` 연동) · D2(`ObjectPool`) ✅ · D4(인스턴싱 + 거리 컬 + LOD 2단계) ✅. 남은 갈래:
-- **D3 — 브로드페이즈(균일 그리드)**: N² 탈출. 크라우드 콜라이더 rebuild(`StepCollision3D` — 지금 600개 선형)·개체끼리 질의·레이캐스트 후보 필터를 O(n) 으로. 게임 사이클 전 마지막 인프라.
-- **D4 잔여 — 빌보드/중간 LOD 티어** (`instanced-rendering.md` §5.3): 규모가 훨씬 커질 때 실효. 우선순위 낮음.
-- **D5 — 웨이브/스폰 + HP/데미지 + 목표·패배**: 게임 루프 본체.
+**현재 위치 (2026-09 기준)**: D1 ✅ · D2 ✅ · D3 ✅(3D `Step()` 그리드 — D3b 레이캐스트 DDA만 남음) · D4 ✅(인스턴싱 + 거리 컬 + LOD 2단계). **핵심 인프라 4개 완료.** 남은 갈래:
+- **D5 — 웨이브/스폰 + HP/데미지 + 목표 지점·패배 판정**: 게임 루프 본체. 여기부터 "게임 사이클".
+- **D3b — 레이캐스트 그리드 DDA**: `RaycastClosest/Any/All` 을 그리드 traversal 로. 지금은 선형(600개). 짧은 사거리 질의(타워)가 많아지면 실효.
+- **D4 잔여 — 빌보드/중간 LOD 티어**: 규모가 훨씬 커질 때.
 
-게임 사이클 전이면 **D3(브로드페이즈)** 가 다음으로 자연스럽다.
+게임 사이클 전이면 **D3b** 또는 **`game/AgentStore` SoA 승격**(측정 게이트) 정도. 그 외엔 D5 로 넘어갈 지점.
 
 ---
 

@@ -206,6 +206,7 @@ namespace engine::game
             const core::ObjectPool<SimAgent>& pool = simulation.SimAgents();
             const SimAgent* agentSlots = pool.Slots();
             const LookRayResult& look = simulation.LookRay();
+            const std::vector<std::uint8_t>& touching = simulation.AgentTouching();
 
             std::vector<render::MeshInstance> lodBucket[3];
             for (const std::uint32_t slotIdx : pool.ActiveIndices())
@@ -224,6 +225,10 @@ namespace engine::game
                 if (look.hit && look.agentSlot == slotIdx)
                 {
                     inst.colorRgba = PackRgba(1.0f, 0.9f, 0.2f, 1.0f);   // look-ray target
+                }
+                else if (slotIdx < touching.size() && touching[slotIdx] != 0)
+                {
+                    inst.colorRgba = PackRgba(0.95f, 0.35f, 0.30f, 1.0f);   // overlapping a neighbour
                 }
                 else
                 {
