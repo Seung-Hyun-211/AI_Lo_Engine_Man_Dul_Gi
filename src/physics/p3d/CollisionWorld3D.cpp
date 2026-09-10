@@ -17,8 +17,11 @@ namespace engine::physics
         constexpr float kMinCellSize = 0.25f;
         constexpr float kMaxCellSize = 64.0f;
         constexpr std::size_t kMaxCells = 262144;   // ~6 MB of empty vectors worst case
-        // Debug: cross-check the grid result against brute force every Nth Step.
+        // Debug: cross-check the grid result against brute force every Nth Step,
+        // but only while the collider count is small enough that O(n^2) is cheap
+        // (a scale test with tens of thousands would otherwise stall).
         constexpr std::uint32_t kBruteForceCheckEvery = 16;
+        constexpr std::size_t   kBruteForceCheckMaxColliders = 4096;
 
         [[nodiscard]] math::Vec3 ColliderExtent(const Collider3D& c)
         {
@@ -204,7 +207,8 @@ namespace engine::physics
         SortContacts(m_contacts);
 
 #if !defined(NDEBUG)
-        if ((m_stepCounter++ % kBruteForceCheckEvery) == 0)
+        if (count <= kBruteForceCheckMaxColliders
+            && (m_stepCounter++ % kBruteForceCheckEvery) == 0)
             assert(ContactsMatchBruteForce() && "grid broadphase disagrees with brute force");
 #endif
     }

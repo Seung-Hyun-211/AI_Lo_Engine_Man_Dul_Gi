@@ -123,8 +123,8 @@ namespace engine::game
         static constexpr float kCliffTop = 6.0f;         // scene 2: plateau (player) height
         static constexpr float kPlateauHalf = 4.0f;      // scene 2: player's walkable plateau half-size
         static constexpr float kFieldHalf = 30.0f;       // scene 2: lower field half-size
-        static constexpr int   kSimAgentCount = 600;      // scene 2: crowd alive on the field (one instanced draw)
-        static constexpr int   kSimAgentCapacity = 1024;  // scene 2: ObjectPool slot count (headroom for spawn/despawn)
+        static constexpr int   kSimAgentCount = 10000;    // scene 2: crowd alive on the field (scale check)
+        static constexpr int   kSimAgentCapacity = 12288; // scene 2: ObjectPool slot count (headroom for spawn/despawn)
         static constexpr float kSimAgentRadius = 0.3f;    // scene 2: crowd collision sphere radius (gameplay truth)
         static constexpr float kLookRayRange = 80.0f;     // scene 2: player look-ray max distance
 #endif

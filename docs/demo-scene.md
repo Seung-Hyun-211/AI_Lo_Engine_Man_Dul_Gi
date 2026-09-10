@@ -117,10 +117,12 @@ SnapshotBuilder (game/)
 
 - **씬 전환**: `src/game/Simulation.h` 의 `Simulation::kDemoScene` 를 `1` 또는 `2` 로. 리빌드.
   (런타임 토글이 필요해지면 생성자 인자로 승격 — 지금은 YAGNI.)
-- **군중 규모**: `kSimAgentCount`(live, 현재 600) 와 `kSimAgentCapacity`(풀 슬롯, 1024).
-  렌더는 배치 1개 = `DrawIndexedInstanced` 1콜이라 수천도 draw call 은 그대로.
-  `StepSimAgents`(`ParallelFor`)와 스냅샷 캡(`kMaxInstances=16384`)이 상한. 그 이상·애니메이션·
-  LOD 는 [instanced-rendering.md](instanced-rendering.md) §8.
+- **군중 규모**: `kSimAgentCount`(live, 현재 **10000 — 스케일 체크값**) 와 `kSimAgentCapacity`
+  (풀 슬롯, 12288). 평소 데모는 600 정도가 적당(10k 는 좁은 필드라 서로 겹쳐 빨간 카펫).
+  렌더는 배치 1개 = `DrawIndexedInstanced` 1콜, 상한은 `MeshPass3D::kMaxInstances`(16384).
+  `StepSimAgents`(`ParallelFor`) + 매 스텝 `CollisionWorld3D` rebuild/`Step()`/`RaycastClosest`
+  가 프레임 비용. 그 이상·SoA·D3b 레이캐스트 가속은 [instanced-rendering.md](instanced-rendering.md) §8,
+  [collider-design.md](collider-design.md).
 - **풀 churn 속도**: `kAgentChurnIntervalSteps`(현재 12스텝마다 1마리 재활용 — 데모용 검증 churn).
   키우면 재활용이 덜 눈에 띈다. 웨이브 스폰/디스폰이 생기면 이 churn 은 제거.
 - **필드·메사 치수**: `kCliffTop`(메사 높이), `kPlateauHalf`(플레이어 이동 반경), `kFieldHalf`
