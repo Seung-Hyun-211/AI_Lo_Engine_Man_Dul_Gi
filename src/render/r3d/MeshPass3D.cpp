@@ -2,6 +2,8 @@
 
 #if defined(ENGINE_WITH_3D)
 
+#include "import/ImageData.h"
+#include "import/ImageFile.h"
 #include "import/ModelImporter.h"
 #include "math/Math3D.h"
 #include "render/r3d/FrameConstants.h"
@@ -17,8 +19,10 @@
 
 namespace engine::render
 {
-    // Position + normal. Matches the input layout and the HLSL VSIn below.
-    struct MeshVertex { float px, py, pz, nx, ny, nz; };
+    // Position + normal + uv. Matches the input layouts and the HLSL VSIn
+    // below (stride 32). The pos-only shadow layouts read POSITION at offset 0
+    // and ignore the rest; mesh.hlsl reads POSITION + NORMAL and ignores uv.
+    struct MeshVertex { float px, py, pz, nx, ny, nz, u, v; };
 
     struct MeshData
     {
@@ -40,6 +44,9 @@ namespace
     // and you want to avoid the startup cost). Keep the metre height / pivot in
     // the matching game::CrowdConfig preset in sync when swapping this file.
     constexpr const char* kCrowdModelFbx = "assets/models/zombie/Zombie1.FBX";
+    // Diffuse for the crowd model (t0 in mesh_instanced.hlsl). Empty / missing
+    // => the 1x1 white fallback (flat-lit, tinted by the per-instance colour).
+    constexpr const char* kCrowdDiffuseTex = "assets/models/zombie/Zombie.tga";
 
     void ThrowIfFailed(HRESULT result, const char* message)
     {
@@ -53,7 +60,8 @@ namespace
     }
 
     // Adds one quad face (two triangles) spanning center +- u/2 +- v/2, all four
-    // vertices sharing the face normal. Winding is CCW seen from outside.
+    // vertices sharing the face normal. Winding is CCW seen from outside; each
+    // face gets a full 0..1 planar uv.
     void AddFace(MeshData& mesh, Vec3 center, Vec3 u, Vec3 v, Vec3 normal)
     {
         const auto base = static_cast<std::uint32_t>(mesh.vertices.size());
@@ -63,8 +71,10 @@ namespace
             center + u * 0.5f + v * 0.5f,
             center - u * 0.5f + v * 0.5f,
         };
-        for (const Vec3& c : corners)
-            mesh.vertices.push_back({ c.x, c.y, c.z, normal.x, normal.y, normal.z });
+        const float uvs[4][2]{ { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 } };
+        for (int i = 0; i < 4; ++i)
+            mesh.vertices.push_back({ corners[i].x, corners[i].y, corners[i].z,
+                                     normal.x, normal.y, normal.z, uvs[i][0], uvs[i][1] });
         for (std::uint32_t index : { 0u, 1u, 2u, 0u, 2u, 3u })
             mesh.indices.push_back(base + index);
     }
@@ -131,6 +141,7 @@ namespace engine::render
         const D3D11_INPUT_ELEMENT_DESC instanced[] = {
             { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,  0, D3D11_INPUT_PER_VERTEX_DATA,   0 },
             { "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA,   0 },
+            { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,    0, 24, D3D11_INPUT_PER_VERTEX_DATA,   0 },   // mesh uv
             { "TEXCOORD", 1, DXGI_FORMAT_R32G32B32_FLOAT, 1,  0, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
             { "TEXCOORD", 2, DXGI_FORMAT_R32_FLOAT,       1, 12, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
             { "TEXCOORD", 3, DXGI_FORMAT_R32_FLOAT,       1, 16, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
@@ -182,6 +193,27 @@ namespace engine::render
         rasterDesc.MultisampleEnable = TRUE;   // MSAA coverage (scene target is multisampled)
         ThrowIfFailed(device->CreateRasterizerState(&rasterDesc, &m_rasterizer), "CreateRasterizerState failed");
 
+        D3D11_SAMPLER_DESC samplerDesc{};
+        samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+        samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
+        samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
+        samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+        samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
+        ThrowIfFailed(device->CreateSamplerState(&samplerDesc, &m_sampler), "CreateSamplerState (mesh) failed");
+
+        const std::uint32_t white = 0xFFFFFFFFu;
+        D3D11_TEXTURE2D_DESC whiteDesc{};
+        whiteDesc.Width = 1; whiteDesc.Height = 1; whiteDesc.MipLevels = 1; whiteDesc.ArraySize = 1;
+        whiteDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        whiteDesc.SampleDesc.Count = 1;
+        whiteDesc.Usage = D3D11_USAGE_IMMUTABLE;
+        whiteDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        D3D11_SUBRESOURCE_DATA whiteInit{ &white, sizeof(white), 0 };
+        ID3D11Texture2D* whiteTex = nullptr;
+        ThrowIfFailed(device->CreateTexture2D(&whiteDesc, &whiteInit, &whiteTex), "CreateTexture2D (mesh white) failed");
+        ThrowIfFailed(device->CreateShaderResourceView(whiteTex, nullptr, &m_whiteSrv), "CreateSRV (mesh white) failed");
+        whiteTex->Release();
+
         CreateMesh(device, MeshId::Cube, MakeCube());
         CreateMesh(device, MeshId::Plane, MakePlane());
         LoadCrowdMesh(device);
@@ -210,7 +242,8 @@ namespace engine::render
                 const auto vbase = static_cast<std::uint32_t>(data.vertices.size());
                 for (const import::ModelVertex& v : m.vertices)
                     data.vertices.push_back({ v.position.x, v.position.y, v.position.z,
-                                              v.normal.x, v.normal.y, v.normal.z });
+                                              v.normal.x, v.normal.y, v.normal.z,
+                                              v.uv.x, v.uv.y });
                 for (const std::uint32_t idx : m.indices)
                     data.indices.push_back(vbase + idx);
             }
@@ -273,6 +306,44 @@ namespace engine::render
         OutputDebugStringA((std::string("MeshPass3D: crowd mesh '") + kCrowdModelFbx + "' loaded ("
             + std::to_string(data.vertices.size()) + " verts, "
             + std::to_string(data.indices.size() / 3) + " tris, zUp=" + (zUp ? "1" : "0") + ")\n").c_str());
+
+        // Crowd diffuse (t0). sRGB SRV so the sample is linearised before
+        // lighting (docs/image-assets.md §3; matches ModelMeshPass3D). Missing
+        // file -> stay on the white fallback.
+        if (kCrowdDiffuseTex != nullptr && kCrowdDiffuseTex[0] != '\0')
+        {
+            import::ImageData img;
+            for (const char* prefix : { "", "../../", "../../../" })
+            {
+                img = import::LoadImageFromFile(std::string(prefix) + kCrowdDiffuseTex);
+                if (img.ok) break;
+            }
+            if (img.ok && !img.rgba.empty())
+            {
+                D3D11_TEXTURE2D_DESC td{};
+                td.Width = static_cast<UINT>(img.width);
+                td.Height = static_cast<UINT>(img.height);
+                td.MipLevels = 1; td.ArraySize = 1;
+                td.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+                td.SampleDesc.Count = 1;
+                td.Usage = D3D11_USAGE_IMMUTABLE;
+                td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+                D3D11_SUBRESOURCE_DATA init{ img.rgba.data(), static_cast<UINT>(img.width) * 4, 0 };
+                ID3D11Texture2D* tex = nullptr;
+                if (SUCCEEDED(device->CreateTexture2D(&td, &init, &tex)))
+                {
+                    device->CreateShaderResourceView(tex, nullptr, &m_crowdDiffuseSrv);
+                    tex->Release();
+                    OutputDebugStringA((std::string("MeshPass3D: crowd diffuse '") + kCrowdDiffuseTex
+                        + "' " + std::to_string(img.width) + "x" + std::to_string(img.height) + "\n").c_str());
+                }
+            }
+            else
+            {
+                OutputDebugStringA((std::string("MeshPass3D: crowd diffuse '") + kCrowdDiffuseTex
+                    + "' not found - using white\n").c_str());
+            }
+        }
     }
 
     void MeshPass3D::Execute(const PassContext& context)
@@ -393,7 +464,13 @@ namespace engine::render
 
         device->IASetInputLayout(program->inputLayout);
         device->VSSetShader(program->vs, nullptr, 0);
-        if (!shadow) device->PSSetShader(program->ps, nullptr, 0);
+        if (!shadow)
+        {
+            device->PSSetShader(program->ps, nullptr, 0);
+            ID3D11ShaderResourceView* srv = m_crowdDiffuseSrv != nullptr ? m_crowdDiffuseSrv : m_whiteSrv;
+            device->PSSetShaderResources(0, 1, &srv);
+            device->PSSetSamplers(0, 1, &m_sampler);
+        }
 
         for (const InstanceBatch& batch : scene.instanceBatches)
         {
@@ -426,6 +503,9 @@ namespace engine::render
         m_shadowShader = nullptr;       // owned by ShaderLibrary
         m_instShader = nullptr;         // owned by ShaderLibrary
         m_shadowInstShader = nullptr;   // owned by ShaderLibrary
+        SafeRelease(m_crowdDiffuseSrv);
+        SafeRelease(m_whiteSrv);
+        SafeRelease(m_sampler);
         SafeRelease(m_rasterizer);
         SafeRelease(m_depthEnabled);
         SafeRelease(m_instanceBuffer);

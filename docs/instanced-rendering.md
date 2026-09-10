@@ -8,7 +8,8 @@
 크라우드의 **수·모델·크기는 `game/CrowdConfig.h` 의 `kActiveCrowd` 하나가 결정**(§9.5) —
 현재 `kCrowdZombies`(1500, `assets/models/zombie/Zombie1.FBX` 정적 bind pose). 원래 데모는
 `kCrowdBoxes`(600 큐브) 프리셋으로 한 줄 복귀.
-남은 것: LOD 중간 티어/빌보드(§5.3), **텍스처·애니메이션**(§9.6), SoA 승격(§6.2, 측정 게이트).
+남은 것: LOD 중간 티어/빌보드(§5.3), **애니메이션(VAT, §9.6-B)**, SoA 승격(§6.2, 측정 게이트).
+크라우드 디퓨즈 텍스처는 구현됨(§9.6-A).
 이 문서는 그 벽을 넘기 위한 **엔진 일반 선행작업** 전체를 설계한다 — 정적/강체 인스턴스를 한
 번의 `DrawIndexedInstanced` 로 그리는 경로, 스냅샷 값 타입, 컬링·LOD, 심(sim) 쪽 SoA + 풀.
 
@@ -576,15 +577,22 @@ inline constexpr CrowdConfig kActiveCrowd = kCrowdZombies;   // ← 이 줄만 �
 
 지금 크라우드는 **무텍스처·정적 bind pose**. 붙이는 두 갈래:
 
-**A. 텍스처 (정적 인스턴스, 작은 작업)**
+**A. 텍스처 (디퓨즈) — ✅ 구현됨**
 
-| 단계 | 무엇 | 기존 경로 / 재사용 |
-|---|---|---|
-| 1 | `MeshVertex` 에 `float u, v` 추가(stride 24→32), `MakeCube`/`MakePlane`/`LoadCrowdMesh` flatten 이 `ModelVertex::uv` 를 넣게, `mesh` 입력 레이아웃에 `TEXCOORD0` | `MeshPass3D` 안 |
-| 2 | `mesh_instanced_tex.hlsl`(또는 `#define TEXTURED`) — VSIn 에 `uv`, PS 에 `Texture2D diffuse : t0` + `SamplerState s0`, `ApplyLighting(diffuse.Sample(...).rgb * icol.rgb, ...)` | `mesh_instanced.hlsl` 복제 + `shaders.Get` |
-| 3 | 디퓨즈 로드: `import::LoadImageFromFile("assets/models/zombie/Zombie.tga")` → `import::ImageData`(RGBA8) → `CreateTexture2D` + SRV(`_UNORM_SRGB`) — **렌더 스레드에서만** | `docs/image-assets.md`; **`ModelMeshPass3D` 가 플레이어 디퓨즈 TGA 로 하는 그대로 복붙** |
-| 4 | `DrawInstanced` 에서 크라우드 배치 전에 `PSSetShaderResources(0,1,&srv)` + 샘플러 | `SpritePass2D` 의 SRV 바인딩 패턴 |
-| — | 노멀/AO/메탈릭/이미션(PNG·TGA 세트)은 탄젠트 프레임 필요 — importer 가 아직 안 뽑음(`model-animation-research.md` "탄젠트"). **디퓨즈만 먼저.** `.tga` 는 gitignore — 배포는 아틀라스(`atlas-build-pipeline.md`)나 ignore 해제 |
+- `MeshVertex` = position+normal+**uv**(stride 32). `AddFace`(큐브/평면)는 면당 0..1 planar uv,
+  `LoadCrowdMesh` flatten 은 `ModelVertex::uv`. `mesh_instanced` 입력 레이아웃에 `TEXCOORD0`(slot 0).
+  `mesh`/`shadow*` 레이아웃은 그대로(uv 무시) — stride 만 32.
+- `mesh_instanced.hlsl` PS 가 `Texture2D diffuse : t0` + `SamplerState samp : s0` 를 샘플:
+  `ApplyLighting(tex.rgb * icol.rgb, nrm, shadow)`, `alpha = tex.a * icol.a`.
+- `MeshPass3D::Initialize` 가 LINEAR/WRAP 샘플러 + 1×1 white SRV 생성. `LoadCrowdMesh` 가
+  `kCrowdDiffuseTex`(`assets/models/zombie/Zombie.tga`, 1024²)를 `import::LoadImageFromFile` →
+  `_UNORM_SRGB` SRV(`m_crowdDiffuseSrv`). 없으면 white 폴백. `DrawInstanced`(비셰도우)가
+  `PSSetShaderResources(0,1, crowdDiffuse ?: white)` + `PSSetSamplers(0,1,sampler)`.
+  (`ModelMeshPass3D` 의 디퓨즈 SRV·white 폴백 코드와 동형.)
+- `Zombie.tga` 는 `.gitignore` 에서 이 한 파일만 예외 처리(`!assets/models/zombie/Zombie.tga`).
+- **남음**: 노멀/AO/메탈릭/이미션 — 탄젠트 프레임 필요(importer 미추출, `model-animation-research.md`
+  "탄젠트"). 큐브 프리셋(`kCrowdBoxes`)은 white 샘플 → 기존과 동일. 배포 최적화는 아틀라스
+  (`atlas-build-pipeline.md`).
 
 **B. 애니메이션 (VAT, 큰 작업) — 전체 설계는 [horde-design.md](horde-design.md) §5**
 

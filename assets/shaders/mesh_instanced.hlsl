@@ -1,12 +1,17 @@
-// MeshPass3D instanced path: many copies of one built-in mesh, transform + colour
-// per instance from vertex stream slot 1 (no Object cbuffer). Y-rotation only, so
-// no matrix - two sin/cos. docs/instanced-rendering.md §4.4.
+// MeshPass3D instanced path: many copies of one mesh, transform + colour per
+// instance from vertex stream slot 1 (no Object cbuffer). Y-rotation only, so
+// no matrix - two sin/cos. Samples a diffuse at t0 (1x1 white when the crowd
+// has no texture). docs/instanced-rendering.md §4.4 / §9.6-A.
 #include "common3d.hlsli"
+
+Texture2D    diffuse : register(t0);
+SamplerState samp    : register(s0);
 
 struct VSIn
 {
     float3 pos    : POSITION;    // slot 0 - mesh vertex
     float3 nrm    : NORMAL;
+    float2 uv     : TEXCOORD0;
     float3 ipos   : TEXCOORD1;   // slot 1 - MeshInstance
     float  iyaw   : TEXCOORD2;
     float  iscale : TEXCOORD3;
@@ -18,6 +23,7 @@ struct VSOut
     float4 pos        : SV_POSITION;
     float3 nrm        : NORMAL;
     float4 shadowClip : TEXCOORD1;
+    float2 uv         : TEXCOORD0;
     float4 col        : COLOR0;
 };
 
@@ -34,12 +40,14 @@ VSOut VSMain(VSIn input)
     output.pos        = mul(float4(wp, 1.0f), viewProj);
     output.nrm        = wn;
     output.shadowClip = mul(float4(wp, 1.0f), lightViewProj);
+    output.uv         = input.uv;
     output.col        = input.icol;
     return output;
 }
 
 float4 PSMain(VSOut input) : SV_TARGET
 {
+    float4 tex = diffuse.Sample(samp, input.uv);
     float shadow = SampleShadow(input.shadowClip);
-    return float4(ApplyLighting(input.col.rgb, input.nrm, shadow), input.col.a);
+    return float4(ApplyLighting(tex.rgb * input.col.rgb, input.nrm, shadow), tex.a * input.col.a);
 }

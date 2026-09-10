@@ -12,6 +12,8 @@ struct ID3D11Buffer;
 struct ID3D11DeviceContext;
 struct ID3D11DepthStencilState;
 struct ID3D11RasterizerState;
+struct ID3D11SamplerState;
+struct ID3D11ShaderResourceView;
 
 namespace engine::render
 {
@@ -60,5 +62,8 @@ namespace engine::render
         ID3D11Buffer* m_instanceBuffer{};             // DYNAMIC, kMaxInstances * sizeof(MeshInstance)
         ID3D11DepthStencilState* m_depthEnabled{};
         ID3D11RasterizerState* m_rasterizer{};
+        ID3D11SamplerState* m_sampler{};              // LINEAR / WRAP, for the crowd diffuse
+        ID3D11ShaderResourceView* m_whiteSrv{};       // 1x1 white fallback (no crowd texture)
+        ID3D11ShaderResourceView* m_crowdDiffuseSrv{};// kCrowdDiffuseTex, or null -> white
     };
 }

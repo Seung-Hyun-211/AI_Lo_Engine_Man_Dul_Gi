@@ -108,11 +108,12 @@ SnapshotBuilder (game/)
                     = 노랑, AgentTouching()[slot] = 빨강, 그 외 속도 램프. 디버그 시선 레이 +
                     hit 마커). 씬 1(kBoxes)은 else.
   · MeshPass3D    : Initialize 에서 LoadCrowdMesh() — kCrowdModelFbx(현재 Zombie1.FBX) 를
-                    bind pose(position+normal)로 로드, Z-up 감지·회전 + 발 원점·단위 높이
-                    정규화 → MeshId::CrowdModel. 경로가 비면 스킵, 실패 시 큐브 폴백. 정적
-                    (애니메이션은 VAT — [instanced-rendering.md](instanced-rendering.md) §9.6).
-                    instanceBatches 를 배치당 DrawIndexedInstanced 1콜 (mesh_instanced.hlsl).
-                    셰도우 패스는 lod>=2(원거리) 배치 스킵.
+                    bind pose(position+normal+uv)로 로드, Z-up 감지·회전 + 발 원점·단위 높이
+                    정규화 → MeshId::CrowdModel. + kCrowdDiffuseTex(Zombie.tga) → _UNORM_SRGB
+                    SRV(m_crowdDiffuseSrv, 없으면 1×1 white). 경로 비면 스킵, 메시 실패 시
+                    큐브 폴백. 정적(애니 = VAT, [instanced-rendering.md](instanced-rendering.md) §9.6-B).
+                    instanceBatches 를 배치당 DrawIndexedInstanced 1콜 (mesh_instanced.hlsl 이
+                    diffuse@t0 샘플). 셰도우 패스는 lod>=2 배치 스킵.
 ```
 
 `SimAgent` 는 동질적이라 `EntityId` 없이 `core::ObjectPool<SimAgent>`(AoS, 슬롯 고정 +

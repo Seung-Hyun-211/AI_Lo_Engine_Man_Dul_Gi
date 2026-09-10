@@ -16,6 +16,8 @@ build/
 # pipeline. Delete these two lines to start tracking them.
 assets/**/*.tga
 assets/**/*.psd
+# ...except the crowd diffuse, which MeshPass3D loads for the instanced zombies.
+!assets/models/zombie/Zombie.tga
 
 # tools/atlas_pack incremental-build hashes (regenerated; the .dds/.atlas are committed)
 assets/atlas/*.cache
