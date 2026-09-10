@@ -30,6 +30,29 @@ namespace engine::render
         math::Color color{ 1.0f, 1.0f, 1.0f, 1.0f };
     };
 
+    // One member of an instanced crowd. Uploaded verbatim as a per-instance
+    // vertex stream (slot 1) - byte layout must match mesh_instanced.hlsl's
+    // per-instance inputs and MeshPass3D's instanced input layout. Transform is
+    // compact (position + Y-rotation + uniform scale); see
+    // docs/instanced-rendering.md §3/§10 for why, and when to widen it.
+    struct MeshInstance
+    {
+        math::Vec3    pos{};              // world                (offset 0)
+        float         yaw{ 0.0f };        // radians, Y axis      (offset 12)
+        float         scale{ 1.0f };      // uniform              (offset 16)
+        std::uint32_t colorRgba{ 0xffffffffu };   // 8:8:8:8, unpacked in the VS (offset 20)
+    };                                    // 24 bytes, no padding
+
+    // A contiguous run of Scene3D::meshInstances that share a mesh (and LOD).
+    // One batch == one DrawIndexedInstanced call. docs/instanced-rendering.md §3.
+    struct InstanceBatch
+    {
+        MeshId        mesh{ MeshId::Cube };
+        std::uint32_t first{ 0 };         // start index into Scene3D::meshInstances
+        std::uint32_t count{ 0 };
+        std::uint16_t lod{ 0 };           // 0 near / 1 mid / 2 far - reserved (LOD buckets: §5)
+    };
+
     // Camera for the 3D passes this frame.
     struct CameraView
     {
@@ -85,6 +108,11 @@ namespace engine::render
         std::vector<MeshDraw> meshDraws;
         std::vector<ModelDraw> modelDraws;
         std::vector<DebugLine> debugLines;
+
+        // Instanced crowds: every batch's instances live contiguously in
+        // meshInstances; instanceBatches slices it. docs/instanced-rendering.md.
+        std::vector<MeshInstance> meshInstances;
+        std::vector<InstanceBatch> instanceBatches;
     };
 
     // --- debug-line builders (header-only; call from wherever fills a Scene3D) ---

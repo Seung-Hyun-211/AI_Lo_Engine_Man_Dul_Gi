@@ -1,9 +1,11 @@
 # 대규모 인스턴스 렌더 — 수천 개체 출력 선행작업
 
-**상태: 설계만. 미구현.** 데모 씬 2([demo-scene.md](demo-scene.md))의 `SimAgent` 군중은 지금
-개체마다 `MeshDraw` 1개 = **draw call 1개**다. 수백까지는 버티지만 수천은 불가능하다. 이
-문서는 그 벽을 넘기 위한 **엔진 일반 선행작업**을 설계한다 — 정적/강체 인스턴스를 한 번의
-`DrawIndexedInstanced` 로 그리는 경로, 스냅샷 값 타입, 컬링·LOD, 심(sim) 쪽 SoA + 풀.
+**상태: §8 의 1~2 구현됨(인스턴스드 드로우 경로 + 프러스텀·거리 컬링), 3~6 미구현.**
+데모 씬 2([demo-scene.md](demo-scene.md))의 `SimAgent` 군중(현재 600마리)이 이제 배치 하나 =
+`DrawIndexedInstanced` 1콜로 그려지고, `SnapshotBuilder` 가 프러스텀·최대거리로 컬한다.
+남은 것: LOD 버킷/빌보드, `core::ObjectPool` + `game/AgentStore`(SoA), 브로드페이즈.
+이 문서는 그 벽을 넘기 위한 **엔진 일반 선행작업** 전체를 설계한다 — 정적/강체 인스턴스를 한
+번의 `DrawIndexedInstanced` 로 그리는 경로, 스냅샷 값 타입, 컬링·LOD, 심(sim) 쪽 SoA + 풀.
 
 **범위 경계**: 이 문서는 **강체 인스턴스**(트랜스폼만 다른 같은 메시)까지다. 인스턴스마다
 **다른 애니메이션**이 필요한 스킨드 군중(좀비 등)은 그 위에 VAT 를 얹는
@@ -24,8 +26,8 @@
 | 지점 | 현행 | 수천에 필요한 것 |
 |---|---|---|
 | **드로우 콜** | `MeshPass3D::Execute` 가 `scene.meshDraws` 를 순회하며 개체마다 `UpdateSubresource(Object cbuffer)` + `IASetVertexBuffers` + `DrawIndexed`. N개 = N콜 + N번 cbuffer 갱신 | 메시·LOD 가 같은 인스턴스를 모아 **배치당 `DrawIndexedInstanced` 1콜**. cbuffer 갱신은 프레임당 1회(Frame b0) |
-| **스냅샷 빌드** | `SnapshotBuilder::BuildCliffScene` 가 `for (SimAgent&) scene.meshDraws.push_back(...)` — 컬링·LOD 없음, 화면 밖도 전부 | 프러스텀 + 거리 컬링 후 **보이는 것만** 20B 레코드로. 메시·LOD 로 분할해 연속 배치 |
-| **스냅샷 크기** | `MeshDraw` = `Mat4`(64B) + color(16B) = 80B. 5,000개 = 400KB/프레임 | 컴팩트 인스턴스(pos+yaw+scale+color ≈ 20–32B). 5,000개 = 100–160KB — 1슬롯 메일박스 허용 |
+| **스냅샷 빌드** | ~~`for (SimAgent&) meshDraws.push_back(...)` — 컬링 없음~~ ✅ 프러스텀 + 최대거리 컬 후 `MeshInstance` 로 | (남음) LOD 분할, 메시 여러 종류 시 `(mesh,lod)` 버킷 |
+| **스냅샷 크기** | `MeshDraw` = `Mat4`(64B) + color(16B) = 80B. 5,000개 = 400KB/프레임 | 컴팩트 인스턴스(pos+yaw+scale+colorRgba = **24B**). 5,000개 = 120KB — 1슬롯 메일박스 허용 |
 | **심 업데이트** | `StepSimAgents` 는 이미 `ParallelFor` (좋음). 단 `std::vector<SimAgent>` 고정, 스폰/디스폰·풀 없음 | 고정 capacity SoA + `core::ObjectPool` free-list. 스폰/디스폰은 스텝 사이 |
 | **충돌** | `CollisionWorld3D` N² · 메인 전용 | 유니폼 그리드 브로드페이즈(2c). 개체끼리는 분리력, 콜라이더는 지형/플레이어만 |
 | **셰이더** | `mesh.hlsl` VS 가 `world`(Object cbuffer)를 읽음 | 인스턴스 변형: 트랜스폼·색을 **per-instance 정점 스트림**(slot 1)에서 |
@@ -74,11 +76,11 @@ namespace engine::render
     // 비균등 스케일이 필요 없다. 필요해지면 §10 참고(4x3 행렬로 확장).
     struct MeshInstance
     {
-        math::Vec3    pos;           // 월드
-        float         yaw;           // 라디안 (Y축 회전)
-        float         scale;         // 균등
-        std::uint32_t colorRgba;     // 8:8:8:8 packed (VS 에서 언팩) — 16B 절약
-    };                               // 20 bytes
+        math::Vec3    pos;           // 월드                (offset 0)
+        float         yaw;           // 라디안 (Y축 회전)   (offset 12)
+        float         scale;         // 균등                (offset 16)
+        std::uint32_t colorRgba;     // 8:8:8:8 packed (VS 에서 언팩)  (offset 20)
+    };                               // 24 bytes, 패딩 없음 (입력 레이아웃 오프셋이 이걸 가정)
 
     // 같은 메시·같은 LOD 인 MeshInstance 들의 연속 구간. 배치 하나 = 드로우 콜 하나.
     struct InstanceBatch
@@ -100,10 +102,10 @@ namespace engine::render
 
 - **`meshDraws` 는 남긴다.** 지형·프롭처럼 수십 개짜리 유니크 오브젝트는 기존 경로가 더 단순하다
   (OCP — 기존 타입 안 건드림). 인스턴스 경로는 "같은 메시 수백+" 전용.
-- **크기 예산**: `MeshInstance` 20B. 8,192개 = 160KB/프레임. `InstanceBatch` 16B × (메시종류 ×
+- **크기 예산**: `MeshInstance` 24B. 8,192개 ≈ 192KB/프레임. `InstanceBatch` 16B × (메시종류 ×
   LOD단계) — 보통 10개 미만. 1슬롯 메일박스가 오래된 프레임을 버려도 무해(규칙 4).
 - `colorRgba` 패킹은 선택 — 색이 인스턴스마다 다를 때만 의미. 배치 전체가 같은 색이면
-  `InstanceBatch` 에 색 하나 두고 `MeshInstance` 를 16B 로 줄여도 된다(§10).
+  `InstanceBatch` 에 색 하나 두고 `MeshInstance` 를 20B 로 줄여도 된다(§10).
 
 ---
 
@@ -391,8 +393,8 @@ namespace engine::game
 |---|---|
 | 1 (D3D11 은 렌더 스레드만) | 인스턴스 VB `CreateBuffer`/`Map` 전부 `MeshPass3D` 안. `SnapshotBuilder` 는 값 배열만 |
 | 2 (렌더러 코어 = clear/bind/pass 순회) | 새 드로우는 `MeshPass3D::Execute` 안. 코어 불변 |
-| 3 (경계는 값 스냅샷만) | `MeshInstance`(20B POD) + `InstanceBatch`. Mat4 팔레트·게임 객체 포인터 없음 |
-| 4 (1슬롯 메일박스) | 160KB/프레임, 오래된 프레임 버려도 무해 |
+| 3 (경계는 값 스냅샷만) | `MeshInstance`(24B POD) + `InstanceBatch`. Mat4 팔레트·게임 객체 포인터 없음 |
+| 4 (1슬롯 메일박스) | ~192KB/프레임(8k), 오래된 프레임 버려도 무해 |
 | 6 (ParallelFor 범위 독립) | `AgentStore::Step` 워커는 자기 `[begin,end)` 만 쓰기, 이웃은 이전 스텝 읽기. 스폰/디스폰·free-list·vector 재할당은 스텝 밖 |
 | 7 (2D/3D 분리) | `MeshInstance`/`InstanceBatch` 는 `render/r3d`. `math` 에 `MakeFrustum` 는 공통(값). 전부 `ENGINE_WITH_3D` |
 | 8 (충돌은 탐지만) | 브로드페이즈는 후보 목록만. 분리력·넉백은 `AgentStore` 안, physics 밖 |
@@ -401,12 +403,14 @@ namespace engine::game
 
 ## 8. 구현 순서 (측정 게이트마다 멈춤)
 
-1. **스냅샷 인스턴스 타입 + `MeshPass3D` 인스턴스 경로 + `mesh_instanced.hlsl`.**
-   데모 씬 2 의 `BuildCliffScene` 크라우드 루프를 `meshDraws.push_back` → `meshInstances` +
-   배치 1개로 교체(컬링·LOD 아직 없음, 큐브 하나). → **2k 큐브 스텝+드로우가 프레임 예산
-   안인지 측정.** 셰도우 인스턴스 경로도 여기서.
-2. **프러스텀 + 최대거리 컬링**(`SnapshotBuilder` + `math::MakeFrustum`). 화면 밖 스킵.
-   → 카메라를 돌리며 인스턴스 수가 줄어드는지 확인.
+1. ~~**스냅샷 인스턴스 타입 + `MeshPass3D` 인스턴스 경로 + `mesh_instanced.hlsl`.**~~ ✅
+   `render::MeshInstance`/`InstanceBatch` + `Scene3D::{meshInstances,instanceBatches}`,
+   `MeshPass3D` 확장(slot1 `PER_INSTANCE_DATA`, DYNAMIC VB `Map(WRITE_DISCARD)` 1회, 배치당
+   `DrawIndexedInstanced`), `mesh_instanced.hlsl` + `shadow_instanced.hlsl`(셰도우 인스턴스 경로).
+   `BuildCliffScene` 크라우드가 배치 1개로. `kMaxInstances = 16384`.
+2. ~~**프러스텀 + 최대거리 컬링**~~ ✅ `SnapshotBuilder` 익명 헬퍼 `MakeFrustum`(Gribb-Hartmann,
+   이 엔진 행렬 규약에 맞춤) + `SphereInFrustum` + `EyeFromView`. 데모 씬 2 크라우드 600마리를
+   컬 후 `MeshInstance` 로. (`math::MakeFrustum` 승격은 두 번째 사용처가 생기면.)
 3. **LOD 버킷**(거리 3단계). LOD2 는 우선 "작은 큐브 + 셰도우 생략"으로. 빌보드/임포스터는 뒤로.
    → 4k+ 목표.
 4. **`core::ObjectPool<T>` + `game/AgentStore`(SoA) + 스폰/디스폰.** `SimAgent` 를 SoA 로 승격,
@@ -485,10 +489,10 @@ m_jobs.ParallelFor(0, n, c, [&](size_t b, size_t e){ for(...) store.Despawn(i); 
 
 ## 10. 판단 필요 / 열린 질문
 
-- **인스턴스 트랜스폼 포맷: 압축(pos+yaw+scale, 20B) vs 4x3 행렬(48B).** 군중은 Y회전·균등
+- **인스턴스 트랜스폼 포맷: 압축(pos+yaw+scale, 24B) vs 4x3 행렬(48B+).** 군중은 Y회전·균등
   스케일뿐이라 압축이 맞다. 기울기·비균등 스케일(래그돌, 파편)이 필요해지면 배치별로 포맷을
   나누거나 4x3 로. 1차는 압축.
-- **색: per-instance(20B) vs per-batch(16B + 배치 색 1개).** 개체마다 색이 다르면 전자, 종류로만
+- **색: per-instance(24B) vs per-batch(20B + 배치 색 1개).** 개체마다 색이 다르면 전자, 종류로만
   갈리면 후자가 스냅샷·대역폭에 유리. 데모 씬 2 는 속도로 색 램프 → per-instance.
 - **`MeshPass3D` 확장 vs 새 `InstancedMeshPass3D`.** 지금은 확장(메시/셰도우/Frame 재사용).
   인스턴스 경로가 커지고 정점 포맷이 갈라지면 분리.

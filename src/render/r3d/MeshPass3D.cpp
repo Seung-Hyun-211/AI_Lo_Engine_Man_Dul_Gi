@@ -8,6 +8,7 @@
 
 #include <d3d11.h>
 
+#include <algorithm>
 #include <cstring>
 #include <stdexcept>
 #include <vector>
@@ -116,6 +117,27 @@ namespace engine::render
         };
         m_shadowShader = shaders.Get(device, "shadow", posOnly, ARRAYSIZE(posOnly));
 
+        // Instanced crowd path: mesh vertex on slot 0, one MeshInstance per
+        // instance on slot 1. Byte offsets match render::MeshInstance.
+        static_assert(sizeof(MeshInstance) == 24, "instanced input layout offsets assume {pos@0, yaw@12, scale@16, colorRgba@20}");
+        const D3D11_INPUT_ELEMENT_DESC instanced[] = {
+            { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,  0, D3D11_INPUT_PER_VERTEX_DATA,   0 },
+            { "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA,   0 },
+            { "TEXCOORD", 1, DXGI_FORMAT_R32G32B32_FLOAT, 1,  0, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "TEXCOORD", 2, DXGI_FORMAT_R32_FLOAT,       1, 12, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "TEXCOORD", 3, DXGI_FORMAT_R32_FLOAT,       1, 16, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "COLOR",    0, DXGI_FORMAT_R8G8B8A8_UNORM,  1, 20, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+        };
+        m_instShader = shaders.Get(device, "mesh_instanced", instanced, ARRAYSIZE(instanced));
+
+        const D3D11_INPUT_ELEMENT_DESC instancedShadow[] = {
+            { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,  0, D3D11_INPUT_PER_VERTEX_DATA,   0 },
+            { "TEXCOORD", 1, DXGI_FORMAT_R32G32B32_FLOAT, 1,  0, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "TEXCOORD", 2, DXGI_FORMAT_R32_FLOAT,       1, 12, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "TEXCOORD", 3, DXGI_FORMAT_R32_FLOAT,       1, 16, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+        };
+        m_shadowInstShader = shaders.Get(device, "shadow_instanced", instancedShadow, ARRAYSIZE(instancedShadow));
+
         D3D11_BUFFER_DESC frameDesc{};
         frameDesc.ByteWidth = sizeof(FrameConstantsGpu);
         frameDesc.Usage = D3D11_USAGE_DEFAULT;
@@ -127,6 +149,13 @@ namespace engine::render
         objectDesc.Usage = D3D11_USAGE_DEFAULT;
         objectDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
         ThrowIfFailed(device->CreateBuffer(&objectDesc, nullptr, &m_objectConstants), "CreateBuffer (mesh object) failed");
+
+        D3D11_BUFFER_DESC instDesc{};
+        instDesc.ByteWidth = sizeof(MeshInstance) * kMaxInstances;
+        instDesc.Usage = D3D11_USAGE_DYNAMIC;
+        instDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+        instDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        ThrowIfFailed(device->CreateBuffer(&instDesc, nullptr, &m_instanceBuffer), "CreateBuffer (mesh instance) failed");
 
         D3D11_DEPTH_STENCIL_DESC depthDesc{};
         depthDesc.DepthEnable = TRUE;
@@ -152,7 +181,9 @@ namespace engine::render
     void MeshPass3D::Execute(const PassContext& context)
     {
         const Scene3D& scene = context.snapshot->scene3d;
-        if (scene.meshDraws.empty() || m_shader == nullptr) return;
+        const bool hasUnique = !scene.meshDraws.empty() && m_shader != nullptr;
+        const bool hasInstanced = !scene.instanceBatches.empty() && m_instShader != nullptr;
+        if (!hasUnique && !hasInstanced) return;
 
         ID3D11DeviceContext* device = context.context;
 
@@ -163,60 +194,116 @@ namespace engine::render
         device->OMSetBlendState(nullptr, nullptr, 0xffffffff);
         device->OMSetDepthStencilState(m_depthEnabled, 0);
         device->RSSetState(m_rasterizer);
-        device->IASetInputLayout(m_shader->inputLayout);
         device->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        device->VSSetShader(m_shader->vs, nullptr, 0);
-        device->PSSetShader(m_shader->ps, nullptr, 0);
         device->VSSetConstantBuffers(0, 1, &m_frameConstants);
         device->PSSetConstantBuffers(0, 1, &m_frameConstants);
 
-        for (const MeshDraw& draw : scene.meshDraws)
+        if (hasUnique)
         {
-            const GpuMesh& mesh = m_meshes[static_cast<std::size_t>(draw.mesh)];
-            if (mesh.vertexBuffer == nullptr) continue;
+            device->IASetInputLayout(m_shader->inputLayout);
+            device->VSSetShader(m_shader->vs, nullptr, 0);
+            device->PSSetShader(m_shader->ps, nullptr, 0);
 
-            ObjectConstants object{};
-            std::memcpy(object.world, draw.world.m, sizeof(object.world));
-            object.color[0] = draw.color.r;
-            object.color[1] = draw.color.g;
-            object.color[2] = draw.color.b;
-            object.color[3] = draw.color.a;
-            device->UpdateSubresource(m_objectConstants, 0, nullptr, &object, 0, 0);
-            device->VSSetConstantBuffers(1, 1, &m_objectConstants);
-            device->PSSetConstantBuffers(1, 1, &m_objectConstants);
+            for (const MeshDraw& draw : scene.meshDraws)
+            {
+                const GpuMesh& mesh = m_meshes[static_cast<std::size_t>(draw.mesh)];
+                if (mesh.vertexBuffer == nullptr) continue;
 
-            const UINT stride = sizeof(MeshVertex), offset = 0;
-            device->IASetVertexBuffers(0, 1, &mesh.vertexBuffer, &stride, &offset);
-            device->IASetIndexBuffer(mesh.indexBuffer, DXGI_FORMAT_R32_UINT, 0);
-            device->DrawIndexed(mesh.indexCount, 0, 0);
+                ObjectConstants object{};
+                std::memcpy(object.world, draw.world.m, sizeof(object.world));
+                object.color[0] = draw.color.r;
+                object.color[1] = draw.color.g;
+                object.color[2] = draw.color.b;
+                object.color[3] = draw.color.a;
+                device->UpdateSubresource(m_objectConstants, 0, nullptr, &object, 0, 0);
+                device->VSSetConstantBuffers(1, 1, &m_objectConstants);
+                device->PSSetConstantBuffers(1, 1, &m_objectConstants);
+
+                const UINT stride = sizeof(MeshVertex), offset = 0;
+                device->IASetVertexBuffers(0, 1, &mesh.vertexBuffer, &stride, &offset);
+                device->IASetIndexBuffer(mesh.indexBuffer, DXGI_FORMAT_R32_UINT, 0);
+                device->DrawIndexed(mesh.indexCount, 0, 0);
+            }
         }
+
+        if (hasInstanced)
+            DrawInstanced(device, scene, /*shadow=*/false);
     }
 
     void MeshPass3D::RenderShadow(const ShadowContext& context)
     {
         const Scene3D& scene = context.snapshot->scene3d;
-        if (scene.meshDraws.empty() || m_shadowShader == nullptr) return;
+        const bool hasUnique = !scene.meshDraws.empty() && m_shadowShader != nullptr;
+        const bool hasInstanced = !scene.instanceBatches.empty() && m_shadowInstShader != nullptr;
+        if (!hasUnique && !hasInstanced) return;
 
         ID3D11DeviceContext* device = context.context;
-        device->IASetInputLayout(m_shadowShader->inputLayout);
         device->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        device->VSSetShader(m_shadowShader->vs, nullptr, 0);
         device->PSSetShader(nullptr, nullptr, 0);
 
-        for (const MeshDraw& draw : scene.meshDraws)
+        if (hasUnique)
         {
-            const GpuMesh& mesh = m_meshes[static_cast<std::size_t>(draw.mesh)];
+            device->IASetInputLayout(m_shadowShader->inputLayout);
+            device->VSSetShader(m_shadowShader->vs, nullptr, 0);
+
+            for (const MeshDraw& draw : scene.meshDraws)
+            {
+                const GpuMesh& mesh = m_meshes[static_cast<std::size_t>(draw.mesh)];
+                if (mesh.vertexBuffer == nullptr) continue;
+
+                ObjectConstants object{};
+                std::memcpy(object.world, draw.world.m, sizeof(object.world));
+                device->UpdateSubresource(m_objectConstants, 0, nullptr, &object, 0, 0);
+                device->VSSetConstantBuffers(1, 1, &m_objectConstants);
+
+                const UINT stride = sizeof(MeshVertex), offset = 0;
+                device->IASetVertexBuffers(0, 1, &mesh.vertexBuffer, &stride, &offset);
+                device->IASetIndexBuffer(mesh.indexBuffer, DXGI_FORMAT_R32_UINT, 0);
+                device->DrawIndexed(mesh.indexCount, 0, 0);
+            }
+        }
+
+        if (hasInstanced)
+            DrawInstanced(device, scene, /*shadow=*/true);
+    }
+
+    // Uploads scene.meshInstances to the DYNAMIC buffer once, then one
+    // DrawIndexedInstanced per batch. `shadow` picks the depth-only shader and
+    // skips far-LOD batches (their shadows do not read). docs/instanced-rendering.md §4.
+    void MeshPass3D::DrawInstanced(ID3D11DeviceContext* device, const Scene3D& scene, bool shadow)
+    {
+        const ShaderProgram* program = shadow ? m_shadowInstShader : m_instShader;
+        if (program == nullptr || m_instanceBuffer == nullptr) return;
+
+        const UINT total = static_cast<UINT>(
+            std::min<std::size_t>(scene.meshInstances.size(), kMaxInstances));
+        if (total == 0) return;
+
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        if (FAILED(device->Map(m_instanceBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) return;
+        std::memcpy(mapped.pData, scene.meshInstances.data(), total * sizeof(MeshInstance));
+        device->Unmap(m_instanceBuffer, 0);
+
+        device->IASetInputLayout(program->inputLayout);
+        device->VSSetShader(program->vs, nullptr, 0);
+        if (!shadow) device->PSSetShader(program->ps, nullptr, 0);
+
+        for (const InstanceBatch& batch : scene.instanceBatches)
+        {
+            if (shadow && batch.lod >= 2) continue;                 // far crowd casts no shadow
+            if (batch.first >= total) continue;
+            const UINT count = std::min(batch.count, total - batch.first);
+            if (count == 0) continue;
+
+            const GpuMesh& mesh = m_meshes[static_cast<std::size_t>(batch.mesh)];
             if (mesh.vertexBuffer == nullptr) continue;
 
-            ObjectConstants object{};
-            std::memcpy(object.world, draw.world.m, sizeof(object.world));
-            device->UpdateSubresource(m_objectConstants, 0, nullptr, &object, 0, 0);
-            device->VSSetConstantBuffers(1, 1, &m_objectConstants);
-
-            const UINT stride = sizeof(MeshVertex), offset = 0;
-            device->IASetVertexBuffers(0, 1, &mesh.vertexBuffer, &stride, &offset);
+            ID3D11Buffer* buffers[2] = { mesh.vertexBuffer, m_instanceBuffer };
+            const UINT strides[2] = { sizeof(MeshVertex), sizeof(MeshInstance) };
+            const UINT offsets[2] = { 0, batch.first * static_cast<UINT>(sizeof(MeshInstance)) };
+            device->IASetVertexBuffers(0, 2, buffers, strides, offsets);
             device->IASetIndexBuffer(mesh.indexBuffer, DXGI_FORMAT_R32_UINT, 0);
-            device->DrawIndexed(mesh.indexCount, 0, 0);
+            device->DrawIndexedInstanced(mesh.indexCount, count, 0, 0, 0);
         }
     }
 
@@ -228,10 +315,13 @@ namespace engine::render
             SafeRelease(mesh.indexBuffer);
             mesh.indexCount = 0;
         }
-        m_shader = nullptr;         // owned by ShaderLibrary
-        m_shadowShader = nullptr;   // owned by ShaderLibrary
+        m_shader = nullptr;             // owned by ShaderLibrary
+        m_shadowShader = nullptr;       // owned by ShaderLibrary
+        m_instShader = nullptr;         // owned by ShaderLibrary
+        m_shadowInstShader = nullptr;   // owned by ShaderLibrary
         SafeRelease(m_rasterizer);
         SafeRelease(m_depthEnabled);
+        SafeRelease(m_instanceBuffer);
         SafeRelease(m_objectConstants);
         SafeRelease(m_frameConstants);
     }

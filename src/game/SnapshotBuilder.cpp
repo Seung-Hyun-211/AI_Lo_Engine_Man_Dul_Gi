@@ -20,6 +20,64 @@ namespace engine::game
         // "forward"; if the character ever runs backwards, flip this to kPi.
         constexpr float kModelYawOffset = 0.0f;
 
+        // --- crowd culling (docs/instanced-rendering.md §5) -------------------
+        // A plane a*x + b*y + c*z + d >= 0 marks the inside half-space.
+        struct Plane { float a, b, c, d; };
+        struct Frustum { Plane p[6]; };
+
+        Plane NormalizePlane(Plane p)
+        {
+            const float inv = 1.0f / std::sqrt(p.a * p.a + p.b * p.b + p.c * p.c);
+            return { p.a * inv, p.b * inv, p.c * inv, p.d * inv };
+        }
+
+        // Gribb-Hartmann from a row-major, row-vector view*projection. Column k
+        // of vp is (m[k], m[4+k], m[8+k], m[12+k]); clip.x = worldHom . col0,
+        // clip.w = worldHom . col3. left = col3 + col0, right = col3 - col0, ...
+        // near = col2 (this engine's projections put clip z in [0, w]).
+        Frustum MakeFrustum(const math::Mat4& vp)
+        {
+            const auto plane = [&](int k, float s) {
+                return NormalizePlane({ vp.m[3] + s * vp.m[k],
+                                        vp.m[7] + s * vp.m[4 + k],
+                                        vp.m[11] + s * vp.m[8 + k],
+                                        vp.m[15] + s * vp.m[12 + k] });
+            };
+            Frustum f{};
+            f.p[0] = plane(0, +1.0f);   // left
+            f.p[1] = plane(0, -1.0f);   // right
+            f.p[2] = plane(1, +1.0f);   // bottom
+            f.p[3] = plane(1, -1.0f);   // top
+            f.p[4] = NormalizePlane({ vp.m[2], vp.m[6], vp.m[10], vp.m[14] });   // near
+            f.p[5] = plane(2, -1.0f);   // far
+            return f;
+        }
+
+        bool SphereInFrustum(const Frustum& f, math::Vec3 c, float r)
+        {
+            for (const Plane& pl : f.p)
+                if (pl.a * c.x + pl.b * c.y + pl.c * c.z + pl.d < -r) return false;
+            return true;
+        }
+
+        // Camera position from a LookAtLH view matrix (orthonormal 3x3 +
+        // translation row = -(axis . eye)).
+        math::Vec3 EyeFromView(const math::Mat4& v)
+        {
+            const float tx = v.m[12], ty = v.m[13], tz = v.m[14];
+            return { -(tx * v.m[0] + ty * v.m[1] + tz * v.m[2]),
+                     -(tx * v.m[4] + ty * v.m[5] + tz * v.m[6]),
+                     -(tx * v.m[8] + ty * v.m[9] + tz * v.m[10]) };
+        }
+
+        std::uint32_t PackRgba(float r, float g, float b, float a)
+        {
+            const auto u8 = [](float v) {
+                return static_cast<std::uint32_t>(math::Clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f);
+            };
+            return u8(r) | (u8(g) << 8) | (u8(b) << 16) | (u8(a) << 24);
+        }
+
         // Third-person orbit camera: sits behind + above the character at the
         // yaw/pitch the mouse drives (Simulation::UpdateCameraLook) and always
         // looks at a point near the character's chest.
@@ -131,18 +189,42 @@ namespace engine::game
                 scene.meshDraws.push_back(draw);
             }
 
-            // The simulation crowd: one small cube per agent. Colour ramps with
-            // speed (slow = teal, fast = amber) so the churn reads at a glance.
+            // The simulation crowd: instanced cubes, one DrawIndexedInstanced for
+            // the whole batch (docs/instanced-rendering.md). Frustum + distance
+            // culled here so off-screen agents never reach the GPU. Colour ramps
+            // with speed (slow = teal, fast = amber) so the churn reads.
+            constexpr float kAgentScale = 0.5f;
+            constexpr float kAgentCullRadius = 0.5f;   // bounding sphere for the frustum test
+            constexpr float kAgentCullDist = 90.0f;    // past this, skip
+            const math::Mat4 viewProj = scene.camera.view * scene.camera.projection;
+            const Frustum frustum = MakeFrustum(viewProj);
+            const math::Vec3 eye = EyeFromView(scene.camera.view);
+
+            const std::size_t firstInstance = scene.meshInstances.size();
             for (const SimAgent& a : simulation.SimAgents())
             {
-                render::MeshDraw draw{};
-                draw.mesh = render::MeshId::Cube;
-                draw.world = math::Scaling({ 0.35f, 0.7f, 0.35f })
-                           * math::RotationY(a.heading)
-                           * math::Translation(a.pos + math::Vec3{ 0.0f, 0.35f, 0.0f });
+                const math::Vec3 center = a.pos + math::Vec3{ 0.0f, kAgentScale * 0.5f, 0.0f };
+                if (!SphereInFrustum(frustum, center, kAgentCullRadius)) continue;
+                const math::Vec3 d = center - eye;
+                if (math::Dot(d, d) > kAgentCullDist * kAgentCullDist) continue;
+
                 const float hot = math::Clamp((a.speed - 0.8f) / 1.4f, 0.0f, 1.0f);
-                draw.color = { 0.25f + 0.65f * hot, 0.62f - 0.22f * hot, 0.70f - 0.45f * hot, 1.0f };
-                scene.meshDraws.push_back(draw);
+                render::MeshInstance inst{};
+                inst.pos = center;
+                inst.yaw = a.heading;
+                inst.scale = kAgentScale;
+                inst.colorRgba = PackRgba(0.25f + 0.65f * hot, 0.62f - 0.22f * hot,
+                                          0.70f - 0.45f * hot, 1.0f);
+                scene.meshInstances.push_back(inst);
+            }
+            if (scene.meshInstances.size() > firstInstance)
+            {
+                render::InstanceBatch batch{};
+                batch.mesh = render::MeshId::Cube;
+                batch.first = static_cast<std::uint32_t>(firstInstance);
+                batch.count = static_cast<std::uint32_t>(scene.meshInstances.size() - firstInstance);
+                batch.lod = 0;
+                scene.instanceBatches.push_back(batch);
             }
 
             // Debug draw: player AABB + a yellow line along the cliff edge the

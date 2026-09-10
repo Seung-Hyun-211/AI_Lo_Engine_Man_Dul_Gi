@@ -9,6 +9,7 @@
 #include <cstdint>
 
 struct ID3D11Buffer;
+struct ID3D11DeviceContext;
 struct ID3D11DepthStencilState;
 struct ID3D11RasterizerState;
 
@@ -37,12 +38,20 @@ namespace engine::render
         };
 
         void CreateMesh(ID3D11Device* device, MeshId id, const struct MeshData& data);
+        void DrawInstanced(ID3D11DeviceContext* context, const Scene3D& scene, bool shadow);
+
+        // Upper bound on instances uploaded per frame. Must match the cap the
+        // SnapshotBuilder applies. docs/instanced-rendering.md §4.2/§9.3.
+        static constexpr std::uint32_t kMaxInstances = 16384;
 
         std::array<GpuMesh, static_cast<std::size_t>(MeshId::Count)> m_meshes{};
-        const ShaderProgram* m_shader{};         // owned by ShaderLibrary
-        const ShaderProgram* m_shadowShader{};   // depth-only, owned by ShaderLibrary
+        const ShaderProgram* m_shader{};              // owned by ShaderLibrary
+        const ShaderProgram* m_shadowShader{};        // depth-only, owned by ShaderLibrary
+        const ShaderProgram* m_instShader{};          // instanced crowd, owned by ShaderLibrary
+        const ShaderProgram* m_shadowInstShader{};    // instanced depth-only, owned by ShaderLibrary
         ID3D11Buffer* m_frameConstants{};
         ID3D11Buffer* m_objectConstants{};
+        ID3D11Buffer* m_instanceBuffer{};             // DYNAMIC, kMaxInstances * sizeof(MeshInstance)
         ID3D11DepthStencilState* m_depthEnabled{};
         ID3D11RasterizerState* m_rasterizer{};
     };

@@ -102,7 +102,7 @@ namespace engine::game
         static constexpr float kCliffTop = 6.0f;         // scene 2: plateau (player) height
         static constexpr float kPlateauHalf = 4.0f;      // scene 2: player's walkable plateau half-size
         static constexpr float kFieldHalf = 30.0f;       // scene 2: lower field half-size
-        static constexpr int   kSimAgentCount = 120;     // scene 2: crowd size on the field
+        static constexpr int   kSimAgentCount = 600;     // scene 2: crowd size on the field (one instanced draw)
 #endif
 
         Simulation(core::JobSystem& jobs, int worldWidth, int worldHeight);

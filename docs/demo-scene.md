@@ -92,20 +92,24 @@ SnapshotBuilder (game/)
   · BuildCamera   : kDemoScene==2 면 orbit 거리 3.6→6.0 (필드·군중이 프레임에 들어오게).
   · BuildLighting : 씬 2 는 셰도우 ortho 를 넓히고(22→64) 중심을 +Z 로 밀어 군중을 덮는다.
   · BuildScene3D  : kDemoScene==2 → BuildCliffScene (넓은 평지 Plane + 메사 Cube +
-                    기둥 마커 몇 개 + SimAgent 마다 작은 Cube(속도로 색 램프) + 디버그로
-                    플레이어 AABB·절벽 모서리 라인). 씬 1 경로(kBoxes 등)는 else 로 보존.
+                    기둥 마커 + **크라우드 = 인스턴스드 배치 1개**: 프러스텀·최대거리 컬 후
+                    SimAgent → render::MeshInstance, scene.instanceBatches 에 배치 1개 +
+                    디버그 플레이어 AABB·절벽 모서리). 씬 1 경로(kBoxes)는 else 로 보존.
+  · MeshPass3D    : instanceBatches 를 배치당 DrawIndexedInstanced 1콜 (mesh_instanced.hlsl).
+                    상세 [instanced-rendering.md](instanced-rendering.md).
 ```
 
 `SimAgent` 는 동질적이라 `EntityId` 없이 `std::vector<SimAgent>` ([entity-lifecycle-design.md](entity-lifecycle-design.md) §3A).
-스레드 경계는 여전히 값뿐 — 군중도 `MeshDraw` 값 배열로만 스냅샷에 실린다.
+스레드 경계는 여전히 값뿐 — 군중은 `render::MeshInstance`(24B POD) 배열 + `InstanceBatch` 로만
+스냅샷에 실린다.
 
 ### 사용 방법 (How to use)
 
 - **씬 전환**: `src/game/Simulation.h` 의 `Simulation::kDemoScene` 를 `1` 또는 `2` 로. 리빌드.
   (런타임 토글이 필요해지면 생성자 인자로 승격 — 지금은 YAGNI.)
-- **군중 규모**: `kSimAgentCount`. `StepSimAgents` 는 `ParallelFor` 라 수백까지는 그대로.
-  수천 이상이면 인스턴싱 렌더(roadmap D4)·브로드페이즈(D3) 가 선행돼야 한다 —
-  지금은 `SimAgent` 마다 `MeshDraw` 1개(=draw call 1개)다.
+- **군중 규모**: `kSimAgentCount`(현재 600). 렌더는 배치 1개 = `DrawIndexedInstanced` 1콜이라
+  수천도 draw call 은 그대로. `StepSimAgents`(`ParallelFor`)와 스냅샷 캡(`kMaxInstances=16384`)이
+  상한. 그 이상·애니메이션·LOD 는 [instanced-rendering.md](instanced-rendering.md) §8.
 - **필드·메사 치수**: `kCliffTop`(메사 높이), `kPlateauHalf`(플레이어 이동 반경), `kFieldHalf`
   (평지 반경). `SnapshotBuilder.cpp` 의 `BuildCliffScene` 가 이 값으로 프롭을 배치하므로
   숫자만 바꾸면 메사·평지·모서리 라인이 같이 따라온다.
@@ -117,8 +121,9 @@ SnapshotBuilder (game/)
 - `SimAgent` 스텝을 `Step()` 밖에서 돌리지 말 것 — 고정 timestep 규칙은 씬 1 과 동일.
 - `StepSimAgents` 의 잡 람다에서 `m_agents` 재할당·다른 잡의 범위 접근·공유 카운터 금지
   (불변 규칙 6). 인덱스로 자기 구간만.
-- 군중을 스킨드 모델(`ModelDraw`)로 그리지 말 것 — `ModelMeshPass3D` 는 인스턴스 1개만
-  CPU 스킨한다(문서화된 제약). 다수는 `MeshDraw`(또는 장차 인스턴싱).
+- 군중을 스킨드 모델(`ModelDraw`)이나 개체마다 `MeshDraw` 로 그리지 말 것 — 전자는 CPU 스킨
+  1개 상한, 후자는 draw call 폭증. `MeshInstance` + `InstanceBatch` 로
+  ([instanced-rendering.md](instanced-rendering.md) §9). 애니메이션 군중은 VAT(§5·horde).
 
 ## 알려진 한계
 

@@ -113,6 +113,8 @@
     <None Include="assets\shaders\cel.hlsl" />
     <None Include="assets\shaders\crease.hlsl" />
     <None Include="assets\shaders\mesh.hlsl" />
+    <None Include="assets\shaders\mesh_instanced.hlsl" />
+    <None Include="assets\shaders\shadow_instanced.hlsl" />
     <None Include="assets\shaders\model.hlsl" />
     <None Include="assets\shaders\outline.hlsl" />
     <None Include="assets\shaders\quad2d.hlsl" />
