@@ -147,6 +147,13 @@ namespace engine::game
         // once by the accumulated mouse delta.
         void UpdateCameraLook(math::Vec2 mouseDelta);
 
+        // Rebuilds the crowd collider world and runs the render-only crowd
+        // queries (player look-ray + neighbour-overlap tint). Called ONCE per
+        // frame from Application - not per fixed step: it is O(crowd) and not
+        // gameplay state, so running it 1-5x per frame turned a slow frame into
+        // a spiral (docs/demo-scene.md). No-op outside demo scene 2.
+        void UpdateCrowdQueries();
+
         // Latches a jump request until the next fixed step consumes it, so a
         // Space press on a frame that runs zero steps is not dropped.
         void QueueJump() { m_actors[0].jumpQueued = true; }
@@ -195,11 +202,6 @@ namespace engine::game
         // Advances the demo-scene-2 crowd (JobSystem::ParallelFor, contiguous
         // ranges). No-op when the crowd is empty (scene 1).
         void StepSimAgents(float fixedDelta);
-        // Rebuilds m_collision3d from the current crowd (rebuild-every-step, like
-        // StepCollision2D) and casts the player look-ray into it, storing
-        // m_lookRay for the snapshot. Detection only; does not touch sim state.
-        // No-op outside demo scene 2.
-        void StepCollision3D();
 #endif
 
         core::JobSystem& m_jobs;

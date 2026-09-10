@@ -475,7 +475,7 @@ namespace engine::game
    `ActiveIndices()` 를 `ParallelFor` 로 돌고, 스텝마다 1마리 churn(Acquire/Release 상시 검증).
    **남음**: SoA 승격(`game/AgentStore`, 측정 게이트 — §6.2), 웨이브형 스폰(게임 루프).
 5. ~~**브로드페이즈**(로드맵 D3)~~ ✅ 3D `CollisionWorld3D::Step()` 균일 그리드 (`collider-design.md`
-   "브로드페이즈"). 데모 씬 2 `StepCollision3D` 가 크라우드 스피어를 매 스텝 rebuild + `Step()`.
+   "브로드페이즈"). 데모 씬 2 `UpdateCrowdQueries()` 가 크라우드 스피어를 프레임당 1회 rebuild + `Step()`.
    레이캐스트 DDA 가속(D3b)은 남음.
 6. **(→ [horde-design.md](horde-design.md) §5)** 애니메이션이 필요하면 VAT 를 이 골격 위에.
    `HordePass3D` 는 여기 인스턴스 버퍼·컬링·LOD 를 재사용하고 per-instance 에 `animTime`,

@@ -66,7 +66,7 @@
 ### 2.2 레이캐스트 + 디버그 드로우 — ✅ 구현 (2D·3D + `Simulation` 연동 완료)
 
 - **레이캐스트**: `physics/p2d`·`p3d` 대칭 — `Ray{2D,3D}` + `RayHit{2D,3D}` + `RaycastCollider`(Ray-Box slab / Ray-Circle·Sphere) + `CollisionWorld{2D,3D}::{RaycastClosest, RaycastAny, RaycastAll}`(선형 스캔, `Step()` 과 독립). "일정 거리 안" = `maxDistance`. 상세 `collider-design.md` "레이캐스트".
-- **`Simulation` 연동**: 데모 씬 2 의 `Simulation::StepCollision3D()` 가 매 스텝 `m_collision3d` 를 크라우드 스피어로 rebuild → 플레이어 시선 레이(`RaycastClosest`) → `LookRayResult` → `SnapshotBuilder` 가 디버그 레이·마커 + 피격 개체 색 하이라이트. 타워 타겟팅·지면 검사도 같은 패턴.
+- **`Simulation` 연동**: 데모 씬 2 의 `Simulation::UpdateCrowdQueries()` 가 **프레임당 1회**(Application 스텝 루프 뒤) `m_collision3d` 를 크라우드 스피어로 rebuild → 플레이어 시선 레이(`RaycastClosest`) → `LookRayResult` → `SnapshotBuilder` 가 디버그 레이·마커 + 피격 개체 색 하이라이트. 타워 타겟팅·지면 검사도 같은 패턴.
 - **디버그 드로우**: `render/r3d/DebugDrawPass` + `Scene3D::debugLines`(`DebugLine{a,b,color}`) + `render::debug::{Line,Box,Sphere,Ray}` 헬퍼(`Scene3D.h`, 헤더 전용) + `debugline.hlsl`(월드 라인리스트, depth-test/no-write).
 
 **(원 설계 — 참고)**

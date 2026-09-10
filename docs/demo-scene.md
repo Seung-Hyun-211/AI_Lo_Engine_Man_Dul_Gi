@@ -91,7 +91,9 @@ Simulation (game/)
                          dt*(speed/1.4)(워크사이클 desync, SeedAgent 가 오프셋). 그 뒤 메인에서
                          churn: 12스텝마다 1마리 Release→Acquire→SeedAgent (풀 상시 검증, 게임
                          메커닉 아님). ActiveIndices() 가 비면(씬 1) 즉시 반환.
-  · StepCollision3D() : (씬 2만) m_collision3d.Clear() + 크라우드마다 Sphere Collider3D
+  · UpdateCrowdQueries(): (씬 2만) Application 이 스텝 루프 뒤 **프레임당 1회** 호출
+                        (Step() 안이 아님 — O(crowd) 라 서브스텝마다 돌리면 느린 프레임이
+                        스파이럴). m_collision3d.Clear() + 크라우드마다 Sphere Collider3D
                         (user=슬롯) Add → (1) 플레이어 시선 레이(head + 카메라 forward,
                         maxDist=kLookRayRange, mask=kLayerCrowd3D) RaycastClosest →
                         LookRayResult, (2) Step()(균일 그리드 브로드페이즈) → Contacts()
@@ -156,8 +158,8 @@ SnapshotBuilder (game/)
   초기 배치는 `SeedAgent`. 실제 게임 AI(추적·경로)로 바꿀 때 이 함수만 교체하면 렌더/스냅샷은
   안 건드린다.
 - **시선 레이 / 개체 충돌**: `kActiveCrowd.colliderRadius`(크라우드 스피어 반경, 중심 = `height*0.5`),
-  `Simulation::kLookRayRange`(80). `StepCollision3D` 가 `m_collision3d` 를 매 스텝 rebuild →
-  시선 레이 `RaycastClosest` + `Step()`(균일 그리드 브로드페이즈, `collider-design.md` "브로드페이즈").
+  `Simulation::kLookRayRange`(80). `UpdateCrowdQueries` 가 `m_collision3d` 를 **프레임당 1회**
+  (스텝 루프 밖) rebuild → 시선 레이 `RaycastClosest` + `Step()`(균일 그리드 브로드페이즈, `collider-design.md` "브로드페이즈").
   타워 타겟팅·투사체·분리력을 붙일 때 이 `CollisionWorld3D` 에 `RaycastClosest/Any/All` /
   `Contacts()` 로 질의. 셀 크기·캡은 `CollisionWorld3D.cpp` 익명(`kMinCellSize` 등).
 

@@ -42,7 +42,7 @@ namespace engine::game
     // Instanced zombie meshes (assets/models/zombie/Zombie1.FBX, VAT run clip).
     // Toon shading to match the engine's default character look (cel.hlsl).
     inline constexpr CrowdConfig kCrowdZombies{
-        /*count*/ 5000, /*capacity*/ 8192, CrowdMesh::Model, CrowdShading::Toon,
+        /*count*/ 5500, /*capacity*/ 8192, CrowdMesh::Model, CrowdShading::Toon,
         /*height*/ 1.8f, /*colliderRadius*/ 0.50f };
 
     // ---- the one knob ----

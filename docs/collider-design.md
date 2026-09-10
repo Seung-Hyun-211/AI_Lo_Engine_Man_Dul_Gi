@@ -101,7 +101,7 @@ Simulation::Step(fixedDt, intent):
 - [x] 2D: Box/Circle, `Overlaps`, `CollisionWorld2D` (N²), 데모에서 플레이어-장애물 겹침 감지
 - [x] 3D: Box/Sphere, `Overlaps`, `CollisionWorld3D` (N²), 데모에서 위성 큐브-중심 큐브 겹침 감지
 - [x] **레이캐스트 (2D · 3D 대칭)** — `Ray{2D,3D}` + `RayHit{2D,3D}` + `RaycastCollider`(Ray-Box slab / Ray-Circle·Sphere, `Collider{2D,3D}.h` 인라인) + `CollisionWorld{2D,3D}::{RaycastClosest, RaycastAny, RaycastAll}` (선형 스캔, `Step()` 과 독립). §"레이캐스트" 참고
-- [x] **`Simulation` 연동** — 데모 씬 2 가 `m_collision3d` 를 매 스텝 rebuild(크라우드 스피어) 후 플레이어 시선 레이(`RaycastClosest`) → `LookRayResult` + `Step()`(브로드페이즈) → `Contacts()` 로 겹친 개체 tint. 스냅샷은 디버그 레이·마커·색 하이라이트
+- [x] **`Simulation` 연동** — 데모 씬 2 `UpdateCrowdQueries()`(Application 스텝 루프 뒤 프레임당 1회) 가 `m_collision3d` 를 rebuild(크라우드 스피어) 후 플레이어 시선 레이(`RaycastClosest`) → `LookRayResult` + `Step()`(브로드페이즈) → `Contacts()` 로 겹친 개체 tint. 스냅샷은 디버그 레이·마커·색 하이라이트
 - [x] **브로드페이즈 (3D `Step()`)** — 균일 그리드. `RebuildGrid()`(콜라이더 AABB 합 + 평균 extent 로 셀 크기 적응, 총 셀 수 캡) 후 셀별 쌍 검사 + per-i 스탬프로 다중 셀 중복 제거. Debug 빌드는 16 스텝마다 브루트포스와 대조(`assert`). 인터페이스 불변
 - [ ] 레이캐스트 그리드 가속(현재 선형 스캔, D3b), 병렬 쌍 검사, 2D 브로드페이즈(현 워크로드 4개라 불필요)
 - [ ] 셰이프/스윕 캐스트, 트리거 enter/exit 이벤트 (현재는 매 스텝 "지금 겹침" 리스트뿐)
@@ -135,7 +135,7 @@ struct RayHit3D { ColliderId id; std::uint64_t user; float distance; math::Vec3 
 - 교차: **Ray-Box** = slab 법(`(min-o)/d`, `(max-o)/d` 의 `tmin/tmax`, `d` 성분 0 은 슬랩 안/밖만 검사). **Ray-Sphere/Circle** = 2차방정식. `t<0`(뒤) 또는 `t>maxDistance` 는 miss. 레이가 콜라이더 안에서 출발하면 `t=0`, `normal` 은 `-dir`.
 - 필터: `LayersInteract` 대신 `ray.mask & collider.layer`(레이는 layer 가 없으니 단방향).
 - **`Step()` 과 독립** — 3 질의는 `m_colliders` 를 직접 훑는다. 레이캐스트만 쓸 거면 `Step()`(N² 쌍 검사) 안 불러도 된다.
-- **`Simulation` 연동됨** (데모 씬 2): `Simulation::StepCollision3D()` 가 매 스텝 `m_collision3d.Clear()` + 크라우드 개체마다 `Collider3D`(Sphere, `user` = 풀 슬롯) `Add`, 그 뒤 플레이어 시선 레이(`RaycastClosest`, `mask = kLayerCrowd3D`)를 쏴 `LookRayResult` 에 저장 → `SnapshotBuilder` 가 디버그 레이/마커 + 피격 개체 색 하이라이트. 타워 타겟팅·지면 검사도 이 패턴.
+- **`Simulation` 연동됨** (데모 씬 2): `Simulation::UpdateCrowdQueries()` 가 **프레임당 1회**(스텝 루프 뒤) `m_collision3d.Clear()` + 크라우드 개체마다 `Collider3D`(Sphere, `user` = 풀 슬롯) `Add`, 그 뒤 플레이어 시선 레이(`RaycastClosest`, `mask = kLayerCrowd3D`)를 쏴 `LookRayResult` 에 저장 → `SnapshotBuilder` 가 디버그 레이/마커 + 피격 개체 색 하이라이트. 타워 타겟팅·지면 검사도 이 패턴.
 
 ## 사용 방법 (How to use)
 

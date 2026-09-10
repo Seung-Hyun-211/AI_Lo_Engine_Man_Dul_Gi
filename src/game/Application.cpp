@@ -95,6 +95,13 @@ namespace engine::game
                         // ignoreGlobalPause still take one fixed step per frame.
                         m_simulation.Step(m_timestep.Step(), intent, /*globalPaused=*/true);
                     }
+
+#if defined(ENGINE_WITH_3D)
+                    // Crowd colliders + look-ray + overlap tint: once per frame,
+                    // after the step loop, on the final positions. O(crowd), so
+                    // running it per sub-step spiralled a slow frame.
+                    m_simulation.UpdateCrowdQueries();
+#endif
                 }
 
                 // Submit every frame even with zero sim steps: the UI overlay may

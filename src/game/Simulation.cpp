@@ -196,7 +196,9 @@ namespace engine::game
 #if defined(ENGINE_WITH_3D)
         StepActors(fixedDelta, /*globalPaused=*/false, intent);
         StepSimAgents(fixedDelta);
-        StepCollision3D();
+        // Crowd colliders + look-ray + overlap tint run ONCE per frame from
+        // Application::UpdateCrowdQueries(), not here - they are O(crowd) and
+        // render-only, so per-sub-step made a slow frame spiral.
 #endif
     }
 
@@ -431,7 +433,7 @@ namespace engine::game
         ++m_agentChurnCursor;
     }
 
-    void Simulation::StepCollision3D()
+    void Simulation::UpdateCrowdQueries()
     {
         if constexpr (kDemoScene != 2) { return; }
         else
