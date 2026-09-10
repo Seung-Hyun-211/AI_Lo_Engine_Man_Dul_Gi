@@ -1,11 +1,12 @@
 # 대규모 인스턴스 렌더 — 수천 개체 출력 선행작업
 
-**상태: §8 의 1~2 + 4(전반) 구현됨, 3·4(SoA)·5·6 미구현.**
+**상태: §8 의 1~3 + 4(풀) 구현됨, 4(SoA)·5·6 미구현.**
 데모 씬 2([demo-scene.md](demo-scene.md))의 `SimAgent` 군중(현재 600 / capacity 1024)이
-배치 하나 = `DrawIndexedInstanced` 1콜로 그려지고, `SnapshotBuilder` 가 프러스텀·최대거리로
-컬하며, 군중은 `core::ObjectPool<SimAgent>`(`src/core/ObjectPool.h`) 에서 산다 —
-`ParallelFor` 는 그 `ActiveIndices()` 를 쪼개 돌고, 스텝마다 1마리씩 풀을 재활용(churn).
-남은 것: LOD 버킷/빌보드(§8-3), SoA 승격(`game/AgentStore`, 측정 게이트), 브로드페이즈(§8-5).
+`DrawIndexedInstanced` 배치로 그려지고, `SnapshotBuilder` 가 프러스텀·최대거리 컬 + **거리 LOD
+2단계**(근거리=그림자 O / 원거리=그림자 X)로 배치를 나눈다. 군중은
+`core::ObjectPool<SimAgent>`(`src/core/ObjectPool.h`) 에 살고, `ParallelFor` 는 그
+`ActiveIndices()` 를 쪼개 돌며, 스텝마다 1마리씩 풀을 재활용(churn).
+남은 것: LOD 중간 티어/빌보드(§5.3), SoA 승격(`game/AgentStore`, 측정 게이트), 브로드페이즈(§8-5).
 이 문서는 그 벽을 넘기 위한 **엔진 일반 선행작업** 전체를 설계한다 — 정적/강체 인스턴스를 한
 번의 `DrawIndexedInstanced` 로 그리는 경로, 스냅샷 값 타입, 컬링·LOD, 심(sim) 쪽 SoA + 풀.
 
@@ -28,7 +29,7 @@
 | 지점 | 현행 | 수천에 필요한 것 |
 |---|---|---|
 | **드로우 콜** | `MeshPass3D::Execute` 가 `scene.meshDraws` 를 순회하며 개체마다 `UpdateSubresource(Object cbuffer)` + `IASetVertexBuffers` + `DrawIndexed`. N개 = N콜 + N번 cbuffer 갱신 | 메시·LOD 가 같은 인스턴스를 모아 **배치당 `DrawIndexedInstanced` 1콜**. cbuffer 갱신은 프레임당 1회(Frame b0) |
-| **스냅샷 빌드** | ~~`for (SimAgent&) meshDraws.push_back(...)` — 컬링 없음~~ ✅ 프러스텀 + 최대거리 컬 후 `MeshInstance` 로 | (남음) LOD 분할, 메시 여러 종류 시 `(mesh,lod)` 버킷 |
+| **스냅샷 빌드** | ~~컬링·LOD 없음~~ ✅ 프러스텀 + 최대거리 컬 + 거리 LOD 2단계(근/원) 배치 분할 | (남음) 중간 티어·빌보드, 메시 여러 종류 시 `(mesh,lod)` 중첩 버킷 |
 | **스냅샷 크기** | `MeshDraw` = `Mat4`(64B) + color(16B) = 80B. 5,000개 = 400KB/프레임 | 컴팩트 인스턴스(pos+yaw+scale+colorRgba = **24B**). 5,000개 = 120KB — 1슬롯 메일박스 허용 |
 | **심 업데이트** | ~~`std::vector<SimAgent>` 고정, 풀 없음~~ ✅ `core::ObjectPool<SimAgent>`(capacity 1024) — `ParallelFor` 는 `ActiveIndices()` 슬라이스, 스폰/디스폰은 스텝 밖 | (남음) 규모 커지면 SoA 승격(§6.2) |
 | **충돌** | `CollisionWorld3D` N² · 메인 전용 | 유니폼 그리드 브로드페이즈(2c). 개체끼리는 분리력, 콜라이더는 지형/플레이어만 |
@@ -257,53 +258,55 @@ math::Vec3 EyeFromView(const math::Mat4& view);         // LookAtLH view → 카
 - 지금은 `math` 가 아니라 `SnapshotBuilder` 익명에 둔다(유일 사용처). **두 번째 사용처가
   생기면 `math/Math3D.h` 로 승격**(순수 값 함수, `ENGINE_WITH_3D`).
 
-### 5.2 컬 + LOD 버킷 — **컬만 구현, LOD 버킷은 미구현 (§8-3)**
+### 5.2 컬 + LOD 버킷 — **구현됨 (거리 LOD 2단계)**
 
-현재 `BuildCliffScene` 은 LOD 없이 컬만 한다:
+`BuildCliffScene` 은 컬 후 거리로 버킷을 나눈다:
 
 ```cpp
 const Frustum frustum = MakeFrustum(scene.camera.view * scene.camera.projection);
 const math::Vec3 eye = EyeFromView(scene.camera.view);
 const auto& pool = simulation.SimAgents();               // core::ObjectPool<SimAgent>
+
+std::vector<render::MeshInstance> lodBucket[3];          // [0] 근 / [1] 중(예약) / [2] 원
 for (std::uint32_t i : pool.ActiveIndices())
 {
     const SimAgent& a = pool.Slots()[i];
     const math::Vec3 center = a.pos + math::Vec3{ 0, kAgentScale * 0.5f, 0 };
     if (!SphereInFrustum(frustum, center, kAgentCullRadius)) continue;   // kAgentCullRadius = 0.5
     const math::Vec3 d = center - eye;
-    if (math::Dot(d, d) > kAgentCullDist * kAgentCullDist) continue;     // kAgentCullDist   = 90
-    scene.meshInstances.push_back({ center, a.heading, kAgentScale, PackRgba(...) });
+    const float d2 = math::Dot(d, d);
+    if (d2 > kAgentCullDist * kAgentCullDist) continue;                  // kAgentCullDist   = 90
+    const int lod = d2 <= kAgentShadowDist * kAgentShadowDist ? 0 : 2;  // kAgentShadowDist = 34
+    lodBucket[lod].push_back({ center, a.heading, kAgentScale, PackRgba(...) });
 }
 ```
 
-**LOD 목표** (§8-3): `d2` 로 `bucket[0..2]` 를 나누고, `bucket` 을 `(meshId, lod)` 순으로
-`meshInstances` 에 이어붙여 배치를 여러 개 만든다. `InstanceBatch.lod` 필드와
-`MeshPass3D::DrawInstanced` 의 `lod >= 2` 셰도우 컷은 이미 배선돼 있다.
+- **2단계**: `[0]` 근거리 = 그림자 캐스트, `[2]` 원거리 = 그림자 없음(색 패스는 동일하게 그림).
+  `MeshPass3D::DrawInstanced` 가 셰도우 패스에서 `batch.lod >= 2` 배치를 건너뛴다 —
+  원거리 크라우드가 셰도우맵 드로우·VS 호출에서 빠져 실질 비용이 준다. `[1]` 중간 티어(정점
+  줄인 메시 / 빌보드)는 예약 슬롯.
 
-### 5.3 배치 조립 (LOD 시)
+### 5.3 배치 조립 — **구현됨**
 
 ```cpp
-// 지금은 메시가 Cube 하나뿐 → LOD 별로 배치 3개. 메시 종류가 늘면 (meshId,lod) 로 중첩.
 for (int lod = 0; lod < 3; ++lod)
 {
-    if (bucket[lod].empty()) continue;
-    render::InstanceBatch b{};
-    b.mesh  = lod < 2 ? render::MeshId::Cube : render::MeshId::Plane;   // 원거리는 빌보드 쿼드
-    b.lod   = (std::uint16_t)lod;
-    b.first = (std::uint32_t)scene.meshInstances.size();
-    b.count = (std::uint32_t)bucket[lod].size();
-    scene.meshInstances.insert(scene.meshInstances.end(), bucket[lod].begin(), bucket[lod].end());
+    if (lodBucket[lod].empty()) continue;
+    render::InstanceBatch b{ render::MeshId::Cube,
+        (std::uint32_t)scene.meshInstances.size(), (std::uint32_t)lodBucket[lod].size(),
+        (std::uint16_t)lod };
+    scene.meshInstances.insert(scene.meshInstances.end(),
+                               lodBucket[lod].begin(), lodBucket[lod].end());
     scene.instanceBatches.push_back(b);
 }
-// 전체 캡: scene.meshInstances.size() 를 kMaxInstances 로 잘라 배치 count 도 보정.
 ```
 
-- **LOD2 = 빌보드**: `MeshId::Plane` 인스턴스를 카메라 향하게(셰이더에서 view-aligned) + 원거리
-  단색/스프라이트. 1차 구현은 그냥 "작은 큐브 그대로, 그림자 생략"으로 시작하고 빌보드는 나중.
+- **다음 (미구현)**: `[1]` 중간 티어 채우기, `[2]` 를 `MeshId::Plane` view-aligned 빌보드로
+  (지금은 `[2]` 도 Cube — 색 패스에선 근거리와 구분 안 됨, 그림자만 빠짐).
 - **정렬**: 불투명이라 앞뒤 정렬 불필요. `(mesh,lod)` 로만 그룹. 반투명 인스턴스가 생기면 거리
   내림차순 정렬 배치 추가.
-- 튜닝 상수: `kAgentCullDist`, `kAgentCullRadius`, `kAgentScale` 는 `BuildCliffScene` 안
-  `constexpr`(구현됨). LOD 경계 `kLodNear`/`kLodMid` 는 §8-3 에서 추가.
+- 튜닝 상수: `kAgentCullDist`(90), `kAgentCullRadius`(0.5), `kAgentScale`(0.5),
+  `kAgentShadowDist`(34) 전부 `BuildCliffScene` 안 `constexpr`.
 
 ---
 
@@ -451,8 +454,10 @@ namespace engine::game
 2. ~~**프러스텀 + 최대거리 컬링**~~ ✅ `SnapshotBuilder` 익명 헬퍼 `MakeFrustum`(Gribb-Hartmann,
    이 엔진 행렬 규약에 맞춤) + `SphereInFrustum` + `EyeFromView`. 데모 씬 2 크라우드 600마리를
    컬 후 `MeshInstance` 로. (`math::MakeFrustum` 승격은 두 번째 사용처가 생기면.)
-3. **LOD 버킷**(거리 3단계). LOD2 는 우선 "작은 큐브 + 셰도우 생략"으로. 빌보드/임포스터는 뒤로.
-   → 4k+ 목표. `InstanceBatch.lod` 필드·셰도우 컷은 이미 배선됨 → `SnapshotBuilder` 쪽만.
+3. ~~**LOD 버킷**~~ ✅ (거리 2단계): `BuildCliffScene` 이 `d2 <= kAgentShadowDist²` 로
+   버킷 `[0]`(근, 그림자 O) / `[2]`(원, 그림자 X) 를 나눠 배치 2개. `MeshPass3D::DrawInstanced`
+   가 셰도우 패스에서 `lod >= 2` 배치 스킵(+ 전부 원거리면 VB 업로드도 생략). **남음**: `[1]`
+   중간 티어(정점 줄인 메시), `[2]` 를 view-aligned 빌보드(`MeshId::Plane`)로.
 4. **~~`core::ObjectPool<T>`~~ ✅ + `game/AgentStore`(SoA) + 스폰/디스폰.**
    `core::ObjectPool<T>`(`src/core/ObjectPool.h`) 구현 완료 — 데모 씬 2 크라우드가
    `ObjectPool<SimAgent>`(capacity 1024) 에서 살고, `StepSimAgents` 가 `ActiveIndices()` 를
@@ -503,9 +508,9 @@ if (inst.size() > first)
 |---|---|
 | 컬링 최대 거리 | `BuildCliffScene` 의 `kAgentCullDist` (현재 90) |
 | 개체 반지름(프러스텀 구 테스트) | `BuildCliffScene` 의 `kAgentCullRadius` (현재 0.5) |
-| LOD 경계 | (§8-3 에서 추가) `kLodNear` / `kLodMid` |
+| LOD 경계 (근→원, 그림자 컷) | `BuildCliffScene` 의 `kAgentShadowDist` (현재 34) |
 | 인스턴스 상한(프레임당) | `MeshPass3D::kMaxInstances` (16384). GPU 측에서 안전하게 자름. **SnapshotBuilder 쪽 캡은 아직 없음** — 규모 커지면 같은 값으로 추가 |
-| 셰도우 캐스트 LOD 컷 | `MeshPass3D::DrawInstanced` 의 `batch.lod >= 2` continue |
+| 셰도우 캐스트 LOD 컷 | `MeshPass3D::DrawInstanced` 의 `batch.lod >= 2` continue (+ 전부 원거리면 업로드 생략) |
 
 ### 9.4 하지 말 것
 

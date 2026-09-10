@@ -94,11 +94,11 @@ SnapshotBuilder (game/)
   · BuildCamera   : kDemoScene==2 면 orbit 거리 3.6→6.0 (필드·군중이 프레임에 들어오게).
   · BuildLighting : 씬 2 는 셰도우 ortho 를 넓히고(22→64) 중심을 +Z 로 밀어 군중을 덮는다.
   · BuildScene3D  : kDemoScene==2 → BuildCliffScene (넓은 평지 Plane + 메사 Cube +
-                    기둥 마커 + **크라우드 = 인스턴스드 배치 1개**: m_agents.ActiveIndices() 순회,
-                    프러스텀·최대거리 컬 후 SimAgent → render::MeshInstance, 배치 1개 +
-                    디버그 플레이어 AABB·절벽 모서리). 씬 1 경로(kBoxes)는 else 로 보존.
+                    기둥 마커 + **크라우드 = 인스턴스드**: m_agents.ActiveIndices() 순회,
+                    프러스텀·최대거리 컬 + 거리 LOD 2단계(d2 <= kAgentShadowDist² → 근 lod0,
+                    아니면 원 lod2)로 lodBucket 나눠 배치 0~2개 + 디버그). 씬 1(kBoxes)은 else.
   · MeshPass3D    : instanceBatches 를 배치당 DrawIndexedInstanced 1콜 (mesh_instanced.hlsl).
-                    상세 [instanced-rendering.md](instanced-rendering.md).
+                    셰도우 패스는 lod>=2(원거리) 배치 스킵. 상세 [instanced-rendering.md](instanced-rendering.md).
 ```
 
 `SimAgent` 는 동질적이라 `EntityId` 없이 `core::ObjectPool<SimAgent>`(AoS, 슬롯 고정 +
@@ -119,6 +119,8 @@ SnapshotBuilder (game/)
 - **필드·메사 치수**: `kCliffTop`(메사 높이), `kPlateauHalf`(플레이어 이동 반경), `kFieldHalf`
   (평지 반경), 크라우드 z 범위 `kFieldAgentZLo/Hi`(Simulation.cpp 익명). `SnapshotBuilder.cpp` 의
   `BuildCliffScene` 가 이 값으로 프롭을 배치하므로 숫자만 바꾸면 메사·평지가 따라온다.
+- **크라우드 컬·LOD**: `BuildCliffScene` 의 `kAgentCullDist`(90, 이 거리 밖 스킵),
+  `kAgentShadowDist`(34, 이 거리 밖은 그림자 안 캐스트), `kAgentCullRadius`(0.5).
 - **군중 거동**: `Simulation::StepSimAgents` 의 heading 드리프트 계수·`speed` 범위·bob 진폭,
   초기 배치는 `SeedAgent`. 실제 게임 AI(추적·경로)로 바꿀 때 이 함수만 교체하면 렌더/스냅샷은
   안 건드린다.

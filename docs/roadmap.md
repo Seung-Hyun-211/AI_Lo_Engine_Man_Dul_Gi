@@ -173,7 +173,7 @@ if (auto hit = world.RaycastClosest(down)) { actor.pos.y = hit->point.y; actor.g
 | ~~D1~~ ✅ | **레이캐스트 + 범위 질의 + 디버그 드로우** | 타워가 사거리 안 적을 고르고, 투사체가 다수를 맞춘다 | §2.2 (구현). `Simulation` 연동만 남음 |
 | D2 | **다수 엔티티 풀 + `core::ObjectPool<T>`** — ✅ `ObjectPool` 구현·크라우드 이주(AoS), SoA 승격(`game/AgentStore`)은 측정 게이트 | 수백~수천 적/투사체를 개별 `new` 없이 스폰·재사용 | `src/core/ObjectPool.h`, **`instanced-rendering.md` §6**, `scrollable-list-and-pool.md` §1.1 |
 | D3 | **브로드페이즈(균일 그리드)** | 다수 대 다수 충돌·타겟 질의 — 선형 스캔 N² 불가 | P1, `instanced-rendering.md` §6.4 |
-| D4 | **인스턴싱 렌더** — ✅ 인스턴스드 드로우 + 프러스텀·거리 컬(§8-1·2), LOD/빌보드·`AgentStore` 남음 | 같은 메시 수천 개를 draw call 소수로 | **`instanced-rendering.md`** (§3~§5, 구현순서 §8) |
+| D4 | **인스턴싱 렌더** — ✅ 인스턴스드 드로우 + 프러스텀·거리 컬 + 거리 LOD 2단계(그림자 컷)(§8-1·2·3). 빌보드/중간 티어·`AgentStore` 남음 | 같은 메시 수천 개를 draw call 소수로 | **`instanced-rendering.md`** (§3~§5, 구현순서 §8) |
 | D5 | **웨이브/스폰 + HP/데미지 + 목표 지점·패배 판정** | 게임 루프 자체 | 새 `game/` 시스템 |
 | ~~D6~~ ✅ | 오디오 최소 믹서 | 타격·스폰·경보음 + 설정 슬라이더 살리기 | `audio-design.md` (최소 구현) |
 | — | 애니 재생 모드/크로스페이드(§2.1) | 플레이어 유닛/보스엔 필요하나 **적 다수엔 저비용 표현이 맞음** → 시점·적 표현 확정 후로 미룸 | P0 → 낮춤 |
@@ -190,12 +190,12 @@ if (auto hit = world.RaycastClosest(down)) { actor.pos.y = hit->point.y; actor.g
 
 착수 순서 제안: **1·2·3 완료 → (4 결정) → 5**.
 
-**현재 위치 (2026-09 기준)**: D1 ✅ · D4(인스턴싱) 컬까지 ✅ · D2(`ObjectPool`) ✅. 남은 갈래:
-- **D4 잔여 — LOD 버킷/빌보드** (`instanced-rendering.md` §8-3): 인프라 트랙 계속. 규모가 커질 때 실효.
+**현재 위치 (2026-09 기준)**: D1 ✅ · D2(`ObjectPool`) ✅ · D4(인스턴싱 + 거리 컬 + LOD 2단계) ✅. 남은 갈래:
+- **D4 잔여 — 빌보드/중간 LOD 티어** (`instanced-rendering.md` §5.3): 규모가 훨씬 커질 때 실효. 지금은 우선순위 낮음.
 - **D1 잔여 — `Simulation`↔`CollisionWorld3D` 연동 + `Ray2D`/`RayHit2D`** (`collider-design.md`): 타워 타겟팅·지면 검사 실제 배선. 게임플레이 쪽으로 한 발.
 - **D3 — 브로드페이즈(균일 그리드)** → **D5 — 웨이브/HP/목표·패배**: 게임 루프.
 
-게임 사이클 전이면 D4-LOD 또는 D1 잔여 중 택1이 자연스럽다.
+게임 사이클 전이면 **D1 잔여**(레이캐스트 실사용 배선)가 다음으로 자연스럽다 — 인프라(D2·D4)가 얼추 준비됨.
 
 ---
 

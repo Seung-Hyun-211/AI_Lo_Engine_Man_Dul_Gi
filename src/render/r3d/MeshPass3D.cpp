@@ -279,6 +279,16 @@ namespace engine::render
             std::min<std::size_t>(scene.meshInstances.size(), kMaxInstances));
         if (total == 0) return;
 
+        // On the shadow pass, if every batch is far-LOD (lod >= 2) there is
+        // nothing to draw - skip the upload entirely.
+        if (shadow)
+        {
+            bool anyCaster = false;
+            for (const InstanceBatch& b : scene.instanceBatches)
+                if (b.lod < 2 && b.first < total) { anyCaster = true; break; }
+            if (!anyCaster) return;
+        }
+
         D3D11_MAPPED_SUBRESOURCE mapped{};
         if (FAILED(device->Map(m_instanceBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) return;
         std::memcpy(mapped.pData, scene.meshInstances.data(), total * sizeof(MeshInstance));

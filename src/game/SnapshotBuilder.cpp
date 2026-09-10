@@ -189,29 +189,32 @@ namespace engine::game
                 scene.meshDraws.push_back(draw);
             }
 
-            // The simulation crowd: instanced cubes, one DrawIndexedInstanced for
-            // the whole batch (docs/instanced-rendering.md). Frustum + distance
-            // culled here so off-screen agents never reach the GPU. Colour ramps
-            // with speed (slow = teal, fast = amber) so the churn reads.
+            // The simulation crowd: instanced cubes, one DrawIndexedInstanced per
+            // LOD batch (docs/instanced-rendering.md §5). Frustum + distance
+            // culled here so off-screen agents never reach the GPU. Distance
+            // LOD, 2 tiers for now: bucket 0 = near (casts shadow), bucket 2 =
+            // far (drawn, but MeshPass3D skips it in the shadow pass). Bucket 1
+            // (a reduced mid representation / billboard) is reserved.
             constexpr float kAgentScale = 0.5f;
-            constexpr float kAgentCullRadius = 0.5f;   // bounding sphere for the frustum test
-            constexpr float kAgentCullDist = 90.0f;    // past this, skip
+            constexpr float kAgentCullRadius = 0.5f;    // bounding sphere for the frustum test
+            constexpr float kAgentCullDist = 90.0f;     // past this, skip entirely
+            constexpr float kAgentShadowDist = 34.0f;   // past this, LOD 2: no shadow cast
             const math::Mat4 viewProj = scene.camera.view * scene.camera.projection;
             const Frustum frustum = MakeFrustum(viewProj);
             const math::Vec3 eye = EyeFromView(scene.camera.view);
 
             const core::ObjectPool<SimAgent>& pool = simulation.SimAgents();
-            const std::vector<std::uint32_t>& activeAgents = pool.ActiveIndices();
             const SimAgent* agentSlots = pool.Slots();
 
-            const std::size_t firstInstance = scene.meshInstances.size();
-            for (const std::uint32_t slotIdx : activeAgents)
+            std::vector<render::MeshInstance> lodBucket[3];
+            for (const std::uint32_t slotIdx : pool.ActiveIndices())
             {
                 const SimAgent& a = agentSlots[slotIdx];
                 const math::Vec3 center = a.pos + math::Vec3{ 0.0f, kAgentScale * 0.5f, 0.0f };
                 if (!SphereInFrustum(frustum, center, kAgentCullRadius)) continue;
                 const math::Vec3 d = center - eye;
-                if (math::Dot(d, d) > kAgentCullDist * kAgentCullDist) continue;
+                const float d2 = math::Dot(d, d);
+                if (d2 > kAgentCullDist * kAgentCullDist) continue;
 
                 const float hot = math::Clamp((a.speed - 0.8f) / 1.4f, 0.0f, 1.0f);
                 render::MeshInstance inst{};
@@ -220,15 +223,20 @@ namespace engine::game
                 inst.scale = kAgentScale;
                 inst.colorRgba = PackRgba(0.25f + 0.65f * hot, 0.62f - 0.22f * hot,
                                           0.70f - 0.45f * hot, 1.0f);
-                scene.meshInstances.push_back(inst);
+
+                const int lod = d2 <= kAgentShadowDist * kAgentShadowDist ? 0 : 2;
+                lodBucket[lod].push_back(inst);
             }
-            if (scene.meshInstances.size() > firstInstance)
+            for (int lod = 0; lod < 3; ++lod)
             {
+                if (lodBucket[lod].empty()) continue;
                 render::InstanceBatch batch{};
                 batch.mesh = render::MeshId::Cube;
-                batch.first = static_cast<std::uint32_t>(firstInstance);
-                batch.count = static_cast<std::uint32_t>(scene.meshInstances.size() - firstInstance);
-                batch.lod = 0;
+                batch.first = static_cast<std::uint32_t>(scene.meshInstances.size());
+                batch.count = static_cast<std::uint32_t>(lodBucket[lod].size());
+                batch.lod = static_cast<std::uint16_t>(lod);
+                scene.meshInstances.insert(scene.meshInstances.end(),
+                                           lodBucket[lod].begin(), lodBucket[lod].end());
                 scene.instanceBatches.push_back(batch);
             }
 
