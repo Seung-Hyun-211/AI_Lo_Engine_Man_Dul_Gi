@@ -101,6 +101,7 @@ namespace engine::game
         agent.heading = std::fmod(seed * 2.399963f, 2.0f * kPi) - kPi;   // spread out
         agent.speed = 0.8f + std::fmod(seed, 5.0f) * 0.35f;              // 0.8 .. 2.2 m/s
         agent.phase = seed * 0.37f;
+        agent.animTime = std::fmod(seed * 0.618f, 3.0f);                 // desync the walk cycle
     }
 
     void Simulation::SpawnSimAgents()
@@ -387,6 +388,10 @@ namespace engine::game
                 {
                     SimAgent& a = slots[active[k]];
                     a.phase += fixedDelta * 4.0f;
+                    // Walk cycle advances with the agent's speed so the stride
+                    // roughly matches its ground movement (kAnimRefSpeed = the
+                    // clip's authored travel speed). VAT wraps by frame count.
+                    a.animTime += fixedDelta * (a.speed / 1.4f);
                     // Lazy heading drift so the crowd churns without a RNG.
                     a.heading += std::sin(a.phase * 0.11f + static_cast<float>(active[k])) * fixedDelta * 0.9f;
 

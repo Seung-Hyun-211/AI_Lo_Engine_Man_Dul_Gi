@@ -87,7 +87,8 @@ Simulation (game/)
                          핸들은 m_agentHandles 에 보관(churn 용). 수·모델은 game/CrowdConfig.h.
   · StepSimAgents(dt)  : ParallelFor(청크 32) 가 m_agents.ActiveIndices() 를 겹치지 않는
                          [begin,end) 로 — Slots()[active[k]] 만 쓰기(슬롯 인덱스 유일 → 충돌
-                         없음). heading 드리프트 + 전진 + bob + 필드 경계 반사. 그 뒤 메인에서
+                         없음). heading 드리프트 + 전진 + bob + 필드 경계 반사 + animTime +=
+                         dt*(speed/1.4)(워크사이클 desync, SeedAgent 가 오프셋). 그 뒤 메인에서
                          churn: 12스텝마다 1마리 Release→Acquire→SeedAgent (풀 상시 검증, 게임
                          메커닉 아님). ActiveIndices() 가 비면(씬 1) 즉시 반환.
   · StepCollision3D() : (씬 2만) m_collision3d.Clear() + 크라우드마다 Sphere Collider3D
@@ -107,19 +108,22 @@ SnapshotBuilder (game/)
                     0~2개. inst.scale = kActiveCrowd.height. 색(flat tint): LookRay().agentSlot
                     = 노랑, AgentTouching()[slot] = 빨강, 그 외 속도 램프. 디버그 시선 레이 +
                     hit 마커). 씬 1(kBoxes)은 else.
-  · MeshPass3D    : Initialize 에서 LoadCrowdMesh() — kCrowdModelFbx(현재 Zombie1.FBX) 를
-                    bind pose(position+normal+uv)로 로드, Z-up 감지·회전 + 발 원점·단위 높이
-                    정규화 → MeshId::CrowdModel. + kCrowdDiffuseTex(Zombie.tga) → _UNORM_SRGB
-                    SRV(m_crowdDiffuseSrv, 없으면 1×1 white). 경로 비면 스킵, 메시 실패 시
-                    큐브 폴백. 정적(애니 = VAT, [instanced-rendering.md](instanced-rendering.md) §9.6-B).
-                    instanceBatches 를 배치당 DrawIndexedInstanced 1콜 (mesh_instanced.hlsl 이
-                    diffuse@t0 샘플). 셰도우 패스는 lod>=2 배치 스킵.
+  · MeshPass3D    : Initialize→LoadCrowdMesh() — kCrowdModelFbx(Zombie1.FBX) 를
+                    position+normal+uv 로 로드 + per-vertex 본 데이터 보관, Z-up 감지·회전 +
+                    발원점·단위높이 정규화 → MeshId::CrowdModel. + kCrowdDiffuseTex(Zombie.tga)
+                    → _UNORM_SRGB SRV(없으면 white). + **VAT 베이크**: kCrowdClipFbx(Zombie@Z_Run)
+                    클립을 kVatFps(24)로, 프레임마다 AnimationSampler+LBS → 같은 변환 적용 →
+                    R32G32B32A32_FLOAT [verts×frames] 텍스처(t2). 경로 비면 스킵, 메시 실패 시
+                    큐브 폴백. instanceBatches 를 배치당 DrawIndexedInstanced 1콜 —
+                    mesh_instanced.hlsl VS 가 CrowdModel 배치엔 animTime 으로 VAT 행 Load(큐브는
+                    바인드포즈), PS 는 diffuse@t0. 셰도우 패스는 lod>=2 스킵 + 바인드포즈(VAT 미적용).
 ```
 
 `SimAgent` 는 동질적이라 `EntityId` 없이 `core::ObjectPool<SimAgent>`(AoS, 슬롯 고정 +
 `ActiveIndices()`) 에 산다 ([entity-lifecycle-design.md](entity-lifecycle-design.md) §3A,
 [scrollable-list-and-pool.md](scrollable-list-and-pool.md) §1.1). 스레드 경계는 여전히 값뿐 —
-군중은 `render::MeshInstance`(24B POD) 배열 + `InstanceBatch` 로만 스냅샷에 실린다.
+군중은 `render::MeshInstance`(28B POD: pos/yaw/scale/color/animTime) 배열 + `InstanceBatch` 로만
+스냅샷에 실린다.
 
 ### 사용 방법 (How to use)
 

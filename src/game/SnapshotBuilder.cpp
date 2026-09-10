@@ -230,6 +230,7 @@ namespace engine::game
                 inst.pos = a.pos + pivotLift;
                 inst.yaw = a.heading;
                 inst.scale = crowdHeight;
+                inst.animTime = a.animTime;   // ignored by MeshPass3D when no crowd VAT is baked
                 if (look.hit && look.agentSlot == slotIdx)
                 {
                     inst.colorRgba = PackRgba(1.0f, 0.9f, 0.2f, 1.0f);   // look-ray target

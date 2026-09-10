@@ -8,8 +8,8 @@
 크라우드의 **수·모델·크기는 `game/CrowdConfig.h` 의 `kActiveCrowd` 하나가 결정**(§9.5) —
 현재 `kCrowdZombies`(1500, `assets/models/zombie/Zombie1.FBX` 정적 bind pose). 원래 데모는
 `kCrowdBoxes`(600 큐브) 프리셋으로 한 줄 복귀.
-남은 것: LOD 중간 티어/빌보드(§5.3), **애니메이션(VAT, §9.6-B)**, SoA 승격(§6.2, 측정 게이트).
-크라우드 디퓨즈 텍스처는 구현됨(§9.6-A).
+남은 것: LOD 중간 티어/빌보드(§5.3), SoA 승격(§6.2, 측정 게이트), VAT 확장(법선·셰도우·다중
+클립·fp16 — §9.6-B "남음"). 크라우드 디퓨즈 텍스처 + 1클립 VAT 애니는 구현됨(§9.6-A/B).
 이 문서는 그 벽을 넘기 위한 **엔진 일반 선행작업** 전체를 설계한다 — 정적/강체 인스턴스를 한
 번의 `DrawIndexedInstanced` 로 그리는 경로, 스냅샷 값 타입, 컬링·LOD, 심(sim) 쪽 SoA + 풀.
 
@@ -33,7 +33,7 @@
 |---|---|---|
 | **드로우 콜** | `MeshPass3D::Execute` 가 `scene.meshDraws` 를 순회하며 개체마다 `UpdateSubresource(Object cbuffer)` + `IASetVertexBuffers` + `DrawIndexed`. N개 = N콜 + N번 cbuffer 갱신 | 메시·LOD 가 같은 인스턴스를 모아 **배치당 `DrawIndexedInstanced` 1콜**. cbuffer 갱신은 프레임당 1회(Frame b0) |
 | **스냅샷 빌드** | ~~컬링·LOD 없음~~ ✅ 프러스텀 + 최대거리 컬 + 거리 LOD 2단계(근/원) 배치 분할 | (남음) 중간 티어·빌보드, 메시 여러 종류 시 `(mesh,lod)` 중첩 버킷 |
-| **스냅샷 크기** | `MeshDraw` = `Mat4`(64B) + color(16B) = 80B. 5,000개 = 400KB/프레임 | 컴팩트 인스턴스(pos+yaw+scale+colorRgba = **24B**). 5,000개 = 120KB — 1슬롯 메일박스 허용 |
+| **스냅샷 크기** | `MeshDraw` = `Mat4`(64B) + color(16B) = 80B. 5,000개 = 400KB/프레임 | 컴팩트 인스턴스(pos+yaw+scale+colorRgba+animTime = **28B**). 5,000개 = 140KB — 1슬롯 메일박스 허용 |
 | **심 업데이트** | ~~`std::vector<SimAgent>` 고정, 풀 없음~~ ✅ `core::ObjectPool<SimAgent>`(capacity = `kActiveCrowd.capacity`) — `ParallelFor` 는 `ActiveIndices()` 슬라이스, 스폰/디스폰은 스텝 밖 | (남음) 규모 커지면 SoA 승격(§6.2) |
 | **충돌** | `CollisionWorld3D` N² · 메인 전용 | 유니폼 그리드 브로드페이즈(2c). 개체끼리는 분리력, 콜라이더는 지형/플레이어만 |
 | **셰이더** | `mesh.hlsl` VS 가 `world`(Object cbuffer)를 읽음 | 인스턴스 변형: 트랜스폼·색을 **per-instance 정점 스트림**(slot 1)에서 |
@@ -88,7 +88,8 @@ namespace engine::render
         float         yaw;           // 라디안 (Y축 회전)   (offset 12)
         float         scale;         // 균등                (offset 16)
         std::uint32_t colorRgba;     // 8:8:8:8 packed (VS 에서 언팩)  (offset 20)
-    };                               // 24 bytes, 패딩 없음 (입력 레이아웃 오프셋이 이걸 가정)
+        float         animTime;      // VAT 클립 재생 시간(초). VAT 없으면 무시  (offset 24)
+    };                               // 28 bytes, 패딩 없음 (입력 레이아웃 오프셋이 이걸 가정)
 
     // 같은 메시·같은 LOD 인 MeshInstance 들의 연속 구간. 배치 하나 = 드로우 콜 하나.
     struct InstanceBatch
@@ -110,7 +111,7 @@ namespace engine::render
 
 - **`meshDraws` 는 남긴다.** 지형·프롭처럼 수십 개짜리 유니크 오브젝트는 기존 경로가 더 단순하다
   (OCP — 기존 타입 안 건드림). 인스턴스 경로는 "같은 메시 수백+" 전용.
-- **크기 예산**: `MeshInstance` 24B. 8,192개 ≈ 192KB/프레임. `InstanceBatch` 16B × (메시종류 ×
+- **크기 예산**: `MeshInstance` 28B. 8,192개 ≈ 224KB/프레임. `InstanceBatch` 16B × (메시종류 ×
   LOD단계) — 보통 10개 미만. 1슬롯 메일박스가 오래된 프레임을 버려도 무해(규칙 4).
 - `colorRgba` 패킹은 선택 — 색이 인스턴스마다 다를 때만 의미. 배치 전체가 같은 색이면
   `InstanceBatch` 에 색 하나 두고 `MeshInstance` 를 20B 로 줄여도 된다(§10).
@@ -129,19 +130,22 @@ namespace engine::render
 ```cpp
 // MeshPass3D::Initialize — "mesh_instanced" 셰이더용 레이아웃
 const D3D11_INPUT_ELEMENT_DESC instanced[] = {
-    // slot 0 — 메시 정점 (기존)
+    // slot 0 — 메시 정점 (position+normal+uv, stride 32)
     { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,  0, D3D11_INPUT_PER_VERTEX_DATA,   0 },
     { "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA,   0 },
-    // slot 1 — per-instance (MeshInstance 와 바이트 일치)
+    { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,    0, 24, D3D11_INPUT_PER_VERTEX_DATA,   0 }, // mesh uv
+    // slot 1 — per-instance (MeshInstance 와 바이트 일치, stride 28)
     { "TEXCOORD", 1, DXGI_FORMAT_R32G32B32_FLOAT, 1,  0, D3D11_INPUT_PER_INSTANCE_DATA, 1 }, // pos
     { "TEXCOORD", 2, DXGI_FORMAT_R32_FLOAT,       1, 12, D3D11_INPUT_PER_INSTANCE_DATA, 1 }, // yaw
     { "TEXCOORD", 3, DXGI_FORMAT_R32_FLOAT,       1, 16, D3D11_INPUT_PER_INSTANCE_DATA, 1 }, // scale
     { "COLOR",    0, DXGI_FORMAT_R8G8B8A8_UNORM,  1, 20, D3D11_INPUT_PER_INSTANCE_DATA, 1 }, // colorRgba
+    { "TEXCOORD", 4, DXGI_FORMAT_R32_FLOAT,       1, 24, D3D11_INPUT_PER_INSTANCE_DATA, 1 }, // animTime
+    // + SV_VertexID (자동), VAT: Texture2D<float4> t2, cbuffer VatInfo b2
 };
 ```
 
-- `InstanceDataStepRate = 1`. slot 1 stride = `sizeof(MeshInstance)` = 24. `MeshPass3D` 는
-  `static_assert(sizeof(MeshInstance) == 24)` 로 이 오프셋 가정을 고정한다.
+- `InstanceDataStepRate = 1`. slot 1 stride = `sizeof(MeshInstance)` = 28. `MeshPass3D` 는
+  `static_assert(sizeof(MeshInstance) == 28)` 로 이 오프셋 가정을 고정한다.
 - 셰이더는 `assets/shaders/mesh_instanced.hlsl` 로 **별 파일** — 인라인 `D3DCompile` 금지,
   `shaders.Get(device, "mesh_instanced", instanced, ARRAYSIZE(instanced))` ([shader-pipeline.md](shader-pipeline.md)).
   (또는 `ShaderLibrary` 에 매크로 순열이 생기면 `mesh.hlsl` + `#define INSTANCED` 하나로. 지금은
@@ -442,8 +446,8 @@ namespace engine::game
 |---|---|
 | 1 (D3D11 은 렌더 스레드만) | 인스턴스 VB `CreateBuffer`/`Map` 전부 `MeshPass3D` 안. `SnapshotBuilder` 는 값 배열만 |
 | 2 (렌더러 코어 = clear/bind/pass 순회) | 새 드로우는 `MeshPass3D::Execute` 안. 코어 불변 |
-| 3 (경계는 값 스냅샷만) | `MeshInstance`(24B POD) + `InstanceBatch`. Mat4 팔레트·게임 객체 포인터 없음 |
-| 4 (1슬롯 메일박스) | ~192KB/프레임(8k), 오래된 프레임 버려도 무해 |
+| 3 (경계는 값 스냅샷만) | `MeshInstance`(28B POD) + `InstanceBatch`. Mat4 팔레트·게임 객체 포인터 없음 |
+| 4 (1슬롯 메일박스) | ~224KB/프레임(8k × 28B), 오래된 프레임 버려도 무해 |
 | 6 (ParallelFor 범위 독립) | `StepSimAgents` 워커는 `ActiveIndices()` 의 자기 `[begin,end)` → `Slots()[active[k]]` 만 쓰기(슬롯 인덱스 유일 → 충돌 없음). `ObjectPool::Acquire/Release`(churn) 는 `Wait()` 뒤 메인에서만 |
 | 7 (2D/3D 분리) | `MeshInstance`/`InstanceBatch` 는 `render/r3d`; `SimAgent`/`ObjectPool` 사용은 전부 `#if ENGINE_WITH_3D`. `MakeFrustum` 는 `SnapshotBuilder` 익명(값). `core::ObjectPool` 자체는 모듈 중립 |
 | 8 (충돌은 탐지만) | 브로드페이즈는 후보 목록만. 분리력·넉백은 크라우드 스텝(`StepSimAgents` / 장차 `AgentStore`) 안, physics 밖 |
@@ -512,7 +516,7 @@ if (inst.size() > first)
    셰이더/레이아웃은 공용(`mesh_instanced`, position+normal+per-instance) — 정점 포맷이 같으면
    추가 작업 없음. 텍스처는 §9.6-A.
 3. 메시 종류가 여럿이면 배치 조립을 `(meshId, lod)` 중첩 버킷으로.
-4. **정적 bind pose 만** — 인스턴스마다 다른 애니메이션은 §9.6-B(VAT).
+4. 정적 or VAT — §9.6-B(1클립 구현). 여러 클립/상태 전이는 후속.
    데모 씬 2 크라우드가 이 경로의 첫 예 (`MeshId::CrowdModel` ← `kCrowdModelFbx`, `game/CrowdConfig.h` §9.5).
 
 ### 9.3 LOD·컬 튜닝
@@ -575,7 +579,7 @@ inline constexpr CrowdConfig kActiveCrowd = kCrowdZombies;   // ← 이 줄만 �
 
 ### 9.6 크라우드에 텍스처·애니메이션 붙이기 — 필요한 작업 + 기존 경로
 
-지금 크라우드는 **무텍스처·정적 bind pose**. 붙이는 두 갈래:
+크라우드는 디퓨즈 텍스처 + 1클립 VAT 애니가 붙어 있다(아래). 확장 갈래:
 
 **A. 텍스처 (디퓨즈) — ✅ 구현됨**
 
@@ -594,16 +598,24 @@ inline constexpr CrowdConfig kActiveCrowd = kCrowdZombies;   // ← 이 줄만 �
   "탄젠트"). 큐브 프리셋(`kCrowdBoxes`)은 white 샘플 → 기존과 동일. 배포 최적화는 아틀라스
   (`atlas-build-pipeline.md`).
 
-**B. 애니메이션 (VAT, 큰 작업) — 전체 설계는 [horde-design.md](horde-design.md) §5**
+**B. 애니메이션 (VAT) — ✅ 1클립 구현됨** (전체 설계는 [horde-design.md](horde-design.md) §5)
 
-| 단계 | 무엇 | 기존 경로 / 재사용 |
-|---|---|---|
-| 1 | 좀비 스켈레톤 로드(`LoadModelFromFile` skipAnimation=false) + 클립 로드 `import::LoadAnimationClipsFromFile("assets/models/zombie/Zombie@Z_Run.FBX", skeleton, ...)` | **`ModelMeshPass3D::LoadModel` 이 unitychan 클립으로 하는 그대로** (`src/import/ModelImporter.*`, `model-animation-research.md`) |
-| 2 | **VAT 베이크**(로드 시 1회): 클립마다 `sampleRate × 프레임` 만큼 `anim::AnimationSampler::Evaluate` + CPU LBS → 최종 정점 위치(모델 로컬) 픽셀 배열. 매 프레임 아니라 로드 시 → 스레드/고정스텝 규칙 무관 | **`anim::AnimationSampler` + `ModelMeshPass3D::UpdateSkinningForFrame` 의 스키닝 수식** (1 인스턴스 매프레임 → N 프레임 오프라인). `horde-design.md` §5.1 레이아웃(`R16G16B16A16_FLOAT`, w=정점수, h=Σ프레임, `clipRowOffset[]`) |
-| 3 | VAT 텍스처 `CreateTexture2D` + 업로드(렌더 스레드), 법선용 2번째 텍스처 | 규칙 1 |
-| 4 | `MeshInstance` 에 `float animTime` + `std::uint16_t clipId` 추가(24B→28B). `SimAgent` 가 `animTime += dt` (스텝 안) + 상태로 `clipId` 선택 | 이 문서 §3 인스턴스 스트림 + `game::CharacterAnimationState` 발상 |
-| 5 | 새 `HordePass3D`(또는 `MeshPass3D` VAT 분기) + `horde.hlsl` — VS 가 `SV_VertexID` + per-instance `animTime`/`clipId` 로 VAT 행을 `Load`, 스키닝 수식이 셰이더에서 사라짐. **이 문서의 인스턴스 버퍼·컬링·LOD 골격 재사용** | `horde-design.md` §5.2·5.3, playbook 3b(새 패스) |
-| 6 | 클립 전이: 1차는 스냅(호드 규모엔 잘 안 보임), 크로스페이드는 두 행 `lerp`(§5.4) | `AnimationSampler::EvaluateBlended` 발상 |
+- `MeshPass3D::LoadCrowdMesh` 가 flatten 하며 per-vertex 본 데이터를 `bakeSrc` 로 보관 →
+  `import::LoadAnimationClipsFromFile(kCrowdClipFbx=Zombie@Z_Run.FBX, model.skeleton, kVatFps=24, 1.0)`
+  으로 클립을 이름 리타깃 로드(`ModelMeshPass3D` 가 unitychan 클립으로 하는 것과 동형).
+- **VAT 베이크**(로드 시): 프레임 `f = 0..ceil(dur*24)` 마다 `anim::AnimationSampler::Evaluate` →
+  본 스킨 팔레트 → 정점마다 `BlendBoneMatrices`(ModelMeshPass3D 헬퍼 복제) + `TransformPoint` →
+  그 위치에 **VB 와 같은 model→render 변환**(`zUpRotate` + `normalise`) 적용 → `R32G32B32A32_FLOAT`
+  텍스처 `[vcount × frames]` (t2, IMMUTABLE). `Zombie1` = 14472 verts × 41 프레임 ≈ 9.5 MB.
+- `MeshInstance` 에 `float animTime`(24B→28B, `TEXCOORD4`). `SimAgent` 가 `animTime += dt*(speed/1.4)`
+  (`StepSimAgents` 안), `SeedAgent` 가 per-agent 오프셋 → 워크 사이클 desync.
+- `mesh_instanced.hlsl` VS: `vatParams.y >= 1` 이면 `frame = (uint)(itime*rate) % frameCount`,
+  `local = vatPos.Load(int3(SV_VertexID, frame, 0))`. 스키닝 수식이 셰이더에서 사라짐.
+  `DrawInstanced` 가 배치별로 `vatParams.y` 세팅 — **`MeshId::CrowdModel` 배치만 VAT, 큐브 배치는 0**.
+- **남음 / 근사**: (1) 법선은 바인드 포즈 유지(법선 VAT 없음) — 몹엔 허용, (2) 셰도우 패스는
+  바인드 포즈 실루엣(T포즈) — `shadow_instanced` VAT 미확장, (3) 클립 1개(run)뿐, `clipId`·
+  상태 전이·크로스페이드 없음(§5.4), (4) VAT 폭 ≤ 16384 verts(D3D `Texture2D` 상한 — 초과 시
+  행 랩 필요), (5) fp32 VAT(fp16 절반 절감은 후속).
 
 **공통 재사용 정리 (기존 작업 루트)**:
 `import::LoadModelFromFile`/`LoadAnimationClipsFromFile`(`src/import/`) · `anim::AnimationSampler`

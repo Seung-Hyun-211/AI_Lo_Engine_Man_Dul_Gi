@@ -42,7 +42,8 @@ namespace engine::render
         float         yaw{ 0.0f };        // radians, Y axis      (offset 12)
         float         scale{ 1.0f };      // uniform              (offset 16)
         std::uint32_t colorRgba{ 0xffffffffu };   // 8:8:8:8, unpacked in the VS (offset 20)
-    };                                    // 24 bytes, no padding
+        float         animTime{ 0.0f };   // seconds into the crowd VAT clip; ignored when no VAT (offset 24)
+    };                                    // 28 bytes, no padding
 
     // A contiguous run of Scene3D::meshInstances that share a mesh (and LOD).
     // One batch == one DrawIndexedInstanced call. docs/instanced-rendering.md §3.

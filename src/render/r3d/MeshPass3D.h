@@ -65,5 +65,9 @@ namespace engine::render
         ID3D11SamplerState* m_sampler{};              // LINEAR / WRAP, for the crowd diffuse
         ID3D11ShaderResourceView* m_whiteSrv{};       // 1x1 white fallback (no crowd texture)
         ID3D11ShaderResourceView* m_crowdDiffuseSrv{};// kCrowdDiffuseTex, or null -> white
+        ID3D11ShaderResourceView* m_vatSrv{};         // crowd VAT (baked clip positions), or null -> static
+        ID3D11Buffer* m_vatInfo{};                    // cbuffer b2: (sampleRate, frameCount, 0, 0)
+        float m_vatSampleRate{ 0.0f };
+        float m_vatFrameCount{ 0.0f };                // 0 => no VAT (shader draws bind pose)
     };
 }

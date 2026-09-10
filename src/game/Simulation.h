@@ -72,6 +72,7 @@ namespace engine::game
         float heading{ 0.0f };   // radians; 0 faces +Z
         float speed{ 1.0f };     // m/s
         float phase{ 0.0f };     // bob / drift clock
+        float animTime{ 0.0f };  // seconds into the crowd VAT clip (per-agent offset + speed-scaled)
 
         // Required by core::ObjectPool: return a recycled slot to spawn-ready
         // state (SpawnSimAgents / the churn pass then fill the fields).
