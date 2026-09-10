@@ -151,7 +151,7 @@ if (auto hit = world.RaycastClosest(down)) { actor.pos.y = hit->point.y; actor.g
 | 시뮬/렌더 파이프라이닝 | 매 프레임 `ParallelFor().Wait()` 완전 블록 |
 | 프레임타임 HUD / 프로파일러 | 성능 회귀 감지 |
 | 라이트 배열(포인트/스팟) + CSM | 단일 방향광·단일 캐스케이드 (`lighting.md`) |
-| 메시 LOD / 임포스터 | 디스턴스 스왑 없음 |
+| 메시 LOD / 임포스터 | 디스턴스 스왑 없음 (인스턴스 크라우드 LOD 는 `instanced-rendering.md` §5, 메시 자체 LOD 는 별개) |
 | 스왑체인 `FLIP_DISCARD` | 레거시 `DISCARD` (`CLAUDE.md` 알려진 이슈) |
 | 결정성 리플레이(입력 로그 + 프레임 해시) | 회귀 테스트 (`time-design.md` 로드맵) |
 | 프리팹 / 직렬화 / 세이브 | 콘텐츠 저작·저장 |
@@ -171,9 +171,9 @@ if (auto hit = world.RaycastClosest(down)) { actor.pos.y = hit->point.y; actor.g
 | # | 항목 | 왜 (디펜스) | 기존 표 |
 |---|---|---|---|
 | ~~D1~~ ✅ | **레이캐스트 + 범위 질의 + 디버그 드로우** | 타워가 사거리 안 적을 고르고, 투사체가 다수를 맞춘다 | §2.2 (구현). `Simulation` 연동만 남음 |
-| D2 | **다수 엔티티 SoA + `core::ObjectPool<T>`** | 수백~수천 적/투사체를 개별 `new` 없이 스폰·재사용 | `entity-lifecycle-design.md` §3A, `scrollable-list-and-pool.md` §1.1 |
-| D3 | **브로드페이즈(균일 그리드)** | 다수 대 다수 충돌·타겟 질의 — 선형 스캔 N² 불가 | P1 |
-| D4 | **인스턴싱 렌더** (`MeshPass3D` 인스턴스 버퍼) | 같은 메시 수천 개를 draw call 소수로 | P2 GPU 스키닝과 별개 |
+| D2 | **다수 엔티티 SoA + `core::ObjectPool<T>`** (`game/AgentStore`) | 수백~수천 적/투사체를 개별 `new` 없이 스폰·재사용 | **`instanced-rendering.md` §6** (+ `entity-lifecycle-design.md` §3A, `scrollable-list-and-pool.md` §1.1) |
+| D3 | **브로드페이즈(균일 그리드)** | 다수 대 다수 충돌·타겟 질의 — 선형 스캔 N² 불가 | P1, `instanced-rendering.md` §6.4 |
+| D4 | **인스턴싱 렌더** (`MeshPass3D` 확장 + `MeshInstance`/`InstanceBatch` + 컬링·LOD) | 같은 메시 수천 개를 draw call 소수로 | **`instanced-rendering.md`** (§3~§5, 구현순서 §8) |
 | D5 | **웨이브/스폰 + HP/데미지 + 목표 지점·패배 판정** | 게임 루프 자체 | 새 `game/` 시스템 |
 | ~~D6~~ ✅ | 오디오 최소 믹서 | 타격·스폰·경보음 + 설정 슬라이더 살리기 | `audio-design.md` (최소 구현) |
 | — | 애니 재생 모드/크로스페이드(§2.1) | 플레이어 유닛/보스엔 필요하나 **적 다수엔 저비용 표현이 맞음** → 시점·적 표현 확정 후로 미룸 | P0 → 낮춤 |
