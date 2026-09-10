@@ -112,7 +112,8 @@ SnapshotBuilder (game/)
                     position+normal+uv 로 로드 + per-vertex 본 데이터 보관, Z-up 감지·회전 +
                     발원점·단위높이 정규화 → MeshId::CrowdModel. + kCrowdDiffuseTex(Zombie.tga)
                     → _UNORM_SRGB SRV(없으면 white). + **VAT 베이크**: kCrowdClipFbx(Zombie@Z_Run)
-                    클립을 kVatFps(24)로, 프레임마다 AnimationSampler+LBS → 같은 변환 적용 →
+                    클립을 kVatFps(24)로, 프레임마다 AnimationSampler+LBS → normalise(zUpRotate 는
+                    안 걸음 — 스킨 행렬이 이미 포함) + 루트 모션 XZ 스트립 →
                     R32G32B32A32_FLOAT [verts×frames] 텍스처(t2). 경로 비면 스킵, 메시 실패 시
                     큐브 폴백. instanceBatches 를 배치당 DrawIndexedInstanced 1콜 —
                     mesh_instanced.hlsl VS 가 CrowdModel 배치엔 animTime 으로 VAT 행 Load(큐브는

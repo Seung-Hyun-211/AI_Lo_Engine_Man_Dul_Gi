@@ -330,13 +330,10 @@ namespace engine::render
 
         // Normalise: feet at y = 0, centred on x/z, total height 1. The
         // SnapshotBuilder scales each instance to the metre height it wants.
-        // `zUpRotate` + `normalise` together are the full model->render transform;
-        // the VAT bake below applies both to raw skinned positions so animated
-        // and bind-pose frames share a space. (data.vertices is already Z-up
-        // rotated above, so its loop only runs `normalise`.)
+        // `data.vertices` is already Z-up rotated above; the VAT bake's skin
+        // matrices already carry that rotation, so both paths only need this.
         const float s = 1.0f / std::max(maxY - minY, 1e-4f);
         const math::Vec3 offset{ (minX + maxX) * 0.5f, minY, (minZ + maxZ) * 0.5f };
-        const auto zUpRotate = [zUp](math::Vec3 p) { return zUp ? math::Vec3{ p.x, p.z, -p.y } : p; };
         const auto normalise = [s, offset](math::Vec3 p)
         {
             return math::Vec3{ (p.x - offset.x) * s, (p.y - offset.y) * s, (p.z - offset.z) * s };
@@ -391,10 +388,17 @@ namespace engine::render
         }
 
         // --- Bake one animation clip into a VAT (t2). CPU-skin every vertex at
-        // kVatFps frames, apply the same model->render transform, store the
-        // final local position per (vertex column, frame row). The VS then just
-        // Loads a row instead of skinning. Missing clip / skeleton => static
-        // bind pose. docs/instanced-rendering.md §9.6-B, docs/horde-design.md §5.
+        // kVatFps frames, apply the same NORMALISE (feet at 0, unit height) the
+        // VB got, store the final local position per (vertex column, frame row).
+        // The VS then just Loads a row instead of skinning. Missing clip /
+        // skeleton => static bind pose. docs/instanced-rendering.md §9.6-B.
+        //
+        // NB: the skin matrices already carry the Z-up -> Y-up rotation (they
+        // are inverseBind * boneModelTransform, and this rig's inverseBind
+        // encodes it), so we do NOT apply `zUpRotate` here - that is only for
+        // the raw (unskinned) VB positions. And we strip the clip's root XZ
+        // travel per frame so the walk cycle plays in place (Simulation moves
+        // the agent).
         if (kCrowdClipFbx != nullptr && kCrowdClipFbx[0] != '\0' && !res.model.skeleton.Empty())
         {
             import::AnimationImportResult clipRes;
@@ -414,17 +418,35 @@ namespace engine::render
                 anim::AnimationSampler sampler;
                 std::vector<math::Mat4> palette;
                 std::vector<float> pix(static_cast<std::size_t>(vcount) * frames * 4, 0.0f);
+                std::vector<math::Vec3> framePos(static_cast<std::size_t>(vcount));
+                float anchorX = 0.0f, anchorZ = 0.0f;   // frame-0 centroid XZ = the root-motion origin
 
                 for (int f = 0; f < frames; ++f)
                 {
                     sampler.Evaluate(res.model.skeleton, clip,
                                      static_cast<float>(f) / kVatFps, palette, anim::PlayMode::Loop);
-                    float* row = pix.data() + static_cast<std::size_t>(f) * vcount * 4;
+
+                    double sumX = 0.0, sumZ = 0.0;
                     for (int i = 0; i < vcount; ++i)
                     {
                         const import::ModelVertex& bv = bakeSrc[static_cast<std::size_t>(i)];
                         const math::Mat4 skin = BlendBoneMatrices(bv.boneIndices, bv.boneWeights, palette);
-                        const math::Vec3 wp = normalise(zUpRotate(math::TransformPoint(bv.position, skin)));
+                        framePos[static_cast<std::size_t>(i)] = math::TransformPoint(bv.position, skin);
+                        sumX += framePos[static_cast<std::size_t>(i)].x;
+                        sumZ += framePos[static_cast<std::size_t>(i)].z;
+                    }
+                    const float meanX = static_cast<float>(sumX / vcount);
+                    const float meanZ = static_cast<float>(sumZ / vcount);
+                    if (f == 0) { anchorX = meanX; anchorZ = meanZ; }
+                    const float driftX = meanX - anchorX;   // this frame's forward travel to remove
+                    const float driftZ = meanZ - anchorZ;
+
+                    float* row = pix.data() + static_cast<std::size_t>(f) * vcount * 4;
+                    for (int i = 0; i < vcount; ++i)
+                    {
+                        math::Vec3 p = framePos[static_cast<std::size_t>(i)];
+                        p.x -= driftX; p.z -= driftZ;
+                        const math::Vec3 wp = normalise(p);
                         row[i * 4 + 0] = wp.x; row[i * 4 + 1] = wp.y; row[i * 4 + 2] = wp.z;
                     }
                 }

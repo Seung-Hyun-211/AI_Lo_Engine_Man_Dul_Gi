@@ -605,8 +605,12 @@ inline constexpr CrowdConfig kActiveCrowd = kCrowdZombies;   // ← 이 줄만 �
   으로 클립을 이름 리타깃 로드(`ModelMeshPass3D` 가 unitychan 클립으로 하는 것과 동형).
 - **VAT 베이크**(로드 시): 프레임 `f = 0..ceil(dur*24)` 마다 `anim::AnimationSampler::Evaluate` →
   본 스킨 팔레트 → 정점마다 `BlendBoneMatrices`(ModelMeshPass3D 헬퍼 복제) + `TransformPoint` →
-  그 위치에 **VB 와 같은 model→render 변환**(`zUpRotate` + `normalise`) 적용 → `R32G32B32A32_FLOAT`
-  텍스처 `[vcount × frames]` (t2, IMMUTABLE). `Zombie1` = 14472 verts × 41 프레임 ≈ 9.5 MB.
+  `normalise`(발 y=0, 단위 높이) → `R32G32B32A32_FLOAT` 텍스처 `[vcount × frames]` (t2, IMMUTABLE).
+  `Zombie1` = 14472 verts × 41 프레임 ≈ 9.5 MB.
+  - **`zUpRotate` 는 안 건다** — 스킨 행렬이 이미 `inverseBind` 로 Z-up→Y-up 회전을 포함한다
+    (이 릭 기준). VB(무스킨 raw) 경로만 `zUpRotate`. VAT 에 또 걸면 90° 이중 회전 → 눕는다.
+  - **루트 모션 스트립**: 프레임마다 전체 정점 XZ 무게중심을 재고, 프레임 0 기준 드리프트만큼
+    빼서 워크 사이클이 제자리에서 돌게 한다(전진 이동은 `Simulation` 이 `pos` 로).
 - `MeshInstance` 에 `float animTime`(24B→28B, `TEXCOORD4`). `SimAgent` 가 `animTime += dt*(speed/1.4)`
   (`StepSimAgents` 안), `SeedAgent` 가 per-agent 오프셋 → 워크 사이클 desync.
 - `mesh_instanced.hlsl` VS: `vatParams.y >= 1` 이면 `frame = (uint)(itime*rate) % frameCount`,
