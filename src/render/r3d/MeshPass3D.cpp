@@ -35,6 +35,12 @@ namespace
 
     struct ObjectConstants { float world[16]; float color[4]; };
 
+    // The FBX drawn as the instanced crowd (MeshId::CrowdModel). Set to nullptr
+    // to skip the load entirely (e.g. when game/CrowdConfig.h uses CrowdMesh::Cube
+    // and you want to avoid the startup cost). Keep the metre height / pivot in
+    // the matching game::CrowdConfig preset in sync when swapping this file.
+    constexpr const char* kCrowdModelFbx = "assets/models/zombie/Zombie1.FBX";
+
     void ThrowIfFailed(HRESULT result, const char* message)
     {
         if (FAILED(result)) throw std::runtime_error(message);
@@ -178,11 +184,13 @@ namespace engine::render
 
         CreateMesh(device, MeshId::Cube, MakeCube());
         CreateMesh(device, MeshId::Plane, MakePlane());
-        LoadZombieMesh(device);
+        LoadCrowdMesh(device);
     }
 
-    void MeshPass3D::LoadZombieMesh(ID3D11Device* device)
+    void MeshPass3D::LoadCrowdMesh(ID3D11Device* device)
     {
+        if (kCrowdModelFbx == nullptr || kCrowdModelFbx[0] == '\0') return;   // CrowdMesh::Cube demo
+
         import::ImportOptions opt;
         opt.skipAnimation = true;   // bind pose only - animated crowds need VAT (docs/horde-design.md §5)
         opt.scale = 1.0f;           // height is normalised below, so source units do not matter
@@ -190,7 +198,7 @@ namespace engine::render
         import::ImportResult res;
         for (const char* prefix : { "", "../../", "../../../" })
         {
-            res = import::LoadModelFromFile(std::string(prefix) + "assets/models/zombie/Zombie1.FBX", opt);
+            res = import::LoadModelFromFile(std::string(prefix) + kCrowdModelFbx, opt);
             if (res.ok) break;
         }
 
@@ -210,9 +218,9 @@ namespace engine::render
 
         if (data.vertices.empty() || data.indices.empty())
         {
-            OutputDebugStringA(("MeshPass3D: zombie mesh load failed ('" + res.error
-                + "') - crowd falls back to the cube\n").c_str());
-            CreateMesh(device, MeshId::Zombie, MakeCube());
+            OutputDebugStringA((std::string("MeshPass3D: crowd mesh '") + kCrowdModelFbx
+                + "' failed to load ('" + res.error + "') - falling back to the cube\n").c_str());
+            CreateMesh(device, MeshId::CrowdModel, MakeCube());
             return;
         }
 
@@ -230,13 +238,13 @@ namespace engine::render
         float minX, minY, minZ, maxX, maxY, maxZ;
         bbox(minX, minY, minZ, maxX, maxY, maxZ);
 
-        // This asset (and many 3ds Max exports) came through Z-up: feet near
+        // Many 3ds Max exports (this one included) come through Z-up: feet near
         // z = 0, head near z = max, and the Z span is the real height. ufbx's
         // axis target did not reorient it. Rotate Z-up -> Y-up in place:
         // (x, y, z) -> (x, z, -y). A proper rotation (det +1, no mirror, so
         // lighting stays correct); this rig's front is -Y, so this leaves the
-        // zombie facing +Z (engine forward = yaw 0). Flip to (-x, z, y) if it
-        // moonwalks.
+        // model facing +Z (engine forward = yaw 0). Flip to (-x, z, y) if it
+        // moonwalks. A Y-up model skips this branch untouched.
         const bool zUp = (maxZ - minZ) > (maxY - minY) && minZ > -2.0f;
         if (zUp)
         {
@@ -261,10 +269,10 @@ namespace engine::render
             v.pz = (v.pz - cz) * s;
         }
 
-        CreateMesh(device, MeshId::Zombie, data);
-        OutputDebugStringA(("MeshPass3D: zombie mesh loaded ("
+        CreateMesh(device, MeshId::CrowdModel, data);
+        OutputDebugStringA((std::string("MeshPass3D: crowd mesh '") + kCrowdModelFbx + "' loaded ("
             + std::to_string(data.vertices.size()) + " verts, "
-            + std::to_string(data.indices.size() / 3) + " tris)\n").c_str());
+            + std::to_string(data.indices.size() / 3) + " tris, zUp=" + (zUp ? "1" : "0") + ")\n").c_str());
     }
 
     void MeshPass3D::Execute(const PassContext& context)

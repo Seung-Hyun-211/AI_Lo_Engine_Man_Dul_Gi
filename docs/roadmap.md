@@ -173,7 +173,7 @@ if (auto hit = world.RaycastClosest(down)) { actor.pos.y = hit->point.y; actor.g
 | ~~D1~~ ✅ | **레이캐스트 + 범위 질의 + 디버그 드로우** | 타워가 사거리 안 적을 고르고, 투사체가 다수를 맞춘다 | §2.2 (구현 — 2D·3D + `Simulation` 연동 완료) |
 | ~~D2~~ ✅ | **다수 엔티티 풀 + `core::ObjectPool<T>`** (AoS. SoA 승격은 측정 게이트) | 수백~수천 적/투사체를 개별 `new` 없이 스폰·재사용 | `src/core/ObjectPool.h`, **`instanced-rendering.md` §6** |
 | ~~D3~~ ✅ (Step) | **브로드페이즈(균일 그리드)** — 3D `Step()` 완료. 레이캐스트 DDA 가속(D3b)만 남음 | 다수 대 다수 충돌·타겟 질의 — 선형 스캔 N² 불가 | `collider-design.md` "브로드페이즈" |
-| ~~D4~~ ✅ | **인스턴싱 렌더** — 인스턴스드 드로우 + 프러스텀·거리 컬 + 거리 LOD 2단계(§8-1·2·3). 크라우드가 FBX 좀비 메시(정적 bind pose, `MeshId::Zombie`). 빌보드/중간 티어·텍스처·애니(VAT)·`AgentStore` 남음 | 같은 메시 수천 개를 draw call 소수로 | **`instanced-rendering.md`** (§3~§5, 구현순서 §8) |
+| ~~D4~~ ✅ | **인스턴싱 렌더** — 인스턴스드 드로우 + 프러스텀·거리 컬 + 거리 LOD 2단계(§8-1·2·3). 크라우드 = FBX 정적 메시(`MeshId::CrowdModel`), 수·모델은 `game/CrowdConfig.h`(§9.5). 빌보드/중간 티어·텍스처(§9.6-A)·애니 VAT(§9.6-B)·`AgentStore` 남음 | 같은 메시 수천 개를 draw call 소수로 | **`instanced-rendering.md`** (§3~§5, 구현순서 §8) |
 | D5 | **웨이브/스폰 + HP/데미지 + 목표 지점·패배 판정** | 게임 루프 자체 | 새 `game/` 시스템 |
 | ~~D6~~ ✅ | 오디오 최소 믹서 | 타격·스폰·경보음 + 설정 슬라이더 살리기 | `audio-design.md` (최소 구현) |
 | — | 애니 재생 모드/크로스페이드(§2.1) | 플레이어 유닛/보스엔 필요하나 **적 다수엔 저비용 표현이 맞음** → 시점·적 표현 확정 후로 미룸 | P0 → 낮춤 |

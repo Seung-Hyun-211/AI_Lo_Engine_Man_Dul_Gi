@@ -82,9 +82,9 @@ Simulation (game/)
                          groundY = kCliffTop (그 높이에 착지), halfRange = kPlateauHalf(5.0,
                          원점 대칭 클램프). 메사 앞면은 kPlateauHalf+1.0 → 플레이어가 절벽
                          가장자리 1m 앞까지 걸어감. m_cameraPitch = -0.5.
-  · SpawnSimAgents     : m_agents(core::ObjectPool<SimAgent>).Init(kSimAgentCapacity=1024) →
-                         kSimAgentCount(600) 번 Acquire + SeedAgent(결정적, RNG 없음).
-                         핸들은 m_agentHandles 에 보관(churn 용).
+  · SpawnSimAgents     : m_agents(core::ObjectPool<SimAgent>).Init(kActiveCrowd.capacity) →
+                         kActiveCrowd.count 번 Acquire + SeedAgent(결정적, RNG 없음).
+                         핸들은 m_agentHandles 에 보관(churn 용). 수·모델은 game/CrowdConfig.h.
   · StepSimAgents(dt)  : ParallelFor(청크 32) 가 m_agents.ActiveIndices() 를 겹치지 않는
                          [begin,end) 로 — Slots()[active[k]] 만 쓰기(슬롯 인덱스 유일 → 충돌
                          없음). heading 드리프트 + 전진 + bob + 필드 경계 반사. 그 뒤 메인에서
@@ -100,18 +100,19 @@ SnapshotBuilder (game/)
   · BuildCamera   : kDemoScene==2 면 orbit 거리 3.6→6.0 (필드·군중이 프레임에 들어오게).
   · BuildLighting : 씬 2 는 셰도우 ortho 를 넓히고(22→64) 중심을 +Z 로 밀어 군중을 덮는다.
   · BuildScene3D  : kDemoScene==2 → BuildCliffScene (넓은 평지 Plane + 메사 Cube +
-                    기둥 마커 + **크라우드 = 인스턴스드 좀비 메시**(MeshId::Zombie): 
+                    기둥 마커 + **크라우드 = 인스턴스드**: 메시/높이/피벗은 kActiveCrowd
+                    (Cube→MeshId::Cube 중심피벗, Model→MeshId::CrowdModel 발피벗).
                     m_agents.ActiveIndices() 순회, 프러스텀·최대거리 컬 + 거리 LOD 2단계
                     (d2 <= kAgentShadowDist² → 근 lod0, 아니면 원 lod2)로 lodBucket 나눠 배치
-                    0~2개. inst.pos = a.pos(발이 원점인 메시), inst.scale = kZombieHeight(1.8).
-                    색(flat tint): LookRay().agentSlot = 노랑, AgentTouching()[slot] = 빨강,
-                    그 외 속도 램프(초록끼). 디버그 시선 레이 + hit 마커). 씬 1(kBoxes)은 else.
-  · MeshPass3D    : Initialize 에서 LoadZombieMesh() — assets/models/zombie/Zombie1.FBX 를
-                    bind pose(position+normal)로 로드, 발 원점·단위 높이로 정규화 →
-                    MeshId::Zombie 슬롯. 로드 실패 시 큐브로 폴백. 애니메이션 없음(정적 —
-                    스킨드 크라우드는 VAT, [horde-design.md](horde-design.md) §5).
+                    0~2개. inst.scale = kActiveCrowd.height. 색(flat tint): LookRay().agentSlot
+                    = 노랑, AgentTouching()[slot] = 빨강, 그 외 속도 램프. 디버그 시선 레이 +
+                    hit 마커). 씬 1(kBoxes)은 else.
+  · MeshPass3D    : Initialize 에서 LoadCrowdMesh() — kCrowdModelFbx(현재 Zombie1.FBX) 를
+                    bind pose(position+normal)로 로드, Z-up 감지·회전 + 발 원점·단위 높이
+                    정규화 → MeshId::CrowdModel. 경로가 비면 스킵, 실패 시 큐브 폴백. 정적
+                    (애니메이션은 VAT — [instanced-rendering.md](instanced-rendering.md) §9.6).
                     instanceBatches 를 배치당 DrawIndexedInstanced 1콜 (mesh_instanced.hlsl).
-                    셰도우 패스는 lod>=2(원거리) 배치 스킵. 상세 [instanced-rendering.md](instanced-rendering.md).
+                    셰도우 패스는 lod>=2(원거리) 배치 스킵.
 ```
 
 `SimAgent` 는 동질적이라 `EntityId` 없이 `core::ObjectPool<SimAgent>`(AoS, 슬롯 고정 +
@@ -123,16 +124,17 @@ SnapshotBuilder (game/)
 
 - **씬 전환**: `src/game/Simulation.h` 의 `Simulation::kDemoScene` 를 `1` 또는 `2` 로. 리빌드.
   (런타임 토글이 필요해지면 생성자 인자로 승격 — 지금은 YAGNI.)
-- **군중 규모**: `kSimAgentCount`(live, 현재 **1500**) 와 `kSimAgentCapacity`(풀 슬롯, 2048).
-  렌더는 배치 1~2개 = `DrawIndexedInstanced`, 상한은 `MeshPass3D::kMaxInstances`(16384).
-  좀비 메시가 ~4.8k tris 라 1500 = ~7M tris/프레임 — 실 GPU 엔 여유, WARP(소프트웨어)에선 느림.
-  `StepSimAgents`(`ParallelFor`) + 매 스텝 `CollisionWorld3D` rebuild/`Step()`/`RaycastClosest`
-  가 프레임 비용. 더 키우려면 SoA·D3b·VAT — [instanced-rendering.md](instanced-rendering.md) §8,
-  [collider-design.md](collider-design.md), [horde-design.md](horde-design.md) §5.
-- **좀비 메시**: `assets/models/zombie/Zombie1.FBX`(정적 bind pose, T포즈). 이 FBX 는 **Z-up**
-  으로 들어와서(ufbx axis target 무시됨) `MeshPass3D::LoadZombieMesh` 가 감지해 `(x,y,z)→(x,z,-y)`
-  로 회전(det +1, 이 릭은 정면이 -Y 라 이 방향이 +Z 를 봄) 후 발 원점·단위 높이 정규화 →
-  `inst.scale`(=1.8) 로 1.8m. 다시 문워크면 `(-x,z,y)` 로. 애니메이션은 VAT 선행.
+- **군중 설정 = `game/CrowdConfig.h` 의 `kActiveCrowd`** (한 줄). 프리셋: `kCrowdBoxes`(600 큐브,
+  원래 데모) / `kCrowdZombies`(1500, `Zombie1.FBX` 정적). `CrowdConfig{count, capacity, mesh,
+  height, colliderRadius}` — `Simulation`(스폰·풀·콜라이더)·`SnapshotBuilder`(메시·높이·피벗)가
+  전부 이걸 읽는다. 수치만 바꾸려면 프리셋 필드 조정. 모델 파일은
+  `MeshPass3D.cpp` 의 `kCrowdModelFbx`. 상세 [instanced-rendering.md](instanced-rendering.md) §9.5.
+  렌더는 배치 1~2개 = `DrawIndexedInstanced`, 상한 `MeshPass3D::kMaxInstances`(16384). 좀비
+  ~4.8k tris → 1500 ≈ 7M tris/프레임(실 GPU 여유, WARP 느림).
+- **좀비 메시**: `Zombie1.FBX`(정적 bind pose, T포즈). **Z-up** 으로 들어와서(ufbx axis target
+  무시) `MeshPass3D::LoadCrowdMesh` 가 감지해 `(x,y,z)→(x,z,-y)` 회전(det +1, 이 릭은 정면이
+  -Y 라 +Z 를 봄) 후 발 원점·단위 높이 정규화. 문워크면 `(-x,z,y)` 로. 텍스처·애니메이션은
+  [instanced-rendering.md](instanced-rendering.md) §9.6.
 - **풀 churn 속도**: `kAgentChurnIntervalSteps`(현재 12스텝마다 1마리 재활용 — 데모용 검증 churn).
   키우면 재활용이 덜 눈에 띈다. 웨이브 스폰/디스폰이 생기면 이 churn 은 제거.
 - **필드·메사 치수**: `kCliffTop`(메사 높이), `kPlateauHalf`(플레이어 이동 반경), `kFieldHalf`
@@ -143,8 +145,8 @@ SnapshotBuilder (game/)
 - **군중 거동**: `Simulation::StepSimAgents` 의 heading 드리프트 계수·`speed` 범위·bob 진폭,
   초기 배치는 `SeedAgent`. 실제 게임 AI(추적·경로)로 바꿀 때 이 함수만 교체하면 렌더/스냅샷은
   안 건드린다.
-- **시선 레이 / 개체 충돌**: `Simulation::kSimAgentRadius`(0.3, 크라우드 스피어 반경 = 게임플레이
-  진실값), `kLookRayRange`(80). `StepCollision3D` 가 `m_collision3d` 를 매 스텝 rebuild →
+- **시선 레이 / 개체 충돌**: `kActiveCrowd.colliderRadius`(크라우드 스피어 반경, 중심 = `height*0.5`),
+  `Simulation::kLookRayRange`(80). `StepCollision3D` 가 `m_collision3d` 를 매 스텝 rebuild →
   시선 레이 `RaycastClosest` + `Step()`(균일 그리드 브로드페이즈, `collider-design.md` "브로드페이즈").
   타워 타겟팅·투사체·분리력을 붙일 때 이 `CollisionWorld3D` 에 `RaycastClosest/Any/All` /
   `Contacts()` 로 질의. 셀 크기·캡은 `CollisionWorld3D.cpp` 익명(`kMinCellSize` 등).

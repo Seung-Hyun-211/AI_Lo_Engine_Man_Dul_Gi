@@ -1,14 +1,14 @@
 # 대규모 인스턴스 렌더 — 수천 개체 출력 선행작업
 
 **상태: §8 의 1~3 + 4(풀) 구현됨, 4(SoA)·5·6 미구현.**
-데모 씬 2([demo-scene.md](demo-scene.md))의 `SimAgent` 군중(현재 1500 / capacity 2048)이
-**인스턴스드 좀비 메시**(`MeshId::Zombie` ← `assets/models/zombie/Zombie1.FBX`, 정적 bind pose)로
-`DrawIndexedInstanced` 배치 그려지고, `SnapshotBuilder` 가 프러스텀·최대거리 컬 + **거리 LOD
-2단계**(근거리=그림자 O / 원거리=그림자 X)로 배치를 나눈다. 군중은
-`core::ObjectPool<SimAgent>`(`src/core/ObjectPool.h`) 에 살고, `ParallelFor` 는 그
-`ActiveIndices()` 를 쪼개 돌며, 스텝마다 1마리씩 풀을 재활용(churn).
-남은 것: LOD 중간 티어/빌보드(§5.3), 텍스처, SoA 승격(`game/AgentStore`, 측정 게이트),
-**애니메이션(VAT — [horde-design.md](horde-design.md) §5)**.
+데모 씬 2([demo-scene.md](demo-scene.md))의 `SimAgent` 군중이 `DrawIndexedInstanced` 배치로
+그려지고, `SnapshotBuilder` 가 프러스텀·최대거리 컬 + **거리 LOD 2단계**(근=그림자 O / 원=그림자 X)로
+배치를 나눈다. 군중은 `core::ObjectPool<SimAgent>`(`src/core/ObjectPool.h`) 에 살고,
+`ParallelFor` 는 `ActiveIndices()` 를 쪼개 돌며, 스텝마다 1마리 풀 재활용(churn).
+크라우드의 **수·모델·크기는 `game/CrowdConfig.h` 의 `kActiveCrowd` 하나가 결정**(§9.5) —
+현재 `kCrowdZombies`(1500, `assets/models/zombie/Zombie1.FBX` 정적 bind pose). 원래 데모는
+`kCrowdBoxes`(600 큐브) 프리셋으로 한 줄 복귀.
+남은 것: LOD 중간 티어/빌보드(§5.3), **텍스처·애니메이션**(§9.6), SoA 승격(§6.2, 측정 게이트).
 이 문서는 그 벽을 넘기 위한 **엔진 일반 선행작업** 전체를 설계한다 — 정적/강체 인스턴스를 한
 번의 `DrawIndexedInstanced` 로 그리는 경로, 스냅샷 값 타입, 컬링·LOD, 심(sim) 쪽 SoA + 풀.
 
@@ -499,15 +499,15 @@ if (inst.size() > first)
 ### 9.2 새 인스턴스 메시 종류 추가
 
 1. `render/r3d/Scene3D.h` `enum class MeshId` 에 값 추가 + `MeshPass3D::Initialize` 에서 채운다 —
-   절차 메시면 `CreateMesh(device, MeshId::New, MakeX())`, **FBX 면 `MeshPass3D::LoadZombieMesh`
+   절차 메시면 `CreateMesh(device, MeshId::New, MakeX())`, **FBX 면 `MeshPass3D::LoadCrowdMesh`
    패턴**: `import::LoadModelFromFile`(skipAnimation) → 서브메시 정점(position+normal)·인덱스
-   flatten → 정규화(발 원점·단위 높이) → `CreateMesh`. 로드 실패 시 큐브 폴백.
+   flatten → Z-up 감지·회전 → 정규화(발 원점·단위 높이) → `CreateMesh`. 로드 실패 시 큐브 폴백.
 2. `SnapshotBuilder` 에서 그 메시를 쓰는 `InstanceBatch{ .mesh = MeshId::New, ... }` 를 만든다.
    셰이더/레이아웃은 공용(`mesh_instanced`, position+normal+per-instance) — 정점 포맷이 같으면
-   추가 작업 없음. 텍스처가 필요하면 `mesh_instanced` 텍스처 변형 + SRV (미구현).
+   추가 작업 없음. 텍스처는 §9.6-A.
 3. 메시 종류가 여럿이면 배치 조립을 `(meshId, lod)` 중첩 버킷으로.
-4. **정적 bind pose 만** — 인스턴스마다 다른 애니메이션은 VAT([horde-design.md](horde-design.md) §5).
-   데모 씬 2 크라우드가 이 경로의 첫 예 (`MeshId::Zombie` ← `assets/models/zombie/Zombie1.FBX`).
+4. **정적 bind pose 만** — 인스턴스마다 다른 애니메이션은 §9.6-B(VAT).
+   데모 씬 2 크라우드가 이 경로의 첫 예 (`MeshId::CrowdModel` ← `kCrowdModelFbx`, `game/CrowdConfig.h` §9.5).
 
 ### 9.3 LOD·컬 튜닝
 
@@ -542,6 +542,60 @@ m_jobs.ParallelFor(0, n, c, [&](size_t b, size_t e){ for(...) store.Despawn(i); 
   안 보낸다. (GPU 컬은 §10, 훨씬 뒤.)
 - 불투명 인스턴스를 거리 정렬하지 말 것 — 낭비. 반투명 배치만 정렬.
 - `meshInstances` 를 배치 경계와 어긋나게 채우지 말 것 — 배치는 **연속 구간**이어야 한 콜.
+
+### 9.5 크라우드 설정 스왑 (`game/CrowdConfig.h`)
+
+크라우드의 수·모델·크기는 `game/CrowdConfig.h` 의 **`kActiveCrowd`** 하나가 결정한다 —
+`Simulation`(스폰 수·풀 capacity·콜라이더)·`SnapshotBuilder`(메시·높이·피벗)가 전부 이걸 읽는다.
+
+```cpp
+struct CrowdConfig { int count, capacity; CrowdMesh mesh; float height, colliderRadius; };
+inline constexpr CrowdConfig kCrowdBoxes  { 600, 1024, CrowdMesh::Cube,  0.5f, 0.30f };  // 원래 데모
+inline constexpr CrowdConfig kCrowdZombies{ 1500, 2048, CrowdMesh::Model, 1.8f, 0.50f };
+inline constexpr CrowdConfig kActiveCrowd = kCrowdZombies;   // ← 이 줄만 바꾸면 스왑
+```
+
+- **수치만 조정**: `count`/`capacity`/`height`/`colliderRadius` 를 고친 프리셋으로 교체.
+  `capacity >= count`(스폰/디스폰 여유). 콜라이더 중심은 `height*0.5`(자동).
+- **모델 파일 교체**: `render/r3d/MeshPass3D.cpp` 의 `kCrowdModelFbx` 를 새 FBX 경로로.
+  `MeshPass3D::LoadCrowdMesh` 가 Z-up 자동 감지·정규화(발 원점·단위 높이) 하므로 임의 캐릭터
+  FBX 대응. 정면이 뒤면 회전을 `(x,z,-y)`↔`(-x,z,y)` 로. 새 모델의 실측 키를 `CrowdConfig.height`
+  에 맞춘다.
+- **큐브로 되돌리기**: `kActiveCrowd = kCrowdBoxes`. (모델은 여전히 로드됨 — 시작 비용도 없애려면
+  `kCrowdModelFbx = nullptr`.)
+- `MeshId::CrowdModel`(=2) = 그 로드된 메시 슬롯. `MeshPass3D` 는 게임 설정을 모르고 파일 경로만
+  안다(불변 규칙 7 — 렌더가 `game/` 를 include 안 함).
+
+### 9.6 크라우드에 텍스처·애니메이션 붙이기 — 필요한 작업 + 기존 경로
+
+지금 크라우드는 **무텍스처·정적 bind pose**. 붙이는 두 갈래:
+
+**A. 텍스처 (정적 인스턴스, 작은 작업)**
+
+| 단계 | 무엇 | 기존 경로 / 재사용 |
+|---|---|---|
+| 1 | `MeshVertex` 에 `float u, v` 추가(stride 24→32), `MakeCube`/`MakePlane`/`LoadCrowdMesh` flatten 이 `ModelVertex::uv` 를 넣게, `mesh` 입력 레이아웃에 `TEXCOORD0` | `MeshPass3D` 안 |
+| 2 | `mesh_instanced_tex.hlsl`(또는 `#define TEXTURED`) — VSIn 에 `uv`, PS 에 `Texture2D diffuse : t0` + `SamplerState s0`, `ApplyLighting(diffuse.Sample(...).rgb * icol.rgb, ...)` | `mesh_instanced.hlsl` 복제 + `shaders.Get` |
+| 3 | 디퓨즈 로드: `import::LoadImageFromFile("assets/models/zombie/Zombie.tga")` → `import::ImageData`(RGBA8) → `CreateTexture2D` + SRV(`_UNORM_SRGB`) — **렌더 스레드에서만** | `docs/image-assets.md`; **`ModelMeshPass3D` 가 플레이어 디퓨즈 TGA 로 하는 그대로 복붙** |
+| 4 | `DrawInstanced` 에서 크라우드 배치 전에 `PSSetShaderResources(0,1,&srv)` + 샘플러 | `SpritePass2D` 의 SRV 바인딩 패턴 |
+| — | 노멀/AO/메탈릭/이미션(PNG·TGA 세트)은 탄젠트 프레임 필요 — importer 가 아직 안 뽑음(`model-animation-research.md` "탄젠트"). **디퓨즈만 먼저.** `.tga` 는 gitignore — 배포는 아틀라스(`atlas-build-pipeline.md`)나 ignore 해제 |
+
+**B. 애니메이션 (VAT, 큰 작업) — 전체 설계는 [horde-design.md](horde-design.md) §5**
+
+| 단계 | 무엇 | 기존 경로 / 재사용 |
+|---|---|---|
+| 1 | 좀비 스켈레톤 로드(`LoadModelFromFile` skipAnimation=false) + 클립 로드 `import::LoadAnimationClipsFromFile("assets/models/zombie/Zombie@Z_Run.FBX", skeleton, ...)` | **`ModelMeshPass3D::LoadModel` 이 unitychan 클립으로 하는 그대로** (`src/import/ModelImporter.*`, `model-animation-research.md`) |
+| 2 | **VAT 베이크**(로드 시 1회): 클립마다 `sampleRate × 프레임` 만큼 `anim::AnimationSampler::Evaluate` + CPU LBS → 최종 정점 위치(모델 로컬) 픽셀 배열. 매 프레임 아니라 로드 시 → 스레드/고정스텝 규칙 무관 | **`anim::AnimationSampler` + `ModelMeshPass3D::UpdateSkinningForFrame` 의 스키닝 수식** (1 인스턴스 매프레임 → N 프레임 오프라인). `horde-design.md` §5.1 레이아웃(`R16G16B16A16_FLOAT`, w=정점수, h=Σ프레임, `clipRowOffset[]`) |
+| 3 | VAT 텍스처 `CreateTexture2D` + 업로드(렌더 스레드), 법선용 2번째 텍스처 | 규칙 1 |
+| 4 | `MeshInstance` 에 `float animTime` + `std::uint16_t clipId` 추가(24B→28B). `SimAgent` 가 `animTime += dt` (스텝 안) + 상태로 `clipId` 선택 | 이 문서 §3 인스턴스 스트림 + `game::CharacterAnimationState` 발상 |
+| 5 | 새 `HordePass3D`(또는 `MeshPass3D` VAT 분기) + `horde.hlsl` — VS 가 `SV_VertexID` + per-instance `animTime`/`clipId` 로 VAT 행을 `Load`, 스키닝 수식이 셰이더에서 사라짐. **이 문서의 인스턴스 버퍼·컬링·LOD 골격 재사용** | `horde-design.md` §5.2·5.3, playbook 3b(새 패스) |
+| 6 | 클립 전이: 1차는 스냅(호드 규모엔 잘 안 보임), 크로스페이드는 두 행 `lerp`(§5.4) | `AnimationSampler::EvaluateBlended` 발상 |
+
+**공통 재사용 정리 (기존 작업 루트)**:
+`import::LoadModelFromFile`/`LoadAnimationClipsFromFile`(`src/import/`) · `anim::AnimationSampler`
+(`src/anim/`, `animation-design.md` §1) · `import::LoadImageFromFile`(`image-assets.md`) ·
+`ModelMeshPass3D` 의 디퓨즈 SRV·스키닝 코드(복붙 템플릿) · 이 문서의 인스턴스 버퍼+컬+LOD ·
+VAT 상세 `horde-design.md` §5(레이아웃·베이크·`horde.hlsl`·LOD·구현순서 §7).
 
 ---
 

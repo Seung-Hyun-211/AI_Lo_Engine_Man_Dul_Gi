@@ -105,12 +105,12 @@ namespace engine::game
 
     void Simulation::SpawnSimAgents()
     {
-        m_agents.Init(static_cast<std::size_t>(kSimAgentCapacity));
+        m_agents.Init(static_cast<std::size_t>(kActiveCrowd.capacity));
         m_agentHandles.clear();
-        m_agentHandles.reserve(static_cast<std::size_t>(kSimAgentCount));
+        m_agentHandles.reserve(static_cast<std::size_t>(kActiveCrowd.count));
         m_agentChurnCursor = 0;
 
-        for (int i = 0; i < kSimAgentCount; ++i)
+        for (int i = 0; i < kActiveCrowd.count; ++i)
         {
             const auto handle = m_agents.Acquire();
             m_agentHandles.push_back(handle);
@@ -445,8 +445,8 @@ namespace engine::game
                 const SimAgent& a = slots[slotIdx];
                 physics::Collider3D c{};
                 c.shape = physics::Collider3D::Shape::Sphere;
-                c.center = a.pos + math::Vec3{ 0.0f, kSimAgentColliderY, 0.0f };   // chest height
-                c.radius = kSimAgentRadius;
+                c.center = a.pos + math::Vec3{ 0.0f, kActiveCrowd.height * 0.5f, 0.0f };   // mid-height
+                c.radius = kActiveCrowd.colliderRadius;
                 c.layer = kLayerCrowd3D;
                 c.user = slotIdx;
                 m_collision3d.Add(c);

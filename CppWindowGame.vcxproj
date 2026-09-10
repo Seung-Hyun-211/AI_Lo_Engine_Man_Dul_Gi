@@ -67,6 +67,7 @@
     <ClInclude Include="src\core\Time.h" />
     <ClInclude Include="src\game\Application.h" />
     <ClInclude Include="src\game\CharacterAnimationState.h" />
+    <ClInclude Include="src\game\CrowdConfig.h" />
     <ClInclude Include="src\game\InGameHud.h" />
     <ClInclude Include="src\game\InventoryScreen.h" />
     <ClInclude Include="src\game\SettingsScreen.h" />

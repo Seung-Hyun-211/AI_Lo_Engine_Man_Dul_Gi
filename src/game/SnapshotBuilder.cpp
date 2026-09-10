@@ -190,14 +190,20 @@ namespace engine::game
                 scene.meshDraws.push_back(draw);
             }
 
-            // The simulation crowd: instanced zombie meshes (MeshId::Zombie,
-            // loaded from assets/models/zombie/Zombie1.FBX - bind pose, static;
-            // animated crowds need VAT, docs/horde-design.md §5). One
-            // DrawIndexedInstanced per LOD batch (docs/instanced-rendering.md
-            // §5). Frustum + distance culled here. Distance LOD, 2 tiers: bucket
-            // 0 = near (casts shadow), bucket 2 = far (no shadow). Bucket 1
-            // (reduced mid / billboard) reserved.
-            const float kZombieHeight = Simulation::kZombieHeight;
+            // The simulation crowd: one instanced draw per LOD batch
+            // (docs/instanced-rendering.md §5). Sizing / mesh / height come from
+            // game/CrowdConfig.h (kActiveCrowd) - Cube or the FBX MeshPass3D
+            // loaded into MeshId::CrowdModel (bind pose, static; animation = VAT,
+            // docs/horde-design.md §5). Frustum + distance culled. Distance LOD,
+            // 2 tiers: bucket 0 = near (casts shadow), bucket 2 = far (no
+            // shadow). Bucket 1 (reduced mid / billboard) reserved.
+            const bool crowdIsModel = CrowdUsesModel();
+            const render::MeshId crowdMesh =
+                crowdIsModel ? render::MeshId::CrowdModel : render::MeshId::Cube;
+            const float crowdHeight = kActiveCrowd.height;
+            const math::Vec3 pivotLift =
+                crowdIsModel ? math::Vec3{ 0.0f, 0.0f, 0.0f }               // FBX pivot at the feet
+                             : math::Vec3{ 0.0f, crowdHeight * 0.5f, 0.0f }; // cube pivot at the centre
             constexpr float kAgentCullDist = 100.0f;    // past this, skip entirely
             constexpr float kAgentShadowDist = 34.0f;   // past this, LOD 2: no shadow cast
             const math::Mat4 viewProj = scene.camera.view * scene.camera.projection;
@@ -213,17 +219,17 @@ namespace engine::game
             for (const std::uint32_t slotIdx : pool.ActiveIndices())
             {
                 const SimAgent& a = agentSlots[slotIdx];
-                // Cull against a sphere around the standing zombie's mid-height.
-                const math::Vec3 mid = a.pos + math::Vec3{ 0.0f, kZombieHeight * 0.5f, 0.0f };
-                if (!SphereInFrustum(frustum, mid, kZombieHeight * 0.6f)) continue;
+                // Cull against a sphere around the agent's mid-height.
+                const math::Vec3 mid = a.pos + math::Vec3{ 0.0f, crowdHeight * 0.5f, 0.0f };
+                if (!SphereInFrustum(frustum, mid, crowdHeight * 0.6f)) continue;
                 const math::Vec3 d = mid - eye;
                 const float d2 = math::Dot(d, d);
                 if (d2 > kAgentCullDist * kAgentCullDist) continue;
 
                 render::MeshInstance inst{};
-                inst.pos = a.pos;               // zombie mesh has feet at the origin
+                inst.pos = a.pos + pivotLift;
                 inst.yaw = a.heading;
-                inst.scale = kZombieHeight;
+                inst.scale = crowdHeight;
                 if (look.hit && look.agentSlot == slotIdx)
                 {
                     inst.colorRgba = PackRgba(1.0f, 0.9f, 0.2f, 1.0f);   // look-ray target
@@ -246,7 +252,7 @@ namespace engine::game
             {
                 if (lodBucket[lod].empty()) continue;
                 render::InstanceBatch batch{};
-                batch.mesh = render::MeshId::Zombie;
+                batch.mesh = crowdMesh;
                 batch.first = static_cast<std::uint32_t>(scene.meshInstances.size());
                 batch.count = static_cast<std::uint32_t>(lodBucket[lod].size());
                 batch.lod = static_cast<std::uint16_t>(lod);

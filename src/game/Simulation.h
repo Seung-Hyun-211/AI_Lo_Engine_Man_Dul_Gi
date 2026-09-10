@@ -13,6 +13,7 @@
 #if defined(ENGINE_WITH_3D)
 #include "core/ObjectPool.h"
 #include "game/CharacterAnimationState.h"
+#include "game/CrowdConfig.h"
 #include "physics/p3d/CollisionWorld3D.h"
 #endif
 
@@ -123,12 +124,9 @@ namespace engine::game
         static constexpr float kCliffTop = 6.0f;         // scene 2: plateau (player) height
         static constexpr float kPlateauHalf = 5.0f;      // scene 2: player's walkable plateau half-size (to the cliff edge)
         static constexpr float kFieldHalf = 30.0f;       // scene 2: lower field half-size
-        static constexpr int   kSimAgentCount = 1500;     // scene 2: crowd alive on the field
-        static constexpr int   kSimAgentCapacity = 2048;  // scene 2: ObjectPool slot count (headroom for spawn/despawn)
-        static constexpr float kSimAgentRadius = 0.5f;    // scene 2: crowd collision sphere radius (gameplay truth)
-        static constexpr float kSimAgentColliderY = 0.9f; // scene 2: sphere centre height above the feet (chest)
-        static constexpr float kZombieHeight = 1.8f;      // scene 2: rendered zombie instance height, metres
-        static constexpr float kLookRayRange = 80.0f;     // scene 2: player look-ray max distance
+        static constexpr float kLookRayRange = 80.0f;    // scene 2: player look-ray max distance
+        // Crowd size / mesh / collider come from game/CrowdConfig.h (kActiveCrowd)
+        // so one preset drives Simulation + SnapshotBuilder + MeshPass3D.
 #endif
 
         Simulation(core::JobSystem& jobs, int worldWidth, int worldHeight);
