@@ -445,7 +445,7 @@ namespace engine::game
                 const SimAgent& a = slots[slotIdx];
                 physics::Collider3D c{};
                 c.shape = physics::Collider3D::Shape::Sphere;
-                c.center = a.pos + math::Vec3{ 0.0f, kSimAgentRadius, 0.0f };
+                c.center = a.pos + math::Vec3{ 0.0f, kSimAgentColliderY, 0.0f };   // chest height
                 c.radius = kSimAgentRadius;
                 c.layer = kLayerCrowd3D;
                 c.user = slotIdx;

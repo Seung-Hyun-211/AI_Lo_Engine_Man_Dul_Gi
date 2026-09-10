@@ -2,6 +2,7 @@
 
 #if defined(ENGINE_WITH_3D)
 
+#include "import/ModelImporter.h"
 #include "math/Math3D.h"
 #include "render/r3d/FrameConstants.h"
 #include "render/shader/ShaderLibrary.h"
@@ -11,6 +12,7 @@
 #include <algorithm>
 #include <cstring>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace engine::render
@@ -176,6 +178,68 @@ namespace engine::render
 
         CreateMesh(device, MeshId::Cube, MakeCube());
         CreateMesh(device, MeshId::Plane, MakePlane());
+        LoadZombieMesh(device);
+    }
+
+    void MeshPass3D::LoadZombieMesh(ID3D11Device* device)
+    {
+        import::ImportOptions opt;
+        opt.skipAnimation = true;   // bind pose only - animated crowds need VAT (docs/horde-design.md §5)
+        opt.scale = 1.0f;           // height is normalised below, so source units do not matter
+
+        import::ImportResult res;
+        for (const char* prefix : { "", "../../", "../../../" })
+        {
+            res = import::LoadModelFromFile(std::string(prefix) + "assets/models/zombie/Zombie1.FBX", opt);
+            if (res.ok) break;
+        }
+
+        MeshData data;
+        if (res.ok)
+        {
+            for (const import::ModelMesh& m : res.model.meshes)
+            {
+                const auto vbase = static_cast<std::uint32_t>(data.vertices.size());
+                for (const import::ModelVertex& v : m.vertices)
+                    data.vertices.push_back({ v.position.x, v.position.y, v.position.z,
+                                              v.normal.x, v.normal.y, v.normal.z });
+                for (const std::uint32_t idx : m.indices)
+                    data.indices.push_back(vbase + idx);
+            }
+        }
+
+        if (data.vertices.empty() || data.indices.empty())
+        {
+            OutputDebugStringA(("MeshPass3D: zombie mesh load failed ('" + res.error
+                + "') - crowd falls back to the cube\n").c_str());
+            CreateMesh(device, MeshId::Zombie, MakeCube());
+            return;
+        }
+
+        // Normalise: feet at y = 0, centred on x/z, total height 1. The
+        // SnapshotBuilder scales each instance to the metre height it wants.
+        float minX = 1e30f, minY = 1e30f, minZ = 1e30f;
+        float maxX = -1e30f, maxY = -1e30f, maxZ = -1e30f;
+        for (const MeshVertex& v : data.vertices)
+        {
+            minX = std::min(minX, v.px); maxX = std::max(maxX, v.px);
+            minY = std::min(minY, v.py); maxY = std::max(maxY, v.py);
+            minZ = std::min(minZ, v.pz); maxZ = std::max(maxZ, v.pz);
+        }
+        const float s = 1.0f / std::max(maxY - minY, 1e-4f);
+        const float cx = (minX + maxX) * 0.5f;
+        const float cz = (minZ + maxZ) * 0.5f;
+        for (MeshVertex& v : data.vertices)
+        {
+            v.px = (v.px - cx) * s;
+            v.py = (v.py - minY) * s;
+            v.pz = (v.pz - cz) * s;
+        }
+
+        CreateMesh(device, MeshId::Zombie, data);
+        OutputDebugStringA(("MeshPass3D: zombie mesh loaded ("
+            + std::to_string(data.vertices.size()) + " verts, "
+            + std::to_string(data.indices.size() / 3) + " tris)\n").c_str());
     }
 
     void MeshPass3D::Execute(const PassContext& context)

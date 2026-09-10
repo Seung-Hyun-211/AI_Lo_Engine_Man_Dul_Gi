@@ -19,6 +19,7 @@ namespace engine::render
     {
         Cube = 0,
         Plane = 1,
+        Zombie = 2,   // loaded from assets/models/zombie/Zombie1.FBX at startup (bind pose, static)
         Count
     };
 

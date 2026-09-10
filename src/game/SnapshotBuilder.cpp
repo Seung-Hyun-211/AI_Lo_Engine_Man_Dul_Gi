@@ -166,9 +166,10 @@ namespace engine::game
             // The mesa the player stands on: a block rising from the field, its
             // flat top at y = cliffTop and its +Z face the "cliff" the view
             // looks down. The player's x/z clamp is symmetric about the origin,
-            // so the mesa is centred there and overhangs it by a few metres.
-            const float mesaFrontZ = Simulation::kPlateauHalf + 4.0f;
-            const float mesaDepth = mesaFrontZ + 20.0f;   // extends far back under the camera
+            // so the mesa is centred there; a small overhang past kPlateauHalf
+            // lets the player walk right up to the edge.
+            const float mesaFrontZ = Simulation::kPlateauHalf + 1.0f;
+            const float mesaDepth = mesaFrontZ + 22.0f;   // extends far back under the camera
             render::MeshDraw mesa{};
             mesa.mesh = render::MeshId::Cube;
             mesa.world = math::Scaling({ Simulation::kPlateauHalf * 2.0f + 8.0f, cliffTop, mesaDepth })
@@ -189,15 +190,15 @@ namespace engine::game
                 scene.meshDraws.push_back(draw);
             }
 
-            // The simulation crowd: instanced cubes, one DrawIndexedInstanced per
-            // LOD batch (docs/instanced-rendering.md §5). Frustum + distance
-            // culled here so off-screen agents never reach the GPU. Distance
-            // LOD, 2 tiers for now: bucket 0 = near (casts shadow), bucket 2 =
-            // far (drawn, but MeshPass3D skips it in the shadow pass). Bucket 1
-            // (a reduced mid representation / billboard) is reserved.
-            constexpr float kAgentScale = 0.5f;
-            constexpr float kAgentCullRadius = 0.5f;    // bounding sphere for the frustum test
-            constexpr float kAgentCullDist = 90.0f;     // past this, skip entirely
+            // The simulation crowd: instanced zombie meshes (MeshId::Zombie,
+            // loaded from assets/models/zombie/Zombie1.FBX - bind pose, static;
+            // animated crowds need VAT, docs/horde-design.md §5). One
+            // DrawIndexedInstanced per LOD batch (docs/instanced-rendering.md
+            // §5). Frustum + distance culled here. Distance LOD, 2 tiers: bucket
+            // 0 = near (casts shadow), bucket 2 = far (no shadow). Bucket 1
+            // (reduced mid / billboard) reserved.
+            const float kZombieHeight = Simulation::kZombieHeight;
+            constexpr float kAgentCullDist = 100.0f;    // past this, skip entirely
             constexpr float kAgentShadowDist = 34.0f;   // past this, LOD 2: no shadow cast
             const math::Mat4 viewProj = scene.camera.view * scene.camera.projection;
             const Frustum frustum = MakeFrustum(viewProj);
@@ -212,16 +213,17 @@ namespace engine::game
             for (const std::uint32_t slotIdx : pool.ActiveIndices())
             {
                 const SimAgent& a = agentSlots[slotIdx];
-                const math::Vec3 center = a.pos + math::Vec3{ 0.0f, kAgentScale * 0.5f, 0.0f };
-                if (!SphereInFrustum(frustum, center, kAgentCullRadius)) continue;
-                const math::Vec3 d = center - eye;
+                // Cull against a sphere around the standing zombie's mid-height.
+                const math::Vec3 mid = a.pos + math::Vec3{ 0.0f, kZombieHeight * 0.5f, 0.0f };
+                if (!SphereInFrustum(frustum, mid, kZombieHeight * 0.6f)) continue;
+                const math::Vec3 d = mid - eye;
                 const float d2 = math::Dot(d, d);
                 if (d2 > kAgentCullDist * kAgentCullDist) continue;
 
                 render::MeshInstance inst{};
-                inst.pos = center;
+                inst.pos = a.pos;               // zombie mesh has feet at the origin
                 inst.yaw = a.heading;
-                inst.scale = kAgentScale;
+                inst.scale = kZombieHeight;
                 if (look.hit && look.agentSlot == slotIdx)
                 {
                     inst.colorRgba = PackRgba(1.0f, 0.9f, 0.2f, 1.0f);   // look-ray target
@@ -233,8 +235,8 @@ namespace engine::game
                 else
                 {
                     const float hot = math::Clamp((a.speed - 0.8f) / 1.4f, 0.0f, 1.0f);
-                    inst.colorRgba = PackRgba(0.25f + 0.65f * hot, 0.62f - 0.22f * hot,
-                                              0.70f - 0.45f * hot, 1.0f);
+                    inst.colorRgba = PackRgba(0.34f + 0.22f * hot, 0.44f + 0.10f * hot,
+                                              0.30f - 0.06f * hot, 1.0f);   // mottled green
                 }
 
                 const int lod = d2 <= kAgentShadowDist * kAgentShadowDist ? 0 : 2;
@@ -244,7 +246,7 @@ namespace engine::game
             {
                 if (lodBucket[lod].empty()) continue;
                 render::InstanceBatch batch{};
-                batch.mesh = render::MeshId::Cube;
+                batch.mesh = render::MeshId::Zombie;
                 batch.first = static_cast<std::uint32_t>(scene.meshInstances.size());
                 batch.count = static_cast<std::uint32_t>(lodBucket[lod].size());
                 batch.lod = static_cast<std::uint16_t>(lod);

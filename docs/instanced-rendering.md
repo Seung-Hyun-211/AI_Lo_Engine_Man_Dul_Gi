@@ -1,12 +1,14 @@
 # 대규모 인스턴스 렌더 — 수천 개체 출력 선행작업
 
 **상태: §8 의 1~3 + 4(풀) 구현됨, 4(SoA)·5·6 미구현.**
-데모 씬 2([demo-scene.md](demo-scene.md))의 `SimAgent` 군중(현재 600 / capacity 1024)이
-`DrawIndexedInstanced` 배치로 그려지고, `SnapshotBuilder` 가 프러스텀·최대거리 컬 + **거리 LOD
+데모 씬 2([demo-scene.md](demo-scene.md))의 `SimAgent` 군중(현재 1500 / capacity 2048)이
+**인스턴스드 좀비 메시**(`MeshId::Zombie` ← `assets/models/zombie/Zombie1.FBX`, 정적 bind pose)로
+`DrawIndexedInstanced` 배치 그려지고, `SnapshotBuilder` 가 프러스텀·최대거리 컬 + **거리 LOD
 2단계**(근거리=그림자 O / 원거리=그림자 X)로 배치를 나눈다. 군중은
 `core::ObjectPool<SimAgent>`(`src/core/ObjectPool.h`) 에 살고, `ParallelFor` 는 그
 `ActiveIndices()` 를 쪼개 돌며, 스텝마다 1마리씩 풀을 재활용(churn).
-남은 것: LOD 중간 티어/빌보드(§5.3), SoA 승격(`game/AgentStore`, 측정 게이트), 브로드페이즈(§8-5).
+남은 것: LOD 중간 티어/빌보드(§5.3), 텍스처, SoA 승격(`game/AgentStore`, 측정 게이트),
+**애니메이션(VAT — [horde-design.md](horde-design.md) §5)**.
 이 문서는 그 벽을 넘기 위한 **엔진 일반 선행작업** 전체를 설계한다 — 정적/강체 인스턴스를 한
 번의 `DrawIndexedInstanced` 로 그리는 경로, 스냅샷 값 타입, 컬링·LOD, 심(sim) 쪽 SoA + 풀.
 
@@ -496,11 +498,16 @@ if (inst.size() > first)
 
 ### 9.2 새 인스턴스 메시 종류 추가
 
-1. `render/r3d/Scene3D.h` `enum class MeshId` 에 값 추가 + `MeshPass3D::Initialize` 의
-   `CreateMesh(device, MeshId::New, MakeX())` (또는 파일 로더가 생기면 거기서).
+1. `render/r3d/Scene3D.h` `enum class MeshId` 에 값 추가 + `MeshPass3D::Initialize` 에서 채운다 —
+   절차 메시면 `CreateMesh(device, MeshId::New, MakeX())`, **FBX 면 `MeshPass3D::LoadZombieMesh`
+   패턴**: `import::LoadModelFromFile`(skipAnimation) → 서브메시 정점(position+normal)·인덱스
+   flatten → 정규화(발 원점·단위 높이) → `CreateMesh`. 로드 실패 시 큐브 폴백.
 2. `SnapshotBuilder` 에서 그 메시를 쓰는 `InstanceBatch{ .mesh = MeshId::New, ... }` 를 만든다.
-   셰이더/레이아웃은 공용(`mesh_instanced`) — 정점 포맷이 같으면 추가 작업 없음.
+   셰이더/레이아웃은 공용(`mesh_instanced`, position+normal+per-instance) — 정점 포맷이 같으면
+   추가 작업 없음. 텍스처가 필요하면 `mesh_instanced` 텍스처 변형 + SRV (미구현).
 3. 메시 종류가 여럿이면 배치 조립을 `(meshId, lod)` 중첩 버킷으로.
+4. **정적 bind pose 만** — 인스턴스마다 다른 애니메이션은 VAT([horde-design.md](horde-design.md) §5).
+   데모 씬 2 크라우드가 이 경로의 첫 예 (`MeshId::Zombie` ← `assets/models/zombie/Zombie1.FBX`).
 
 ### 9.3 LOD·컬 튜닝
 

@@ -38,6 +38,10 @@ namespace engine::render
         };
 
         void CreateMesh(ID3D11Device* device, MeshId id, const struct MeshData& data);
+        // Loads assets/models/zombie/Zombie1.FBX (bind pose, position+normal
+        // only) into the MeshId::Zombie slot, normalised to feet-at-origin /
+        // unit height. Falls back to the cube if the load fails.
+        void LoadZombieMesh(ID3D11Device* device);
         void DrawInstanced(ID3D11DeviceContext* context, const Scene3D& scene, bool shadow);
 
         // Upper bound on instances uploaded per frame. Must match the cap the

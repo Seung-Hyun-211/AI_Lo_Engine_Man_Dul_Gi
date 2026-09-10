@@ -121,11 +121,13 @@ namespace engine::game
         // with a wandering simulation crowd below.
         static constexpr int   kDemoScene = 2;
         static constexpr float kCliffTop = 6.0f;         // scene 2: plateau (player) height
-        static constexpr float kPlateauHalf = 4.0f;      // scene 2: player's walkable plateau half-size
+        static constexpr float kPlateauHalf = 5.0f;      // scene 2: player's walkable plateau half-size (to the cliff edge)
         static constexpr float kFieldHalf = 30.0f;       // scene 2: lower field half-size
-        static constexpr int   kSimAgentCount = 10000;    // scene 2: crowd alive on the field (scale check)
-        static constexpr int   kSimAgentCapacity = 12288; // scene 2: ObjectPool slot count (headroom for spawn/despawn)
-        static constexpr float kSimAgentRadius = 0.3f;    // scene 2: crowd collision sphere radius (gameplay truth)
+        static constexpr int   kSimAgentCount = 1500;     // scene 2: crowd alive on the field
+        static constexpr int   kSimAgentCapacity = 2048;  // scene 2: ObjectPool slot count (headroom for spawn/despawn)
+        static constexpr float kSimAgentRadius = 0.5f;    // scene 2: crowd collision sphere radius (gameplay truth)
+        static constexpr float kSimAgentColliderY = 0.9f; // scene 2: sphere centre height above the feet (chest)
+        static constexpr float kZombieHeight = 1.8f;      // scene 2: rendered zombie instance height, metres
         static constexpr float kLookRayRange = 80.0f;     // scene 2: player look-ray max distance
 #endif
 
