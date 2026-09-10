@@ -53,7 +53,21 @@ namespace engine::game
         float timeScale{ 1.0f };
         bool  ignoreGlobalPause{ false };
         float phase{ 0.0f };                  // canned-behaviour clock (unused for the player)
+        float groundY{ 0.0f };                // surface this actor rests / lands on (cliff top in demo scene 2)
+        float halfRange{ 7.5f };              // half-size of the square the actor is clamped to (kCharHalfRange / plateau)
         CharacterAnimationState anim{ render::kUnityChanClips };
+    };
+
+    // A lightweight member of the simulation crowd on the lower field (demo
+    // scene 2). Homogeneous, so it lives in a plain std::vector with no
+    // EntityId (docs/entity-lifecycle-design.md §3A). Stepped with
+    // JobSystem::ParallelFor - each job owns a distinct [begin, end) range.
+    struct SimAgent
+    {
+        math::Vec3 pos{};        // on the field; y is a small bob above 0
+        float heading{ 0.0f };   // radians; 0 faces +Z
+        float speed{ 1.0f };     // m/s
+        float phase{ 0.0f };     // bob / drift clock
     };
 #endif
 
@@ -80,6 +94,15 @@ namespace engine::game
         static constexpr float kMouseSensitivity = 0.0022f;   // rad per pixel of mouse motion
         static constexpr float kCamPitchMin = -1.15f;   // look down
         static constexpr float kCamPitchMax = 0.35f;    // look up
+
+        // Demo scene selector (docs/demo-scene.md). 1 = local-time-scale actors
+        // on a small slab. 2 = player on a clifftop overlooking a large field
+        // with a wandering simulation crowd below.
+        static constexpr int   kDemoScene = 2;
+        static constexpr float kCliffTop = 6.0f;         // scene 2: plateau (player) height
+        static constexpr float kPlateauHalf = 4.0f;      // scene 2: player's walkable plateau half-size
+        static constexpr float kFieldHalf = 30.0f;       // scene 2: lower field half-size
+        static constexpr int   kSimAgentCount = 120;     // scene 2: crowd size on the field
 #endif
 
         Simulation(core::JobSystem& jobs, int worldWidth, int worldHeight);
@@ -120,6 +143,7 @@ namespace engine::game
         [[nodiscard]] float CameraPitch() const { return m_cameraPitch; }
         [[nodiscard]] AnimPose HeroAnimPose() const { return m_actors[0].anim.Pose(); }
         [[nodiscard]] const std::vector<Actor>& Actors() const { return m_actors; }
+        [[nodiscard]] const std::vector<SimAgent>& SimAgents() const { return m_agents; }
 #endif
 
     private:
@@ -128,12 +152,16 @@ namespace engine::game
         void StepCollision2D();
 #if defined(ENGINE_WITH_3D)
         void SpawnActors();
+        void SpawnSimAgents();
         // Advances every actor by its own local-time-scaled step (sub-stepped
         // when timeScale > 1). `globalPaused` restricts the pass to actors that
         // set `ignoreGlobalPause`.
         void StepActors(float fixedDelta, bool globalPaused, const PlayerIntent& intent);
         // One actor, one sub-step. `intent == nullptr` runs the canned path.
         void StepOneActor(Actor& actor, float dt, const PlayerIntent* intent) const;
+        // Advances the demo-scene-2 crowd (JobSystem::ParallelFor, contiguous
+        // ranges). No-op when the crowd is empty (scene 1).
+        void StepSimAgents(float fixedDelta);
 #endif
 
         core::JobSystem& m_jobs;
@@ -148,7 +176,8 @@ namespace engine::game
         physics::CollisionWorld2D m_collision2d;
 
 #if defined(ENGINE_WITH_3D)
-        std::vector<Actor> m_actors;               // [0] = player; [1..] = local-time-scale demo
+        std::vector<Actor> m_actors;               // [0] = player; [1..] = local-time-scale demo (scene 1)
+        std::vector<SimAgent> m_agents;            // scene 2: wandering crowd on the lower field
         float m_cameraYaw{ 0.0f };                 // radians; orbit angle around the player
         float m_cameraPitch{ -0.28f };            // radians; negative looks down at the player
 #endif

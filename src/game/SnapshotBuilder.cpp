@@ -35,8 +35,11 @@ namespace engine::game
             // Unit vector from the focus point toward where the camera looks.
             const math::Vec3 forward{ cp * std::sin(yaw), sp, cp * std::cos(yaw) };
 
+            // Scene 2 (clifftop overlook) pulls the camera back so the field and
+            // the crowd below are in frame, not just the player's back.
+            const float orbitDistance = Simulation::kDemoScene == 2 ? 6.0f : 3.6f;
             const math::Vec3 focus = simulation.CharacterPosition() + math::Vec3{ 0.0f, 1.3f, 0.0f };
-            const math::Vec3 eye = focus - forward * 3.6f;
+            const math::Vec3 eye = focus - forward * orbitDistance;
 
             render::CameraView camera{};
             camera.view = math::LookAtLH(eye, focus, { 0.0f, 1.0f, 0.0f });
@@ -57,11 +60,16 @@ namespace engine::game
             lighting.ambient.ground = { 0.22f, 0.20f, 0.18f, 1.0f };
 
             // Directional shadow map: an ortho frustum fitted around the scene.
+            // Scene 2 spreads the crowd across a wide field, so widen the frustum
+            // and push its centre out toward it.
+            const bool scene2 = Simulation::kDemoScene == 2;
             const math::Vec3 dir = math::Normalized(lighting.key.direction);
-            const math::Vec3 center{ 0.0f, 1.0f, 0.0f };
-            const math::Vec3 eye = center - dir * 16.0f;
+            const math::Vec3 center = scene2 ? math::Vec3{ 0.0f, 1.0f, 18.0f } : math::Vec3{ 0.0f, 1.0f, 0.0f };
+            const float span = scene2 ? 64.0f : 22.0f;
+            const float depth = scene2 ? 90.0f : 40.0f;
+            const math::Vec3 eye = center - dir * (scene2 ? 32.0f : 16.0f);
             const math::Mat4 view = math::LookAtLH(eye, center, { 0.0f, 1.0f, 0.0f });
-            const math::Mat4 proj = math::OrthographicLH(22.0f, 22.0f, 0.1f, 40.0f);
+            const math::Mat4 proj = math::OrthographicLH(span, span, 0.1f, depth);
             lighting.lightViewProj = view * proj;
             lighting.shadowsEnabled = true;
             return lighting;
@@ -79,6 +87,72 @@ namespace engine::game
             { { 4.0f, 0.5f, 1.0f }, {  0.2f, 0.25f, -3.2f }, { 0.68f, 0.68f, 0.68f, 1.0f } },
             { { 0.4f, 1.7f, 0.4f }, { -2.4f, 0.85f, -2.2f }, { 0.74f, 0.70f, 0.56f, 1.0f } },
         };
+
+        // Demo scene 2: a large field with the player standing on a mesa that
+        // drops away in front of them, and a wandering simulation crowd on the
+        // field below. Props only - the player model + crowd stepping live in
+        // Simulation. See docs/demo-scene.md.
+        void BuildCliffScene(render::Scene3D& scene, const Simulation& simulation)
+        {
+            const float fieldHalf = Simulation::kFieldHalf;
+            const float cliffTop = Simulation::kCliffTop;
+
+            // Wide lower field.
+            render::MeshDraw field{};
+            field.mesh = render::MeshId::Plane;
+            field.world = math::Scaling({ fieldHalf * 2.8f, 1.0f, fieldHalf * 2.8f })
+                        * math::Translation({ 0.0f, 0.0f, fieldHalf * 0.6f });
+            field.color = { 0.33f, 0.40f, 0.30f, 1.0f };
+            scene.meshDraws.push_back(field);
+
+            // The mesa the player stands on: a block rising from the field, its
+            // flat top at y = cliffTop and its +Z face the "cliff" the view
+            // looks down. The player's x/z clamp is symmetric about the origin,
+            // so the mesa is centred there and overhangs it by a few metres.
+            const float mesaFrontZ = Simulation::kPlateauHalf + 4.0f;
+            const float mesaDepth = mesaFrontZ + 20.0f;   // extends far back under the camera
+            render::MeshDraw mesa{};
+            mesa.mesh = render::MeshId::Cube;
+            mesa.world = math::Scaling({ Simulation::kPlateauHalf * 2.0f + 8.0f, cliffTop, mesaDepth })
+                       * math::Translation({ 0.0f, cliffTop * 0.5f, mesaFrontZ - mesaDepth * 0.5f });
+            mesa.color = { 0.42f, 0.38f, 0.34f, 1.0f };
+            scene.meshDraws.push_back(mesa);
+
+            // A couple of markers on the field for depth / scale reference.
+            const math::Vec3 pillars[] = {
+                { -16.0f, 1.5f, 22.0f }, { 18.0f, 1.5f, 30.0f }, { 4.0f, 1.5f, 40.0f },
+            };
+            for (const math::Vec3& p : pillars)
+            {
+                render::MeshDraw draw{};
+                draw.mesh = render::MeshId::Cube;
+                draw.world = math::Scaling({ 1.2f, 3.0f, 1.2f }) * math::Translation(p);
+                draw.color = { 0.55f, 0.52f, 0.48f, 1.0f };
+                scene.meshDraws.push_back(draw);
+            }
+
+            // The simulation crowd: one small cube per agent. Colour ramps with
+            // speed (slow = teal, fast = amber) so the churn reads at a glance.
+            for (const SimAgent& a : simulation.SimAgents())
+            {
+                render::MeshDraw draw{};
+                draw.mesh = render::MeshId::Cube;
+                draw.world = math::Scaling({ 0.35f, 0.7f, 0.35f })
+                           * math::RotationY(a.heading)
+                           * math::Translation(a.pos + math::Vec3{ 0.0f, 0.35f, 0.0f });
+                const float hot = math::Clamp((a.speed - 0.8f) / 1.4f, 0.0f, 1.0f);
+                draw.color = { 0.25f + 0.65f * hot, 0.62f - 0.22f * hot, 0.70f - 0.45f * hot, 1.0f };
+                scene.meshDraws.push_back(draw);
+            }
+
+            // Debug draw: player AABB + a yellow line along the cliff edge the
+            // camera looks over.
+            const math::Vec3 feet = simulation.CharacterPosition();
+            render::debug::Box(scene.debugLines, { feet.x, feet.y + 0.9f, feet.z },
+                               { 0.30f, 0.90f, 0.30f }, { 0.20f, 1.0f, 0.35f, 1.0f });
+            render::debug::Line(scene.debugLines, { -fieldHalf * 0.5f, cliffTop + 0.02f, mesaFrontZ },
+                                { fieldHalf * 0.5f, cliffTop + 0.02f, mesaFrontZ }, { 1.0f, 0.85f, 0.2f, 1.0f });
+        }
 
         void BuildScene3D(render::Scene3D& scene, const Simulation& simulation)
         {
@@ -115,33 +189,40 @@ namespace engine::game
                 scene.meshDraws.push_back(draw);
             }
 
-            render::MeshDraw ground{};
-            ground.mesh = render::MeshId::Plane;
-            ground.world = math::Scaling({ 16.0f, 1.0f, 16.0f });
-            ground.color = { 0.50f, 0.52f, 0.57f, 1.0f };
-            scene.meshDraws.push_back(ground);
-
-            for (const DemoBox& box : kBoxes)
+            if constexpr (Simulation::kDemoScene == 2)
             {
-                render::MeshDraw draw{};
-                draw.mesh = render::MeshId::Cube;
-                draw.world = math::Scaling(box.scale) * math::Translation(box.pos);
-                draw.color = box.color;
-                scene.meshDraws.push_back(draw);
+                BuildCliffScene(scene, simulation);
             }
+            else
+            {
+                render::MeshDraw ground{};
+                ground.mesh = render::MeshId::Plane;
+                ground.world = math::Scaling({ 16.0f, 1.0f, 16.0f });
+                ground.color = { 0.50f, 0.52f, 0.57f, 1.0f };
+                scene.meshDraws.push_back(ground);
 
-            // Temporary: exercises DebugDrawPass. The character's AABB, its
-            // forward vector, and the downward "ground check" ray a raycast
-            // would use. Replaced when gameplay drives debug draw (roadmap D1).
-            const math::Vec3 feet = simulation.CharacterPosition();
-            const math::Vec3 boxCenter{ feet.x, feet.y + 0.9f, feet.z };
-            render::debug::Box(scene.debugLines, boxCenter, { 0.30f, 0.90f, 0.30f },
-                               { 0.20f, 1.0f, 0.35f, 1.0f });
-            const float yaw = simulation.CharacterFacingYaw();
-            const math::Vec3 fwd{ std::sin(yaw), 0.0f, std::cos(yaw) };
-            render::debug::Ray(scene.debugLines, boxCenter, fwd, 1.2f, { 1.0f, 0.85f, 0.2f, 1.0f });
-            render::debug::Ray(scene.debugLines, { feet.x, feet.y + 0.2f, feet.z }, { 0.0f, -1.0f, 0.0f },
-                               0.6f, { 0.4f, 0.7f, 1.0f, 1.0f });
+                for (const DemoBox& box : kBoxes)
+                {
+                    render::MeshDraw draw{};
+                    draw.mesh = render::MeshId::Cube;
+                    draw.world = math::Scaling(box.scale) * math::Translation(box.pos);
+                    draw.color = box.color;
+                    scene.meshDraws.push_back(draw);
+                }
+
+                // Temporary: exercises DebugDrawPass. The character's AABB, its
+                // forward vector, and the downward "ground check" ray a raycast
+                // would use. Replaced when gameplay drives debug draw (roadmap D1).
+                const math::Vec3 feet = simulation.CharacterPosition();
+                const math::Vec3 boxCenter{ feet.x, feet.y + 0.9f, feet.z };
+                render::debug::Box(scene.debugLines, boxCenter, { 0.30f, 0.90f, 0.30f },
+                                   { 0.20f, 1.0f, 0.35f, 1.0f });
+                const float yaw = simulation.CharacterFacingYaw();
+                const math::Vec3 fwd{ std::sin(yaw), 0.0f, std::cos(yaw) };
+                render::debug::Ray(scene.debugLines, boxCenter, fwd, 1.2f, { 1.0f, 0.85f, 0.2f, 1.0f });
+                render::debug::Ray(scene.debugLines, { feet.x, feet.y + 0.2f, feet.z }, { 0.0f, -1.0f, 0.0f },
+                                   0.6f, { 0.4f, 0.7f, 1.0f, 1.0f });
+            }
         }
 #endif
 

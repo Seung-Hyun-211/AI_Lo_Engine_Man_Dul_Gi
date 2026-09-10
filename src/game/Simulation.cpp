@@ -40,27 +40,62 @@ namespace engine::game
 #if defined(ENGINE_WITH_3D)
     void Simulation::SpawnActors()
     {
-        m_actors.reserve(3);
-
         Actor player;
         player.playerControlled = true;
-        m_actors.push_back(std::move(player));
 
-        // A "hasted" demo actor: 3x local time, wanders visibly faster than the
-        // player even at global scale 1. Keeps moving while the world is paused.
-        Actor fast;
-        fast.pos = { -3.0f, 0.0f, -2.5f };
-        fast.facingYaw = 0.6f;
-        fast.timeScale = 3.0f;
-        fast.ignoreGlobalPause = true;
-        m_actors.push_back(std::move(fast));
+        if constexpr (kDemoScene == 2)
+        {
+            // Stand on top of the mesa facing out over the field (+Z). The
+            // x/z clamp is symmetric about the origin (halfRange), so the mesa
+            // prop is centred there too. The orbit camera sits behind + above,
+            // so the default view looks down the drop at the crowd.
+            player.pos = { 0.0f, kCliffTop, -2.0f };
+            player.facingYaw = 0.0f;
+            player.groundY = kCliffTop;
+            player.halfRange = kPlateauHalf;
+            m_actors.push_back(std::move(player));
 
-        // A "slowed" demo actor: 0.35x local time.
-        Actor slow;
-        slow.pos = { 3.0f, 0.0f, 2.5f };
-        slow.facingYaw = -2.2f;
-        slow.timeScale = 0.35f;
-        m_actors.push_back(std::move(slow));
+            m_cameraPitch = -0.5f;   // steeper default tilt for the overlook
+            SpawnSimAgents();
+        }
+        else
+        {
+            m_actors.reserve(3);
+            m_actors.push_back(std::move(player));
+
+            // A "hasted" demo actor: 3x local time, wanders visibly faster than
+            // the player even at global scale 1. Keeps moving while paused.
+            Actor fast;
+            fast.pos = { -3.0f, 0.0f, -2.5f };
+            fast.facingYaw = 0.6f;
+            fast.timeScale = 3.0f;
+            fast.ignoreGlobalPause = true;
+            m_actors.push_back(std::move(fast));
+
+            // A "slowed" demo actor: 0.35x local time.
+            Actor slow;
+            slow.pos = { 3.0f, 0.0f, 2.5f };
+            slow.facingYaw = -2.2f;
+            slow.timeScale = 0.35f;
+            m_actors.push_back(std::move(slow));
+        }
+    }
+
+    void Simulation::SpawnSimAgents()
+    {
+        m_agents.resize(static_cast<std::size_t>(kSimAgentCount));
+        for (std::size_t i = 0; i < m_agents.size(); ++i)
+        {
+            const float t = static_cast<float>(i);
+            SimAgent& a = m_agents[i];
+            // Deterministic scatter across the field in front of the mesa.
+            a.pos = { std::fmod(t * 7.13f, 2.0f * kFieldHalf) - kFieldHalf,
+                      0.2f,
+                      10.0f + std::fmod(t * 3.7f, kFieldHalf) };
+            a.heading = std::fmod(t * 2.399963f, 2.0f * kPi) - kPi;   // spread out
+            a.speed = 0.8f + std::fmod(t, 5.0f) * 0.35f;              // 0.8 .. 2.2 m/s
+            a.phase = t * 0.37f;
+        }
     }
 #endif
 
@@ -138,6 +173,7 @@ namespace engine::game
         StepCollision2D();
 #if defined(ENGINE_WITH_3D)
         StepActors(fixedDelta, /*globalPaused=*/false, intent);
+        StepSimAgents(fixedDelta);
 #endif
     }
 
@@ -265,9 +301,9 @@ namespace engine::game
             {
                 actor.verticalVel -= kCharGravity * dt;
                 actor.pos.y += actor.verticalVel * dt;
-                if (actor.pos.y <= 0.0f)
+                if (actor.pos.y <= actor.groundY)
                 {
-                    actor.pos.y = 0.0f;
+                    actor.pos.y = actor.groundY;
                     actor.verticalVel = 0.0f;
                     actor.grounded = true;
                 }
@@ -275,19 +311,19 @@ namespace engine::game
         }
         else
         {
-            actor.pos.y = 0.4f + 0.25f * std::sin(actor.phase);
+            actor.pos.y = actor.groundY + 0.4f + 0.25f * std::sin(actor.phase);
         }
 
         // Reflect the canned actors off the slab edge instead of sticking there.
         if (intent == nullptr)
         {
-            if (actor.pos.x < -kCharHalfRange || actor.pos.x > kCharHalfRange)
+            if (actor.pos.x < -actor.halfRange || actor.pos.x > actor.halfRange)
                 actor.facingYaw = std::atan2(-std::sin(actor.facingYaw), std::cos(actor.facingYaw));
-            if (actor.pos.z < -kCharHalfRange || actor.pos.z > kCharHalfRange)
+            if (actor.pos.z < -actor.halfRange || actor.pos.z > actor.halfRange)
                 actor.facingYaw = std::atan2(std::sin(actor.facingYaw), -std::cos(actor.facingYaw));
         }
-        actor.pos.x = math::Clamp(actor.pos.x, -kCharHalfRange, kCharHalfRange);
-        actor.pos.z = math::Clamp(actor.pos.z, -kCharHalfRange, kCharHalfRange);
+        actor.pos.x = math::Clamp(actor.pos.x, -actor.halfRange, actor.halfRange);
+        actor.pos.z = math::Clamp(actor.pos.z, -actor.halfRange, actor.halfRange);
 
         // Locomotion -> which clip the animation state plays. Only
         // (clipIndex, clipTime) crosses into the snapshot; ModelMeshPass3D owns
@@ -309,6 +345,44 @@ namespace engine::game
             else                  loco = Locomotion::Walk;
             actor.anim.Update(dt, loco);
         }
+    }
+
+    void Simulation::StepSimAgents(float fixedDelta)
+    {
+        if (m_agents.empty()) return;
+
+        // Same contiguous-range contract as the particle advect: each job owns a
+        // distinct [begin, end), touches only its own agents, no shared writes.
+        // This is the seed of the mass-object path (docs/roadmap.md D2).
+        m_jobs.ParallelFor(0, m_agents.size(), 32,
+            [this, fixedDelta](std::size_t begin, std::size_t end)
+            {
+                const float zLo = 8.0f;
+                const float zHi = kFieldHalf + 10.0f;
+                for (std::size_t i = begin; i < end; ++i)
+                {
+                    SimAgent& a = m_agents[i];
+                    a.phase += fixedDelta * 4.0f;
+                    // Lazy heading drift so the crowd churns without a RNG.
+                    a.heading += std::sin(a.phase * 0.11f + static_cast<float>(i)) * fixedDelta * 0.9f;
+
+                    const math::Vec3 dir{ std::sin(a.heading), 0.0f, std::cos(a.heading) };
+                    a.pos = a.pos + dir * (a.speed * fixedDelta);
+                    a.pos.y = 0.2f + 0.15f * std::sin(a.phase);   // small bob above the field
+
+                    // Bounce the heading off the field box edges.
+                    if (a.pos.x < -kFieldHalf || a.pos.x > kFieldHalf)
+                    {
+                        a.heading = -a.heading;
+                        a.pos.x = math::Clamp(a.pos.x, -kFieldHalf, kFieldHalf);
+                    }
+                    if (a.pos.z < zLo || a.pos.z > zHi)
+                    {
+                        a.heading = kPi - a.heading;
+                        a.pos.z = math::Clamp(a.pos.z, zLo, zHi);
+                    }
+                }
+            }).Wait();
     }
 #endif
 }

@@ -69,6 +69,57 @@ SnapshotBuilder (game/)
   `ModelDraw`/`MeshDraw`/`CameraView` 값으로만 방출 (OCP, [engine-overview.md](engine-overview.md) DIP 절).
 - 마우스 잠금은 `Win32Window::SetPointerLocked` 로만. 패스나 UI 에서 `ClipCursor`/`ShowCursor` 직접 호출 금지.
 
+## 데모 씬 2 — 절벽 위 조망 + 시뮬레이션 군중
+
+`Simulation::kDemoScene` (`static constexpr int`, 기본 `2`) 로 고른다. `1` = 위에서 설명한
+로컬 배속 액터 3인 + 작은 슬랩. `2` = **같은 플레이어**가 메사(mesa) 위에 서서 앞쪽 넓은
+평지를 내려다보고, 그 아래에서 다수의 경량 개체(`SimAgent`)가 배회한다. 대규모 디펜스
+장르([synopsis.md](synopsis.md))의 "다수 오브젝트" 파이프라인 씨앗.
+
+```text
+Simulation (game/)
+  · SpawnActors        : kDemoScene==2 → 플레이어 1명만. pos.y = kCliffTop,
+                         groundY = kCliffTop (그 높이에 착지), halfRange = kPlateauHalf
+                         (원점 대칭 정사각형으로 이동 클램프 → 메사 위). m_cameraPitch = -0.5.
+  · SpawnSimAgents     : kSimAgentCount 개 SimAgent 를 평지에 결정적으로 흩뿌림
+                         (RNG 없음 — 인덱스 기반). pos / heading / speed / phase.
+  · StepSimAgents(dt)  : JobSystem::ParallelFor(청크 32) — 잡마다 겹치지 않는 [begin,end),
+                         공유 쓰기 없음 (파티클 advect 와 같은 계약). heading 느린 드리프트 +
+                         전진 + 상하 bob + 필드 박스 경계에서 heading 반사. m_agents 가 비면
+                         (씬 1) 즉시 반환.
+  · Actor.groundY/halfRange : 액터별 바닥 높이·이동 반경. 씬 1 은 기본값(0 / 7.5)이라 동작 불변.
+SnapshotBuilder (game/)
+  · BuildCamera   : kDemoScene==2 면 orbit 거리 3.6→6.0 (필드·군중이 프레임에 들어오게).
+  · BuildLighting : 씬 2 는 셰도우 ortho 를 넓히고(22→64) 중심을 +Z 로 밀어 군중을 덮는다.
+  · BuildScene3D  : kDemoScene==2 → BuildCliffScene (넓은 평지 Plane + 메사 Cube +
+                    기둥 마커 몇 개 + SimAgent 마다 작은 Cube(속도로 색 램프) + 디버그로
+                    플레이어 AABB·절벽 모서리 라인). 씬 1 경로(kBoxes 등)는 else 로 보존.
+```
+
+`SimAgent` 는 동질적이라 `EntityId` 없이 `std::vector<SimAgent>` ([entity-lifecycle-design.md](entity-lifecycle-design.md) §3A).
+스레드 경계는 여전히 값뿐 — 군중도 `MeshDraw` 값 배열로만 스냅샷에 실린다.
+
+### 사용 방법 (How to use)
+
+- **씬 전환**: `src/game/Simulation.h` 의 `Simulation::kDemoScene` 를 `1` 또는 `2` 로. 리빌드.
+  (런타임 토글이 필요해지면 생성자 인자로 승격 — 지금은 YAGNI.)
+- **군중 규모**: `kSimAgentCount`. `StepSimAgents` 는 `ParallelFor` 라 수백까지는 그대로.
+  수천 이상이면 인스턴싱 렌더(roadmap D4)·브로드페이즈(D3) 가 선행돼야 한다 —
+  지금은 `SimAgent` 마다 `MeshDraw` 1개(=draw call 1개)다.
+- **필드·메사 치수**: `kCliffTop`(메사 높이), `kPlateauHalf`(플레이어 이동 반경), `kFieldHalf`
+  (평지 반경). `SnapshotBuilder.cpp` 의 `BuildCliffScene` 가 이 값으로 프롭을 배치하므로
+  숫자만 바꾸면 메사·평지·모서리 라인이 같이 따라온다.
+- **군중 거동**: `Simulation::StepSimAgents` 의 heading 드리프트 계수·`speed` 범위·bob 진폭.
+  실제 게임 AI(추적·경로)로 바꿀 때 이 함수만 교체하면 렌더/스냅샷은 안 건드린다.
+
+### 하지 말 것 (씬 2 추가분)
+
+- `SimAgent` 스텝을 `Step()` 밖에서 돌리지 말 것 — 고정 timestep 규칙은 씬 1 과 동일.
+- `StepSimAgents` 의 잡 람다에서 `m_agents` 재할당·다른 잡의 범위 접근·공유 카운터 금지
+  (불변 규칙 6). 인덱스로 자기 구간만.
+- 군중을 스킨드 모델(`ModelDraw`)로 그리지 말 것 — `ModelMeshPass3D` 는 인스턴스 1개만
+  CPU 스킨한다(문서화된 제약). 다수는 `MeshDraw`(또는 장차 인스턴싱).
+
 ## 알려진 한계
 
 - **루트 모션**: walk/run/jump 클립의 루트 본 트랙에 이동이 구워져 있어, 캐릭터가 제자리에서
@@ -88,7 +139,9 @@ SnapshotBuilder (game/)
 - **클립 선두 프레임 트림**: Unity-chan 클립 take 는 `time_begin` 이 실제 모션보다 한 프레임
   앞이라 프레임 0 이 바인드(T)포즈다 — 루프마다·상태 전환마다 1프레임 T포즈가 튄다.
   `BakeClip` 이 "모든 본의 첫 키가 바인드 포즈와 일치할 때만" 선두 키를 버린다(`Skeleton` 인자로 비교).
-- **크로스페이드 없음**: 상태 전환이 즉시 스냅이다. 블렌딩은 설계만.
-- **캐릭터 콜라이더 없음**: 박스/바닥과 물리 상호작용 안 함. 이동 범위는 `kCharHalfRange` 로 클램프만.
+- ~~크로스페이드 없음~~: 상태 전환에 0.15s 크로스페이드가 들어갔다(`CharacterAnimationState`
+  + `AnimationSampler::EvaluateBlended`, 로컬 TRS lerp). 점프는 파라메트릭 구동. [roadmap.md](roadmap.md) §2.1.
+- **캐릭터 콜라이더 없음**: 박스/바닥과 물리 상호작용 안 함. 이동 범위는 `Actor.halfRange`
+  (씬 1 = `kCharHalfRange`, 씬 2 = `kPlateauHalf`)로 원점 대칭 클램프만, 바닥은 `Actor.groundY`.
   (충돌 모듈은 탐지 전용 — [collider-design.md](collider-design.md).)
 - 잠금 중에는 커서가 안 보여 `SETTINGS` HUD 버튼을 클릭할 수 없다. `Esc` 로 설정 열기.
