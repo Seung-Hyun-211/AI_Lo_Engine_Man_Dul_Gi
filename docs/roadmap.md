@@ -16,7 +16,7 @@
 | 애니메이션 | CPU LBS 스키닝, 클립 리타깃, Locomotion→클립 스냅, 재생 모드(Once/PingPong), 크로스페이드(로컬 TRS lerp), 파라메트릭 점프 | 2D 프레임 애니(설계만) | **루트 모션, GPU 스키닝, IK, 블렌드 트리** |
 | 물리/충돌 | Box/Sphere 탐지, layer/mask, Contacts, 레이캐스트 3D(Closest/Any/All) | — | **레이캐스트 2D, `Simulation` 연동, 브로드페이즈, 스윕/CCD, 캡슐, 트리거 enter/exit 이벤트, 재사용 캐릭터 컨트롤러** |
 | 에셋 | FBX+스키닝, 이미지 디코드 seam, atlas_pack v1(무압축) | — | BC7 압축, AssetRegistry, 비동기 로더, 핫리로드(아틀라스/모델), 글리프 아틀라스 |
-| 게임 프레임워크 | 씬 상태(Title/InGame/Settings), 고정 스텝 + time scale, EntityId 뼈대, 오디오 최소 믹서(XAudio2) | ScrollList v1 | **오디오 스트리밍/3D음, 세이브, 이벤트 버스, 프리팹/직렬화, 게임 루프(장르 미정)** |
+| 게임 프레임워크 | 씬 상태(Title/InGame/Settings), 고정 스텝 + time scale, EntityId 뼈대, `core::ObjectPool<T>`, 오디오 최소 믹서(XAudio2) | ScrollList v1 | **오디오 스트리밍/3D음, 세이브, 이벤트 버스, 프리팹/직렬화, 게임 루프(장르 미정)** |
 | 입력 | 키보드/마우스/휠 | — | 게임패드(XInput), 리바인딩, 액션맵 레이어 |
 | 툴/디버그 | entity 메모리 벤치, atlas_pack | — | 프레임타임 HUD/프로파일러, 인게임 콘솔, 엔티티 인스펙터, 리플레이 |
 
@@ -171,7 +171,7 @@ if (auto hit = world.RaycastClosest(down)) { actor.pos.y = hit->point.y; actor.g
 | # | 항목 | 왜 (디펜스) | 기존 표 |
 |---|---|---|---|
 | ~~D1~~ ✅ | **레이캐스트 + 범위 질의 + 디버그 드로우** | 타워가 사거리 안 적을 고르고, 투사체가 다수를 맞춘다 | §2.2 (구현). `Simulation` 연동만 남음 |
-| D2 | **다수 엔티티 SoA + `core::ObjectPool<T>`** (`game/AgentStore`) | 수백~수천 적/투사체를 개별 `new` 없이 스폰·재사용 | **`instanced-rendering.md` §6** (+ `entity-lifecycle-design.md` §3A, `scrollable-list-and-pool.md` §1.1) |
+| D2 | **다수 엔티티 풀 + `core::ObjectPool<T>`** — ✅ `ObjectPool` 구현·크라우드 이주(AoS), SoA 승격(`game/AgentStore`)은 측정 게이트 | 수백~수천 적/투사체를 개별 `new` 없이 스폰·재사용 | `src/core/ObjectPool.h`, **`instanced-rendering.md` §6**, `scrollable-list-and-pool.md` §1.1 |
 | D3 | **브로드페이즈(균일 그리드)** | 다수 대 다수 충돌·타겟 질의 — 선형 스캔 N² 불가 | P1, `instanced-rendering.md` §6.4 |
 | D4 | **인스턴싱 렌더** — ✅ 인스턴스드 드로우 + 프러스텀·거리 컬(§8-1·2), LOD/빌보드·`AgentStore` 남음 | 같은 메시 수천 개를 draw call 소수로 | **`instanced-rendering.md`** (§3~§5, 구현순서 §8) |
 | D5 | **웨이브/스폰 + HP/데미지 + 목표 지점·패배 판정** | 게임 루프 자체 | 새 `game/` 시스템 |

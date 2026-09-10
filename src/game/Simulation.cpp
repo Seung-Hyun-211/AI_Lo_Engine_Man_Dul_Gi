@@ -19,6 +19,12 @@ namespace engine::game
         // (so a hasted actor integrates in small increments, not one big jump).
         constexpr int kMaxActorSubSteps = 8;
         constexpr float kDemoActorSpeed = 3.0f;   // m/s the canned demo actors wander at
+
+        // Demo-scene-2 crowd field box (z range the agents wander in) and the
+        // pool churn cadence. Shared by SeedAgent / StepSimAgents.
+        constexpr float kFieldAgentZLo = 8.0f;
+        constexpr float kFieldAgentZHi = Simulation::kFieldHalf + 10.0f;
+        constexpr int   kAgentChurnIntervalSteps = 12;   // recycle 1 crowd member every N fixed steps
 #endif
     }
 
@@ -81,20 +87,30 @@ namespace engine::game
         }
     }
 
+    void Simulation::SeedAgent(SimAgent& agent, float seed)
+    {
+        // Deterministic (no RNG) scatter across the field in front of the mesa.
+        agent.pos = { std::fmod(seed * 7.13f, 2.0f * kFieldHalf) - kFieldHalf,
+                      0.2f,
+                      kFieldAgentZLo + std::fmod(seed * 3.7f, kFieldAgentZHi - kFieldAgentZLo) };
+        agent.heading = std::fmod(seed * 2.399963f, 2.0f * kPi) - kPi;   // spread out
+        agent.speed = 0.8f + std::fmod(seed, 5.0f) * 0.35f;              // 0.8 .. 2.2 m/s
+        agent.phase = seed * 0.37f;
+    }
+
     void Simulation::SpawnSimAgents()
     {
-        m_agents.resize(static_cast<std::size_t>(kSimAgentCount));
-        for (std::size_t i = 0; i < m_agents.size(); ++i)
+        m_agents.Init(static_cast<std::size_t>(kSimAgentCapacity));
+        m_agentHandles.clear();
+        m_agentHandles.reserve(static_cast<std::size_t>(kSimAgentCount));
+        m_agentChurnCursor = 0;
+
+        for (int i = 0; i < kSimAgentCount; ++i)
         {
-            const float t = static_cast<float>(i);
-            SimAgent& a = m_agents[i];
-            // Deterministic scatter across the field in front of the mesa.
-            a.pos = { std::fmod(t * 7.13f, 2.0f * kFieldHalf) - kFieldHalf,
-                      0.2f,
-                      10.0f + std::fmod(t * 3.7f, kFieldHalf) };
-            a.heading = std::fmod(t * 2.399963f, 2.0f * kPi) - kPi;   // spread out
-            a.speed = 0.8f + std::fmod(t, 5.0f) * 0.35f;              // 0.8 .. 2.2 m/s
-            a.phase = t * 0.37f;
+            const auto handle = m_agents.Acquire();
+            m_agentHandles.push_back(handle);
+            if (SimAgent* a = m_agents.Get(handle))
+                SeedAgent(*a, static_cast<float>(i));
         }
     }
 #endif
@@ -349,22 +365,24 @@ namespace engine::game
 
     void Simulation::StepSimAgents(float fixedDelta)
     {
-        if (m_agents.empty()) return;
+        const std::vector<std::uint32_t>& active = m_agents.ActiveIndices();
+        if (active.empty()) return;
+
+        SimAgent* slots = m_agents.Slots();
 
         // Same contiguous-range contract as the particle advect: each job owns a
-        // distinct [begin, end), touches only its own agents, no shared writes.
-        // This is the seed of the mass-object path (docs/roadmap.md D2).
-        m_jobs.ParallelFor(0, m_agents.size(), 32,
-            [this, fixedDelta](std::size_t begin, std::size_t end)
+        // distinct [begin, end) slice of the active-index list. Every entry is a
+        // unique slot, so writes to slots[active[k]] never overlap (invariant 6).
+        // This is the seed of the mass-object path (docs/instanced-rendering.md §6).
+        m_jobs.ParallelFor(0, active.size(), 32,
+            [slots, &active, fixedDelta](std::size_t begin, std::size_t end)
             {
-                const float zLo = 8.0f;
-                const float zHi = kFieldHalf + 10.0f;
-                for (std::size_t i = begin; i < end; ++i)
+                for (std::size_t k = begin; k < end; ++k)
                 {
-                    SimAgent& a = m_agents[i];
+                    SimAgent& a = slots[active[k]];
                     a.phase += fixedDelta * 4.0f;
                     // Lazy heading drift so the crowd churns without a RNG.
-                    a.heading += std::sin(a.phase * 0.11f + static_cast<float>(i)) * fixedDelta * 0.9f;
+                    a.heading += std::sin(a.phase * 0.11f + static_cast<float>(active[k])) * fixedDelta * 0.9f;
 
                     const math::Vec3 dir{ std::sin(a.heading), 0.0f, std::cos(a.heading) };
                     a.pos = a.pos + dir * (a.speed * fixedDelta);
@@ -376,13 +394,30 @@ namespace engine::game
                         a.heading = -a.heading;
                         a.pos.x = math::Clamp(a.pos.x, -kFieldHalf, kFieldHalf);
                     }
-                    if (a.pos.z < zLo || a.pos.z > zHi)
+                    if (a.pos.z < kFieldAgentZLo || a.pos.z > kFieldAgentZHi)
                     {
                         a.heading = kPi - a.heading;
-                        a.pos.z = math::Clamp(a.pos.z, zLo, zHi);
+                        a.pos.z = math::Clamp(a.pos.z, kFieldAgentZLo, kFieldAgentZHi);
                     }
                 }
             }).Wait();
+
+        // Demo churn: recycle one crowd member through the pool every N steps so
+        // Acquire / Release / stale-handle rejection stay exercised (this is not
+        // a game mechanic - a wave director would own spawn/despawn). Release
+        // before Acquire so it is safe even if the pool is at capacity.
+        if (!m_agentHandles.empty() && (m_agentChurnCursor % kAgentChurnIntervalSteps) == 0)
+        {
+            const std::size_t k =
+                (m_agentChurnCursor / kAgentChurnIntervalSteps) % m_agentHandles.size();
+            m_agents.Release(m_agentHandles[k]);
+            const auto handle = m_agents.Acquire();
+            m_agentHandles[k] = handle;
+            if (SimAgent* a = m_agents.Get(handle))
+                SeedAgent(*a, static_cast<float>(m_agentChurnCursor) * 1.37f
+                              + static_cast<float>(k) * 2.11f);
+        }
+        ++m_agentChurnCursor;
     }
 #endif
 }

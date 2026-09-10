@@ -11,6 +11,7 @@
 #include <vector>
 
 #if defined(ENGINE_WITH_3D)
+#include "core/ObjectPool.h"
 #include "game/CharacterAnimationState.h"
 #endif
 
@@ -59,15 +60,20 @@ namespace engine::game
     };
 
     // A lightweight member of the simulation crowd on the lower field (demo
-    // scene 2). Homogeneous, so it lives in a plain std::vector with no
-    // EntityId (docs/entity-lifecycle-design.md §3A). Stepped with
-    // JobSystem::ParallelFor - each job owns a distinct [begin, end) range.
+    // scene 2). Homogeneous, so it lives in a core::ObjectPool<SimAgent> with no
+    // EntityId (docs/entity-lifecycle-design.md §3A, docs/instanced-rendering.md
+    // §6). Stepped with JobSystem::ParallelFor over the pool's active indices -
+    // each job owns a distinct [begin, end) range of that list.
     struct SimAgent
     {
         math::Vec3 pos{};        // on the field; y is a small bob above 0
         float heading{ 0.0f };   // radians; 0 faces +Z
         float speed{ 1.0f };     // m/s
         float phase{ 0.0f };     // bob / drift clock
+
+        // Required by core::ObjectPool: return a recycled slot to spawn-ready
+        // state (SpawnSimAgents / the churn pass then fill the fields).
+        void Reset() { *this = SimAgent{}; }
     };
 #endif
 
@@ -102,7 +108,8 @@ namespace engine::game
         static constexpr float kCliffTop = 6.0f;         // scene 2: plateau (player) height
         static constexpr float kPlateauHalf = 4.0f;      // scene 2: player's walkable plateau half-size
         static constexpr float kFieldHalf = 30.0f;       // scene 2: lower field half-size
-        static constexpr int   kSimAgentCount = 600;     // scene 2: crowd size on the field (one instanced draw)
+        static constexpr int   kSimAgentCount = 600;      // scene 2: crowd alive on the field (one instanced draw)
+        static constexpr int   kSimAgentCapacity = 1024;  // scene 2: ObjectPool slot count (headroom for spawn/despawn)
 #endif
 
         Simulation(core::JobSystem& jobs, int worldWidth, int worldHeight);
@@ -143,7 +150,7 @@ namespace engine::game
         [[nodiscard]] float CameraPitch() const { return m_cameraPitch; }
         [[nodiscard]] AnimPose HeroAnimPose() const { return m_actors[0].anim.Pose(); }
         [[nodiscard]] const std::vector<Actor>& Actors() const { return m_actors; }
-        [[nodiscard]] const std::vector<SimAgent>& SimAgents() const { return m_agents; }
+        [[nodiscard]] const core::ObjectPool<SimAgent>& SimAgents() const { return m_agents; }
 #endif
 
     private:
@@ -153,6 +160,10 @@ namespace engine::game
 #if defined(ENGINE_WITH_3D)
         void SpawnActors();
         void SpawnSimAgents();
+        // Scatters one recycled agent across the field. `seed` (any changing
+        // float) drives a deterministic no-RNG spread. Used by SpawnSimAgents
+        // and the churn pass in StepSimAgents.
+        static void SeedAgent(SimAgent& agent, float seed);
         // Advances every actor by its own local-time-scaled step (sub-stepped
         // when timeScale > 1). `globalPaused` restricts the pass to actors that
         // set `ignoreGlobalPause`.
@@ -177,7 +188,9 @@ namespace engine::game
 
 #if defined(ENGINE_WITH_3D)
         std::vector<Actor> m_actors;               // [0] = player; [1..] = local-time-scale demo (scene 1)
-        std::vector<SimAgent> m_agents;            // scene 2: wandering crowd on the lower field
+        core::ObjectPool<SimAgent> m_agents;       // scene 2: wandering crowd on the lower field
+        std::vector<core::ObjectPool<SimAgent>::Handle> m_agentHandles;   // one per live crowd member (for the churn pass)
+        std::size_t m_agentChurnCursor{ 0 };       // round-robin index into m_agentHandles
         float m_cameraYaw{ 0.0f };                 // radians; orbit angle around the player
         float m_cameraPitch{ -0.28f };            // radians; negative looks down at the player
 #endif

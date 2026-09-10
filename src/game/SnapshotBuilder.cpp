@@ -200,9 +200,14 @@ namespace engine::game
             const Frustum frustum = MakeFrustum(viewProj);
             const math::Vec3 eye = EyeFromView(scene.camera.view);
 
+            const core::ObjectPool<SimAgent>& pool = simulation.SimAgents();
+            const std::vector<std::uint32_t>& activeAgents = pool.ActiveIndices();
+            const SimAgent* agentSlots = pool.Slots();
+
             const std::size_t firstInstance = scene.meshInstances.size();
-            for (const SimAgent& a : simulation.SimAgents())
+            for (const std::uint32_t slotIdx : activeAgents)
             {
+                const SimAgent& a = agentSlots[slotIdx];
                 const math::Vec3 center = a.pos + math::Vec3{ 0.0f, kAgentScale * 0.5f, 0.0f };
                 if (!SphereInFrustum(frustum, center, kAgentCullRadius)) continue;
                 const math::Vec3 d = center - eye;

@@ -1,9 +1,11 @@
 # 대규모 인스턴스 렌더 — 수천 개체 출력 선행작업
 
-**상태: §8 의 1~2 구현됨(인스턴스드 드로우 경로 + 프러스텀·거리 컬링), 3~6 미구현.**
-데모 씬 2([demo-scene.md](demo-scene.md))의 `SimAgent` 군중(현재 600마리)이 이제 배치 하나 =
-`DrawIndexedInstanced` 1콜로 그려지고, `SnapshotBuilder` 가 프러스텀·최대거리로 컬한다.
-남은 것: LOD 버킷/빌보드, `core::ObjectPool` + `game/AgentStore`(SoA), 브로드페이즈.
+**상태: §8 의 1~2 + 4(전반) 구현됨, 3·4(SoA)·5·6 미구현.**
+데모 씬 2([demo-scene.md](demo-scene.md))의 `SimAgent` 군중(현재 600 / capacity 1024)이
+배치 하나 = `DrawIndexedInstanced` 1콜로 그려지고, `SnapshotBuilder` 가 프러스텀·최대거리로
+컬하며, 군중은 `core::ObjectPool<SimAgent>`(`src/core/ObjectPool.h`) 에서 산다 —
+`ParallelFor` 는 그 `ActiveIndices()` 를 쪼개 돌고, 스텝마다 1마리씩 풀을 재활용(churn).
+남은 것: LOD 버킷/빌보드(§8-3), SoA 승격(`game/AgentStore`, 측정 게이트), 브로드페이즈(§8-5).
 이 문서는 그 벽을 넘기 위한 **엔진 일반 선행작업** 전체를 설계한다 — 정적/강체 인스턴스를 한
 번의 `DrawIndexedInstanced` 로 그리는 경로, 스냅샷 값 타입, 컬링·LOD, 심(sim) 쪽 SoA + 풀.
 
@@ -28,7 +30,7 @@
 | **드로우 콜** | `MeshPass3D::Execute` 가 `scene.meshDraws` 를 순회하며 개체마다 `UpdateSubresource(Object cbuffer)` + `IASetVertexBuffers` + `DrawIndexed`. N개 = N콜 + N번 cbuffer 갱신 | 메시·LOD 가 같은 인스턴스를 모아 **배치당 `DrawIndexedInstanced` 1콜**. cbuffer 갱신은 프레임당 1회(Frame b0) |
 | **스냅샷 빌드** | ~~`for (SimAgent&) meshDraws.push_back(...)` — 컬링 없음~~ ✅ 프러스텀 + 최대거리 컬 후 `MeshInstance` 로 | (남음) LOD 분할, 메시 여러 종류 시 `(mesh,lod)` 버킷 |
 | **스냅샷 크기** | `MeshDraw` = `Mat4`(64B) + color(16B) = 80B. 5,000개 = 400KB/프레임 | 컴팩트 인스턴스(pos+yaw+scale+colorRgba = **24B**). 5,000개 = 120KB — 1슬롯 메일박스 허용 |
-| **심 업데이트** | `StepSimAgents` 는 이미 `ParallelFor` (좋음). 단 `std::vector<SimAgent>` 고정, 스폰/디스폰·풀 없음 | 고정 capacity SoA + `core::ObjectPool` free-list. 스폰/디스폰은 스텝 사이 |
+| **심 업데이트** | ~~`std::vector<SimAgent>` 고정, 풀 없음~~ ✅ `core::ObjectPool<SimAgent>`(capacity 1024) — `ParallelFor` 는 `ActiveIndices()` 슬라이스, 스폰/디스폰은 스텝 밖 | (남음) 규모 커지면 SoA 승격(§6.2) |
 | **충돌** | `CollisionWorld3D` N² · 메인 전용 | 유니폼 그리드 브로드페이즈(2c). 개체끼리는 분리력, 콜라이더는 지형/플레이어만 |
 | **셰이더** | `mesh.hlsl` VS 가 `world`(Object cbuffer)를 읽음 | 인스턴스 변형: 트랜스폼·색을 **per-instance 정점 스트림**(slot 1)에서 |
 
@@ -299,32 +301,59 @@ for (int lod = 0; lod < 3; ++lod)
 렌더가 준비돼도, 수천 개체를 **매 프레임 `new`/`vector` 재할당 없이** 스폰·재사용·순회할
 구조가 필요하다. 로드맵 D2.
 
-### 6.1 `core::ObjectPool<T>` (`scrollable-list-and-pool.md` §1.1 구현)
+### 6.1 `core::ObjectPool<T>` — **구현됨** (`src/core/ObjectPool.h`)
 
 ```cpp
 namespace engine::core
 {
-    // 연속 저장 + free-list. Acquire 는 T::Reset() 호출(생성자 재실행 X), Release 는
-    // 파괴 안 함(재사용). 세대(generation) 핸들로 stale 참조 감지.
-    template <class T>
-    class ObjectPool
+    // 슬롯 1회 할당. Acquire 는 T::Reset() 호출(생성자 재실행 X), Release 는 파괴 안 함
+    // (버퍼 재사용). 슬롯은 이동하지 않음 → Handle::index 는 객체 수명 내내 유효.
+    // generation 으로 stale 핸들 거부. 메인/심 스레드 전용 (규칙 6).
+    template <class T>   // T: 기본 생성 가능 + void Reset()
+    class ObjectPool : private core::NonCopyable
     {
     public:
-        explicit ObjectPool(std::size_t capacity);        // 한 번 할당, 재할당 없음
-        struct Handle { std::uint32_t index; std::uint32_t generation; };
+        struct Handle { std::uint32_t index, generation; bool Valid() const; };
+        ObjectPool() = default;  explicit ObjectPool(std::size_t cap);
+        void Init(std::size_t cap);                 // 나중 (재)초기화
 
-        Handle Acquire();                 // free-list 에서, 없으면 무효 핸들
-        void   Release(Handle);           // 슬롯을 free-list 로, generation++
-        T*     Get(Handle);               // generation 불일치면 nullptr
-        std::size_t AliveCount() const;
-        // 순회용: 조밀 인덱스가 필요하면 swap-remove 압축(아래 §6.3)
+        Handle Acquire();                           // free 스택에서, 꽉 차면 무효 핸들
+        void   Release(Handle);                     // free 스택으로. stale/무효는 no-op
+        bool   IsLive(Handle) const;   T* Get(Handle);
+
+        T* Slots();                                             // cap 개, ActiveIndices() 만 live
+        const std::vector<std::uint32_t>& ActiveIndices() const; // 조밀 live 슬롯 인덱스
+        std::size_t Size() const;   bool Full() const;
     };
 }
 ```
 
-### 6.2 `game/AgentStore` — SoA, 고정 capacity
+원안(`std::span<T> Active()` 압축형) 대신 **슬롯 고정 + `ActiveIndices()`** 를 택한 이유·
+`ParallelFor` 매핑은 `scrollable-list-and-pool.md` §1.1 "설계 노트".
 
-`SimAgent` 를 이걸로 승격한다(데모 씬 2 가 첫 사용처).
+**사용 (`ParallelFor` + 스냅샷)**:
+
+```cpp
+// 스텝 (심 스레드). 스폰/디스폰은 이 밖에서만.
+const auto& active = pool.ActiveIndices();
+T* slots = pool.Slots();
+jobs.ParallelFor(0, active.size(), 32, [slots, &active](size_t b, size_t e){
+    for (size_t k = b; k < e; ++k) { T& x = slots[active[k]]; /* x 만 쓰기 */ }
+}).Wait();
+
+// 스냅샷 빌드 (심 스레드, 스텝 뒤). 순서 의존 금지.
+for (uint32_t i : pool.ActiveIndices()) { const T& x = pool.Slots()[i]; emit(x); }
+
+// 스폰/디스폰: 스텝 사이 메인만. 꽉 찰 수 있으면 Release 먼저.
+pool.Release(h);  auto h2 = pool.Acquire();  if (T* x = pool.Get(h2)) reseed(*x);
+```
+
+### 6.2 `game/AgentStore` — SoA, 고정 capacity — **아직 안 함 (측정 게이트)**
+
+현재 데모 씬 2 크라우드는 **AoS** 다: `core::ObjectPool<SimAgent>`(§6.1) 에 `SimAgent`
+구조체가 그대로 산다. 600마리에선 이게 맞다(§6.2 마지막 불릿). 수천에서 `ParallelFor` 가
+pos/vel 만 스트리밍하는 게 병목으로 측정되면 그때 아래 SoA 로 승격한다 — `ObjectPool` 은
+그대로 두고 `AgentStore` 가 병렬 벡터 + 자체 free-list 를 갖는다.
 
 ```cpp
 namespace engine::game
@@ -395,8 +424,8 @@ namespace engine::game
 | 2 (렌더러 코어 = clear/bind/pass 순회) | 새 드로우는 `MeshPass3D::Execute` 안. 코어 불변 |
 | 3 (경계는 값 스냅샷만) | `MeshInstance`(24B POD) + `InstanceBatch`. Mat4 팔레트·게임 객체 포인터 없음 |
 | 4 (1슬롯 메일박스) | ~192KB/프레임(8k), 오래된 프레임 버려도 무해 |
-| 6 (ParallelFor 범위 독립) | `AgentStore::Step` 워커는 자기 `[begin,end)` 만 쓰기, 이웃은 이전 스텝 읽기. 스폰/디스폰·free-list·vector 재할당은 스텝 밖 |
-| 7 (2D/3D 분리) | `MeshInstance`/`InstanceBatch` 는 `render/r3d`. `math` 에 `MakeFrustum` 는 공통(값). 전부 `ENGINE_WITH_3D` |
+| 6 (ParallelFor 범위 독립) | `StepSimAgents` 워커는 `ActiveIndices()` 의 자기 `[begin,end)` → `Slots()[active[k]]` 만 쓰기(슬롯 인덱스 유일 → 충돌 없음). `ObjectPool::Acquire/Release`(churn) 는 `Wait()` 뒤 메인에서만 |
+| 7 (2D/3D 분리) | `MeshInstance`/`InstanceBatch` 는 `render/r3d`; `SimAgent`/`ObjectPool` 사용은 전부 `#if ENGINE_WITH_3D`. `MakeFrustum` 는 `SnapshotBuilder` 익명(값). `core::ObjectPool` 자체는 모듈 중립 |
 | 8 (충돌은 탐지만) | 브로드페이즈는 후보 목록만. 분리력·넉백은 `AgentStore` 안, physics 밖 |
 
 ---
@@ -412,9 +441,12 @@ namespace engine::game
    이 엔진 행렬 규약에 맞춤) + `SphereInFrustum` + `EyeFromView`. 데모 씬 2 크라우드 600마리를
    컬 후 `MeshInstance` 로. (`math::MakeFrustum` 승격은 두 번째 사용처가 생기면.)
 3. **LOD 버킷**(거리 3단계). LOD2 는 우선 "작은 큐브 + 셰도우 생략"으로. 빌보드/임포스터는 뒤로.
-   → 4k+ 목표.
-4. **`core::ObjectPool<T>` + `game/AgentStore`(SoA) + 스폰/디스폰.** `SimAgent` 를 SoA 로 승격,
-   웨이브형 스폰. → 8k 스케일, `ParallelFor` 조밀도(압축 vs free-list) 결정.
+   → 4k+ 목표. `InstanceBatch.lod` 필드·셰도우 컷은 이미 배선됨 → `SnapshotBuilder` 쪽만.
+4. **~~`core::ObjectPool<T>`~~ ✅ + `game/AgentStore`(SoA) + 스폰/디스폰.**
+   `core::ObjectPool<T>`(`src/core/ObjectPool.h`) 구현 완료 — 데모 씬 2 크라우드가
+   `ObjectPool<SimAgent>`(capacity 1024) 에서 살고, `StepSimAgents` 가 `ActiveIndices()` 를
+   `ParallelFor` 로 돌고, 스텝마다 1마리 churn(Acquire/Release 상시 검증). **남음**: SoA 승격
+   (`game/AgentStore`, 측정 게이트 — §6.2), 웨이브형 스폰(게임 루프).
 5. **브로드페이즈**(로드맵 D3) — 개체끼리 분리력 + 타겟 질의.
 6. **(→ [horde-design.md](horde-design.md) §5)** 애니메이션이 필요하면 VAT 를 이 골격 위에.
    `HordePass3D` 는 여기 인스턴스 버퍼·컬링·LOD 를 재사용하고 per-instance 에 `animTime`,

@@ -4,9 +4,11 @@
 화면에 보이는 ~M개만 두고, 스크롤할 때 파괴/재생성이 아니라 **재바인딩(recycle)** 한다
 (가상화 / UI virtualization — RecyclerView·UITableView cell reuse 와 같은 패턴).
 
-**상태: `ui::ScrollList` 구현됨 (v1).** 고정 행 높이 · 클리핑 A · 휠 입력 · 스크롤바 드래그 ·
-데모 화면(`game/InventoryScreen`, 타이틀 → ITEMS). 미구현: `core::ObjectPool<T>`(§1.1, 범용 풀은
-아직 안 지음), 가변 행 높이, 키보드 네비. 이 문서가 계약.
+**상태: `ui::ScrollList` 구현됨 (v1) + `core::ObjectPool<T>` 구현됨 (§1.1).** 고정 행 높이 ·
+클리핑 A · 휠 입력 · 스크롤바 드래그 · 데모 화면(`game/InventoryScreen`, 타이틀 → ITEMS).
+`core::ObjectPool<T>` 는 `src/core/ObjectPool.h`, 첫 사용처는 데모 씬 2 크라우드. 미구현:
+`ScrollList` 가 `ObjectPool` 을 쓰도록 리팩터(현재 자체 ring, §1.2), 가변 행 높이, 키보드 네비,
+크라우드 SoA 승격(`instanced-rendering.md` §6.2). 이 문서가 계약.
 
 관련: `docs/ui-architecture.md`(Widget·UIContext·Quad 방출·clipping 미구현), `docs/scene-flow-design.md`(화면을 자유 함수가 만든다), `docs/entity-lifecycle-design.md` §4(같은 타입 → 연속 메모리, 이 문서의 풀도 그 규칙), `docs/collider-design.md`(메인 스레드 전용 규칙 선례).
 
@@ -28,28 +30,48 @@
 
 ## 1. 구성요소
 
-### 1.1 `core::ObjectPool<T>` — 범용 풀 (메모리 이점)
+### 1.1 `core::ObjectPool<T>` — 범용 풀 (메모리 이점) — **구현됨** (`src/core/ObjectPool.h`)
 
 ```cpp
-template <typename T>
-class ObjectPool
+template <class T>
+class ObjectPool : private core::NonCopyable
 {
 public:
-    struct Handle { std::uint32_t index; std::uint32_t generation; };
+    struct Handle { std::uint32_t index; std::uint32_t generation; bool Valid() const; };
 
-    explicit ObjectPool(std::size_t capacity);   // reserve 1회, 이후 힙 접근 0
-    [[nodiscard]] Handle Acquire();               // 죽은 슬롯 재사용 → T::Reset() (파괴/생성 X)
-    void Release(Handle);                          // free 스택으로. 파괴 X
-    [[nodiscard]] T* Get(Handle);                 // generation 불일치면 nullptr (stale 방어)
-    [[nodiscard]] std::span<T> Active();          // 살아있는 것만, 연속 순회
+    ObjectPool() = default;                        // 빈 풀(capacity 0)
+    explicit ObjectPool(std::size_t capacity);     // 슬롯 1회 할당
+    void Init(std::size_t capacity);               // 나중에 (재)초기화 — 내용 전부 버림
+
+    [[nodiscard]] Handle Acquire();                // 죽은 슬롯 재사용 → T::Reset(). 꽉 차면 무효 핸들
+    void Release(Handle);                          // free 스택으로. 파괴 X. stale/무효 핸들은 no-op
+    [[nodiscard]] bool IsLive(Handle) const;
+    [[nodiscard]] T* Get(Handle);                  // generation·active 불일치면 nullptr
+
+    // 슬롯은 이동하지 않는다 → Handle::index 는 그 객체 수명 내내 유효(외부 보관 가능).
+    [[nodiscard]] T* Slots();                                       // capacity 개, ActiveIndices() 만 live
+    [[nodiscard]] const std::vector<std::uint32_t>& ActiveIndices() const;   // 살아있는 슬롯 인덱스(조밀, 순서 불특정)
+    [[nodiscard]] std::size_t Size() const;   [[nodiscard]] bool Full() const;
 
 private:
-    std::vector<T> m_slots;                        // 연속 저장 (entity-lifecycle-design.md §4)
-    std::vector<std::uint32_t> m_generation;
-    std::vector<std::uint32_t> m_free;
-    std::size_t m_activeCount{ 0 };
+    std::vector<T> m_slots;                        // 안정 저장, 재정렬 안 함 (entity-lifecycle-design.md §4)
+    std::vector<std::uint32_t> m_generation;       // 슬롯별, Acquire 때 +1
+    std::vector<std::uint8_t>  m_slotActive;
+    std::vector<std::uint32_t> m_activePos;        // 슬롯 인덱스 → m_active 안 위치 (swap-remove 용)
+    std::vector<std::uint32_t> m_active, m_free;
 };
 ```
+
+**설계 노트**: 원안은 `std::span<T> Active()`(슬롯을 조밀 압축, swap-remove)였으나, 그러면
+객체가 물리적으로 이동해 `Handle::index` 를 간접 테이블로 다시 매핑해야 한다. 구현은 **슬롯
+고정 + `ActiveIndices()` 조밀 리스트** 를 택했다 — `Handle::index` == 슬롯 인덱스라 간접층이
+없고 `T` 가 이동 가능할 필요도 없다. `ParallelFor` 는 `ActiveIndices()` 를 겹치지 않는
+`[begin,end)` 로 쪼개면 되고(각 항목이 유일한 슬롯 → `Slots()[active[k]]` 쓰기 충돌 없음),
+`SnapshotBuilder` 는 `for (i : ActiveIndices()) use Slots()[i]`. 압축형이 필요해지면(원거리
+순회 캐시) 그때 확장.
+
+첫 사용처: 데모 씬 2 크라우드(`game::Simulation::m_agents`, `SimAgent` 600마리 / capacity 1024),
+`docs/demo-scene.md`·`docs/instanced-rendering.md` §6.
 
 이점 (요구사항: "메모리 관리 이점" + "재사용 이점"):
 

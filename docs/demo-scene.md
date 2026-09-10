@@ -81,46 +81,54 @@ Simulation (game/)
   · SpawnActors        : kDemoScene==2 → 플레이어 1명만. pos.y = kCliffTop,
                          groundY = kCliffTop (그 높이에 착지), halfRange = kPlateauHalf
                          (원점 대칭 정사각형으로 이동 클램프 → 메사 위). m_cameraPitch = -0.5.
-  · SpawnSimAgents     : kSimAgentCount 개 SimAgent 를 평지에 결정적으로 흩뿌림
-                         (RNG 없음 — 인덱스 기반). pos / heading / speed / phase.
-  · StepSimAgents(dt)  : JobSystem::ParallelFor(청크 32) — 잡마다 겹치지 않는 [begin,end),
-                         공유 쓰기 없음 (파티클 advect 와 같은 계약). heading 느린 드리프트 +
-                         전진 + 상하 bob + 필드 박스 경계에서 heading 반사. m_agents 가 비면
-                         (씬 1) 즉시 반환.
+  · SpawnSimAgents     : m_agents(core::ObjectPool<SimAgent>).Init(kSimAgentCapacity=1024) →
+                         kSimAgentCount(600) 번 Acquire + SeedAgent(결정적, RNG 없음).
+                         핸들은 m_agentHandles 에 보관(churn 용).
+  · StepSimAgents(dt)  : ParallelFor(청크 32) 가 m_agents.ActiveIndices() 를 겹치지 않는
+                         [begin,end) 로 — Slots()[active[k]] 만 쓰기(슬롯 인덱스 유일 → 충돌
+                         없음). heading 드리프트 + 전진 + bob + 필드 경계 반사. 그 뒤 메인에서
+                         churn: 12스텝마다 1마리 Release→Acquire→SeedAgent (풀 상시 검증, 게임
+                         메커닉 아님). ActiveIndices() 가 비면(씬 1) 즉시 반환.
   · Actor.groundY/halfRange : 액터별 바닥 높이·이동 반경. 씬 1 은 기본값(0 / 7.5)이라 동작 불변.
 SnapshotBuilder (game/)
   · BuildCamera   : kDemoScene==2 면 orbit 거리 3.6→6.0 (필드·군중이 프레임에 들어오게).
   · BuildLighting : 씬 2 는 셰도우 ortho 를 넓히고(22→64) 중심을 +Z 로 밀어 군중을 덮는다.
   · BuildScene3D  : kDemoScene==2 → BuildCliffScene (넓은 평지 Plane + 메사 Cube +
-                    기둥 마커 + **크라우드 = 인스턴스드 배치 1개**: 프러스텀·최대거리 컬 후
-                    SimAgent → render::MeshInstance, scene.instanceBatches 에 배치 1개 +
+                    기둥 마커 + **크라우드 = 인스턴스드 배치 1개**: m_agents.ActiveIndices() 순회,
+                    프러스텀·최대거리 컬 후 SimAgent → render::MeshInstance, 배치 1개 +
                     디버그 플레이어 AABB·절벽 모서리). 씬 1 경로(kBoxes)는 else 로 보존.
   · MeshPass3D    : instanceBatches 를 배치당 DrawIndexedInstanced 1콜 (mesh_instanced.hlsl).
                     상세 [instanced-rendering.md](instanced-rendering.md).
 ```
 
-`SimAgent` 는 동질적이라 `EntityId` 없이 `std::vector<SimAgent>` ([entity-lifecycle-design.md](entity-lifecycle-design.md) §3A).
-스레드 경계는 여전히 값뿐 — 군중은 `render::MeshInstance`(24B POD) 배열 + `InstanceBatch` 로만
-스냅샷에 실린다.
+`SimAgent` 는 동질적이라 `EntityId` 없이 `core::ObjectPool<SimAgent>`(AoS, 슬롯 고정 +
+`ActiveIndices()`) 에 산다 ([entity-lifecycle-design.md](entity-lifecycle-design.md) §3A,
+[scrollable-list-and-pool.md](scrollable-list-and-pool.md) §1.1). 스레드 경계는 여전히 값뿐 —
+군중은 `render::MeshInstance`(24B POD) 배열 + `InstanceBatch` 로만 스냅샷에 실린다.
 
 ### 사용 방법 (How to use)
 
 - **씬 전환**: `src/game/Simulation.h` 의 `Simulation::kDemoScene` 를 `1` 또는 `2` 로. 리빌드.
   (런타임 토글이 필요해지면 생성자 인자로 승격 — 지금은 YAGNI.)
-- **군중 규모**: `kSimAgentCount`(현재 600). 렌더는 배치 1개 = `DrawIndexedInstanced` 1콜이라
-  수천도 draw call 은 그대로. `StepSimAgents`(`ParallelFor`)와 스냅샷 캡(`kMaxInstances=16384`)이
-  상한. 그 이상·애니메이션·LOD 는 [instanced-rendering.md](instanced-rendering.md) §8.
+- **군중 규모**: `kSimAgentCount`(live, 현재 600) 와 `kSimAgentCapacity`(풀 슬롯, 1024).
+  렌더는 배치 1개 = `DrawIndexedInstanced` 1콜이라 수천도 draw call 은 그대로.
+  `StepSimAgents`(`ParallelFor`)와 스냅샷 캡(`kMaxInstances=16384`)이 상한. 그 이상·애니메이션·
+  LOD 는 [instanced-rendering.md](instanced-rendering.md) §8.
+- **풀 churn 속도**: `kAgentChurnIntervalSteps`(현재 12스텝마다 1마리 재활용 — 데모용 검증 churn).
+  키우면 재활용이 덜 눈에 띈다. 웨이브 스폰/디스폰이 생기면 이 churn 은 제거.
 - **필드·메사 치수**: `kCliffTop`(메사 높이), `kPlateauHalf`(플레이어 이동 반경), `kFieldHalf`
-  (평지 반경). `SnapshotBuilder.cpp` 의 `BuildCliffScene` 가 이 값으로 프롭을 배치하므로
-  숫자만 바꾸면 메사·평지·모서리 라인이 같이 따라온다.
-- **군중 거동**: `Simulation::StepSimAgents` 의 heading 드리프트 계수·`speed` 범위·bob 진폭.
-  실제 게임 AI(추적·경로)로 바꿀 때 이 함수만 교체하면 렌더/스냅샷은 안 건드린다.
+  (평지 반경), 크라우드 z 범위 `kFieldAgentZLo/Hi`(Simulation.cpp 익명). `SnapshotBuilder.cpp` 의
+  `BuildCliffScene` 가 이 값으로 프롭을 배치하므로 숫자만 바꾸면 메사·평지가 따라온다.
+- **군중 거동**: `Simulation::StepSimAgents` 의 heading 드리프트 계수·`speed` 범위·bob 진폭,
+  초기 배치는 `SeedAgent`. 실제 게임 AI(추적·경로)로 바꿀 때 이 함수만 교체하면 렌더/스냅샷은
+  안 건드린다.
 
 ### 하지 말 것 (씬 2 추가분)
 
 - `SimAgent` 스텝을 `Step()` 밖에서 돌리지 말 것 — 고정 timestep 규칙은 씬 1 과 동일.
-- `StepSimAgents` 의 잡 람다에서 `m_agents` 재할당·다른 잡의 범위 접근·공유 카운터 금지
-  (불변 규칙 6). 인덱스로 자기 구간만.
+- `StepSimAgents` 의 잡 람다에서 `m_agents.Acquire()`/`Release()`·다른 잡의 슬롯 접근 금지
+  (불변 규칙 6). 스폰/디스폰·churn 은 `ParallelFor().Wait()` **뒤** 메인에서만. 잡은
+  `Slots()[active[k]]`(자기 `[begin,end)`) 만 쓴다.
 - 군중을 스킨드 모델(`ModelDraw`)이나 개체마다 `MeshDraw` 로 그리지 말 것 — 전자는 CPU 스킨
   1개 상한, 후자는 draw call 폭증. `MeshInstance` + `InstanceBatch` 로
   ([instanced-rendering.md](instanced-rendering.md) §9). 애니메이션 군중은 VAT(§5·horde).

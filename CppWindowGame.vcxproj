@@ -62,6 +62,7 @@
     <ClInclude Include="src\core\EntityRegistry.h" />
     <ClInclude Include="src\core\JobSystem.h" />
     <ClInclude Include="src\core\NonCopyable.h" />
+    <ClInclude Include="src\core\ObjectPool.h" />
     <ClInclude Include="src\core\Settings.h" />
     <ClInclude Include="src\core\Time.h" />
     <ClInclude Include="src\game\Application.h" />
