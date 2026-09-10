@@ -5,7 +5,7 @@
 텍스처 콘텐츠가 생기면 CPU 로 rect+UV 를 잘라내는 A 안이 부담이 되고(UV 재계산·엣지 블리딩),
 scissor 는 아틀라스 패스가 어차피 손대는 파일에 필드 하나 얹는 한계비용이 된다.
 
-**상태: 부분 구현.** §7 의 1·2 완료 + 3 최소본(동기 `.dds` 로더 + `.atlas` 파서 + `AtlasIndex`, `AssetRegistry` 는 아직) 완료. `ui::DrawList`·`ScrollList` 연동·`GlyphAtlas`·`atlas_pack` 은 미구현.
+**상태: 부분 구현.** §7 의 1·2 완료 + 3 최소본(동기 `.dds` 로더 + `.atlas` 파서 + `AtlasIndex`, `AssetRegistry` 는 아직) + **4 (`tools/atlas_pack` v1, 무압축 페이지)** 완료. `ui::DrawList`·`ScrollList` 연동·`GlyphAtlas`·BC7 압축은 미구현.
 
 관련: `docs/ui-architecture.md`(Quad 방출·clipping 미구현·"텍스트는 glyph atlas"), `docs/scrollable-list-and-pool.md`(ScrollList 가 이 클리핑을 씀), `docs/loading-and-streaming.md`(아틀라스 = 비동기 로드 에셋), `docs/model-animation-research.md`·`docs/animation-design.md` §2(2D 스프라이트 애니메이션의 선행 조건), `command-playbook.md` #3(SpriteDraw + SpriteBatch 로드맵).
 
@@ -16,7 +16,7 @@ scissor 는 아틀라스 패스가 어차피 손대는 파일에 필드 하나 �
 - `render::Quad {x,y,w,h,rgba}` — 단색 AABB, UV 없음. `render/r2d/Sprite2D.h`.
 - `QuadPass2D` — 동적 VB 1개 + `Draw` 1번, `quad2d.hlsl`(텍스처 샘플 없음). straight-alpha 블렌드, depth off. **scissor rasterizer state 없음.**
 - UI 텍스트 = `UI.cpp` 의 5×7 절차적 비트맵 폰트 → 글자마다 단색 quad 다발.
-- 클리핑 없음(`ui-architecture.md` #7 `PushClipRect` 미구현).
+- 진짜 scissor 클리핑 없음(`ui-architecture.md` #8 `PushClipRect` 미구현). `ScrollList` 는 Quad clamp(옵션 A)로 자체 처리.
 
 ---
 
@@ -88,7 +88,7 @@ public:
 
 ### 1.4 `loading-and-streaming` 통합
 
-- `AssetKind::Atlas` — `AssetLoader` IO 워커가 이미지 디코드(`import::LoadTga` 재사용) + `.atlas` 파싱 → CPU `AtlasIndex`. 렌더 스레드 업로드 펌프가 `ID3D11Texture2D` + SRV 생성 → `AssetRegistry` 에 `GpuReady`.
+- `AssetKind::Atlas` — `AssetLoader` IO 워커가 이미지 디코드(`import::LoadImageFromFile` 재사용) + `.atlas` 파싱 → CPU `AtlasIndex`. 렌더 스레드 업로드 펌프가 `ID3D11Texture2D` + SRV 생성 → `AssetRegistry` 에 `GpuReady`.
 - **부팅 매니페스트** 에 UI 아틀라스 + 폰트 아틀라스 포함 → 첫 프레임부터 텍스트·아이콘 렌더 가능(로딩 커튼 자체도 이걸 씀).
 - 씬 매니페스트가 씬별 아틀라스를 나열. 공유 아틀라스는 매니페스트 diff 로 재로드 안 됨.
 
@@ -197,7 +197,7 @@ private:
 |---|---|
 | `scrollable-list-and-pool.md` | 클리핑을 **B(scissor)로 확정**. `ScrollList` 는 `dl.PushClip/PopClip` 만. `RowView::SetIcon(SpriteRect)` 가 실제로 가능해짐. 풀/recycler 설계는 불변. |
 | `loading-and-streaming.md` | 아틀라스 = `AssetKind::Atlas` 에셋. `AssetLoader` 디코드 + 렌더 스레드 SRV 업로드 + `AssetRegistry` 상주. 부팅 매니페스트에 UI/폰트 아틀라스. |
-| `ModelGpuResources` / `import::TgaImage` | TGA 디코더(`import::LoadTga`, RGBA) 를 아틀라스 이미지 로더로 재사용. PNG 는 `command-playbook.md` #3d(stb_image vendor) 이후. |
+| `import::LoadImageFromFile` | 아틀라스 페이지 디코드에 재사용. `.tga` 는 자체 `LoadTga`, `.png/.jpg/.bmp/.gif` 는 `stb_image`(vendored, `src/import/ImageFile.*`). 결과는 `import::ImageData`(RGBA8 top-down). |
 | `command-playbook.md` #3 (SpriteDraw + SpriteBatch) | 이 문서가 그 로드맵 항목의 구체화. `SpritePass2D` = 그 "SpriteBatch". |
 | `animation-design.md` §2 (2D 스프라이트 애니메이션) | 선행 조건이던 "텍스처 `SpriteDraw`" 가 여기서 생김. `SpriteAnimator` 가 `SpriteRect` 를 시간에 따라 바꿔 `SpriteDraw` 에 복사. |
 | `time-design.md` / demo-scene | 무관, 안 건드림. |
@@ -263,10 +263,10 @@ dl.PopClip();               // 반드시 짝 맞추기 (RAII 가드 ui::ClipScop
 1. ✅ `render/r2d/Sprite2D.h` 에 `SpriteDraw`(dest+uv+tint+atlasId+`clip` math::Rect). `RenderSnapshot` 에 `uiSprites`.
 2. ✅ `assets/shaders/sprite2d.hlsl` + `render/r2d/SpritePass2D.{h,cpp}` — `(atlasId, clip)` 연속 런 그룹핑, SRV 바인드, `RSSetScissorRects`, 동적 VB `WRITE_DISCARD`/`NO_OVERWRITE`. scissor rasterizer state 는 패스가 소유. `Dx11Renderer::AddRenderPass(pass, atEnd=true)` 신설(scissor state 가 `QuadPass2D` 로 새지 않게 맨 끝) + `main.cpp` 등록. `atlasId 0` = 내장 1×1 흰 텍스처.
 3. 최소본 ✅ / 나머지 ❌ — `render/r2d/TextureAtlas.{h,cpp}` 에 `SpriteRect` + `AtlasIndex`(텍스트 `.atlas` 파서, 메인 스레드). `SpritePass2D` 가 `Initialize` 에서 `.dds` 1장 로드(최소 DX10-헤더 DDS 리더, RGBA8/BC7/BC4). `Application` 이 `m_uiAtlas` 로드 → `SnapshotBuilder::Build` 에 넘김(데모 스프라이트). **`AssetKind::Atlas` / `AssetRegistry` / `loading-and-streaming` 연동은 아직** — 지금은 `ModelMeshPass3D` 처럼 로드-원스.
-4. ❌ `tools/atlas_pack.*` (오프라인 패커) + BC7 로 구운 `assets/atlas/*`. **현재 `assets/atlas/ui.0.dds` 는 무압축 RGBA8 디버그 아틀라스**(2셀: `icon_a`/`icon_b`), 임시 생성기 산출물.
+4. ✅ v1 — `tools/atlas_pack.{cpp,bat}` (오프라인, 엔진 빌드 밖): 플랫 `atlas.groups` 파싱 + shelf 패킹 + edge-extend gutter + box-filter 밉 + 무압축 `R8G8B8A8_UNORM_SRGB` `.dds`(DX10 헤더) + `.atlas` + `.cache`(증분). 디코드는 `import::LoadImageFromFile` 재사용. `assets/src/ui/*` → `assets/atlas/ui.{0.dds,atlas}`. fixture 생성기 `tools/make_test_atlas_src.cpp`. ❌ 남음: **BC7/BC4 압축**(`bc7enc` vendor + `--format bc7`), 셀 16px 밉 컷.
 5. ❌ `ui::DrawList` + 클립 스택 + `ui::ClipScope`. `Widget::Build(DrawList&, Vec2)` 오버로드. `UIContext::Build` 가 `uiSprites` 채움. 위젯 단계적 이전. (그 전까지 `SnapshotBuilder::BuildDemoUiSprites` 가 임시로 채움.)
 6. ❌ `ScrollList` 가 `dl.PushClip(viewport)` 사용.
 7. ❌ `GlyphAtlas` + `AddText` 재작성. 5×7 폴백 유지.
-8. ❌ `command-playbook.md` #3ea·`ui-architecture.md` #7·위젯 표·`scrollable-list-and-pool.md` §1.5 갱신.
+8. ❌ `command-playbook.md` #3ea·`ui-architecture.md` #8·`scrollable-list-and-pool.md` §1.5 갱신.
 
 의존: 1·2 완료. 3 은 최소본만(레지스트리 연동은 `loading-and-streaming` 구현과 묶임). 5~6 은 지금 가능(2 이후). 7 은 3 이후.

@@ -18,7 +18,7 @@ struct ID3D11RasterizerState;
 struct ID3D11SamplerState;
 struct ID3D11ShaderResourceView;
 
-namespace engine::import { struct TgaImage; }
+namespace engine::import { struct ImageData; }
 
 namespace engine::render
 {
@@ -74,7 +74,7 @@ namespace engine::render
 
         void LoadModel(ID3D11Device* device);
         ID3D11ShaderResourceView* CreateTextureSrv(ID3D11Device* device, const std::string& fileName,
-                                                   const engine::import::TgaImage& image);
+                                                   const engine::import::ImageData& image);
         void UpdateSkinningForFrame(ID3D11DeviceContext* context, const Scene3D& scene);
         void SkinAndUpload(ID3D11DeviceContext* context, SubMesh& sub) const;
 

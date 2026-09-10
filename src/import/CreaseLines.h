@@ -1,7 +1,7 @@
 #pragma once
 
 #include "import/Model.h"
-#include "import/TgaImage.h"
+#include "import/ImageData.h"
 #include "math/Math2D.h"
 #include "math/Math3D.h"
 
@@ -42,7 +42,7 @@ namespace engine::import
 
     [[nodiscard]] std::vector<CreaseVertex> BuildCreaseLines(
         const ModelMesh& mesh,
-        const TgaImage* texture,        // nullptr -> material colour only
+        const ImageData* texture,        // nullptr -> material colour only
         const ModelMaterial* material,  // nullptr -> white
         const CreaseOptions& options = {});
 

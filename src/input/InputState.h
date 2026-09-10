@@ -33,6 +33,7 @@ namespace engine::input
             m_pressedButtons.fill(false);
             m_releasedButtons.fill(false);
             m_mouseDelta = {};
+            m_wheel = 0.0f;
         }
 
         void OnKey(int virtualKey, bool down)
@@ -48,6 +49,10 @@ namespace engine::input
         // Relative motion (raw input) accumulated across the frame; used for
         // mouse-look while the pointer is locked. Cleared by BeginFrame().
         void OnMouseDelta(math::Vec2 delta) { m_mouseDelta.x += delta.x; m_mouseDelta.y += delta.y; }
+
+        // Vertical wheel, in notches (one detent = 1.0, sign: up = positive).
+        // Accumulated across the frame like m_mouseDelta; cleared by BeginFrame().
+        void OnMouseWheel(float notches) { m_wheel += notches; }
 
         void OnMouseButton(int button, bool down)
         {
@@ -81,6 +86,7 @@ namespace engine::input
 
         [[nodiscard]] math::Vec2 MousePosition() const { return m_mouse; }
         [[nodiscard]] math::Vec2 MouseDelta() const { return m_mouseDelta; }
+        [[nodiscard]] float MouseWheel() const { return m_wheel; }
         [[nodiscard]] bool MouseDown(int button) const
         {
             return button >= 0 && button < kButtonCount && m_buttons[button];
@@ -105,5 +111,6 @@ namespace engine::input
 
         math::Vec2 m_mouse{};
         math::Vec2 m_mouseDelta{};
+        float m_wheel{};
     };
 }

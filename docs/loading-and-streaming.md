@@ -154,7 +154,7 @@ private:
 
 - **IO 워커 루프**: 큐에서 pop → `kind` 별 CPU 디코드
   - `Model`  → `import::LoadModelFromFile` → `import::Model`
-  - `Texture`→ `import::LoadTga` → `DecodedImage{ w, h, std::vector<std::uint8_t> rgba }`
+  - `Texture`→ `import::LoadImageFromFile` → `import::ImageData{ ok, w, h, std::vector<std::uint8_t> rgba }`
   - `AnimationClip` → `import::LoadAnimationClipsFromFile` → `import::AnimationClip`
   - 결과를 `CpuAsset{ id, kind, payload(값 소유), bytes }` 로 **결과 큐**에 push, 레지스트리 항목을 `CpuReady` 로.
   - 항목마다 `stop_token` 체크 → 취소면 버림.
@@ -268,7 +268,7 @@ public:
      AssetLoader.Enqueue ──► [우선순위 큐]
                               pop → CPU 디코드
                               (import::Model /
-                               DecodedImage / Clip)
+                               import::ImageData / Clip)
                              push ──► [결과 큐(성장)] ──► PumpUploads(budget µs)
                                                           Create{Buffer,Texture2D,SRV}
                                                           Registry: GpuReady

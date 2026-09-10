@@ -31,7 +31,7 @@ namespace engine::import
                  pack(std::llround(p.z * inv)));
         }
 
-        math::Color SampleTexture(const TgaImage* tex, math::Vec2 uv)
+        math::Color SampleTexture(const ImageData* tex, math::Vec2 uv)
         {
             if (tex == nullptr || !tex->ok || tex->rgba.empty() || tex->width <= 0 || tex->height <= 0)
                 return { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -57,7 +57,7 @@ namespace engine::import
         }
     }
 
-    std::vector<CreaseVertex> BuildCreaseLines(const ModelMesh& mesh, const TgaImage* texture,
+    std::vector<CreaseVertex> BuildCreaseLines(const ModelMesh& mesh, const ImageData* texture,
                                               const ModelMaterial* material, const CreaseOptions& options)
     {
         std::vector<CreaseVertex> out;

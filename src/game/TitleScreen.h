@@ -16,6 +16,7 @@ namespace engine::game
     // (docs/ui-architecture.md).
     [[nodiscard]] std::unique_ptr<ui::Widget> BuildTitleScreen(
         std::function<void()> onStart,
+        std::function<void()> onOpenItems,
         std::function<void()> onOpenSettings,
         std::function<void()> onQuit);
 }

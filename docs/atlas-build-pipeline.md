@@ -9,7 +9,7 @@
 포맷·페이지 크기·컨테이너를 전부 D3D11 에 맞춰 **하나로 고정**한다(크로스플랫폼 분기 없음).
 모바일로 확장할 일이 생기면 §4 "참고: 모바일" + §5 노트를 출발점으로.
 
-**상태: 설계만.** §10 지을 것.
+**상태: `tools/atlas_pack` v1 구현** — **무압축** `R8G8B8A8_UNORM_SRGB` `.dds` 페이지만(BC7/BC4 인코더 미vendor, 후속 `--format bc7` 로 격리 확장 예정). shelf 패킹 + edge-extend gutter + box-filter 밉 + `.dds`/`.atlas`/`.cache`(증분). 디코드는 엔진과 같은 `import::LoadImageFromFile`. 그룹 매니페스트는 아래 §1 의 블록 형식 대신 **플랫 한 줄 형식**(파서 단순화). §10 참조.
 
 관련: `docs/texture-atlas-and-sprite-pass.md`(런타임 소비), `docs/loading-and-streaming.md`(아틀라스 = `AssetKind::Atlas` 에셋, 그룹 = 레지스트리 1항목), `docs/game-settings.md`(텍스처 품질 설정), `command-playbook.md` #3·#3d.
 
@@ -30,20 +30,22 @@
 - **증분 빌드 ("매번 안 만듦")**: 그룹마다 `.cache` 에 입력 파일별 콘텐츠 해시 + 패커/설정 버전 + (포맷·pageSize·mips) 를 기록. 빌드 시 그룹의 입력 해시가 전부 일치하고 설정도 그대로면 **스킵**(기존 산출물 재사용), 아니면 그 그룹만 재패킹.
 - 런타임은 절대 패킹하지 않는다(v1). 산출물은 커밋하거나 CI 가 굽고, 엔진은 **로드만**.
 
-### 그룹 매니페스트 (`assets/atlas/atlas.groups` 또는 그룹별 파일)
+### 그룹 매니페스트 (`assets/atlas/atlas.groups`)
+
+**v1 실제 형식** — 파서를 단순·무결하게 유지하려고 블록/글롭 대신 플랫 한 줄:
 
 ```
-group "ui" {
-    inputs   = [ "assets/src/ui/**.png" ]
-    pageSize = 4096            # §3 의 고정 집합 중 하나
-    mips     = 2               # 0 = 없음, -1 = full (§6)
-    gutter   = 4               # px
-}
-group "char/unitychan" { inputs = [ "assets/src/char/unitychan/**.png" ]; pageSize = 2048; mips = -1; gutter = 12 }
-group "obj/props"      { inputs = [ "assets/src/obj/props/**.png" ];     pageSize = 4096; mips =  4; gutter = 8 }
+# group <name>  page <1024|2048|4096>  mips <N | -1 | 0>  gutter <px>
+group ui page 1024 mips 2 gutter 4
+group char/unitychan page 2048 mips -1 gutter 12
+group obj/props page 4096 mips 4 gutter 8
 ```
 
-GPU 포맷은 매니페스트에 안 적는다 — **엔진 전역 고정**(§5). 그룹은 크기·밉·gutter 만 고른다.
+- 입력 = `assets/src/<name>/` **아래 모든 이미지**(`.png .jpg .jpeg .bmp .gif .tga`, 재귀, 경로순 정렬). 별도 글롭 문법 없음 — 하위폴더로 그룹을 나눈다.
+- 스프라이트 이름 = 파일 stem(확장자 제외). 그룹 내 중복 이름은 에러.
+- 산출 basename = `<name>` 의 `/` → `_` (`char/unitychan` → `char_unitychan.*.dds` / `.atlas`).
+- GPU 포맷은 매니페스트에 안 적는다 — **엔진 전역 고정**(§5, v1 = 무압축 `R8G8B8A8_UNORM_SRGB`). 그룹은 크기·밉·gutter 만 고른다.
+- 실행: 프로젝트 루트에서 `build\tools\atlas_pack.exe [--all | --group <name>] [--force]` (빌드는 `tools\build_atlas_pack.bat`). 소스 낱장이 없는 fresh checkout 용 fixture 생성기: `tools/make_test_atlas_src.cpp`.
 
 ### 산출물 (그룹당)
 
@@ -185,7 +187,7 @@ assets/atlas/<group>.<page>.dds  +  <group>.atlas      (산출물, 커밋 or CI)
 런타임: texture-atlas-and-sprite-pass.md (SpriteDraw / SpritePass2D / DrawList)
 ```
 
-- `tools/atlas_pack` 는 엔진 빌드 밖(`tools/entity_memory_bench.cpp` 와 같은 위상). 의존: 이미지 디코드(stb_image), BC7/BC4 인코더(bc7enc / ispc_texcomp), 최소 DDS writer.
+- `tools/atlas_pack` 는 엔진 빌드 밖(`tools/entity_memory_bench.cpp` 와 같은 위상). 의존: 이미지 디코드는 **엔진과 같은 계약** — `src/import/ImageFile.cpp` + `src/import/ImageData.cpp` + `src/vendor/stb` 를 그대로 컴파일해 `import::LoadImageFromFile`(RGBA8 top-down straight-alpha, `docs/image-assets.md`) 를 재사용(stb 를 raw 로 다시 부르지 않는다). 그 외: BC7/BC4 인코더(bc7enc / ispc_texcomp), 최소 DDS writer.
 
 ---
 
@@ -236,7 +238,7 @@ assets/atlas/<group>.<page>.dds  +  <group>.atlas      (산출물, 커밋 or CI)
 
 ## 10. 지을 것
 
-- `tools/atlas_pack.*` — 그룹 매니페스트 파싱, 입력 해시 캐시, 고정 페이지 배치 + gutter/edge-extend, 밉 생성, BC7/BC4 압축, `.dds` + `.atlas` 쓰기. (의존: stb_image, bc7enc / ispc_texcomp, 최소 DDS writer.)
+- ~~`tools/atlas_pack.*` — 그룹 매니페스트 파싱, 입력 해시 캐시, 고정 페이지 배치 + gutter/edge-extend, 밉 생성, `.dds` + `.atlas` 쓰기, 디코드는 `import::LoadImageFromFile` 재사용~~ **v1 됨** (`tools/atlas_pack.cpp` + `tools/build_atlas_pack.bat`, 엔진 빌드 밖). 남은 것: **BC7/BC4 압축** (`bc7enc` vendor + `--format bc7`, `ui` 그룹은 무압축 유지 가능), 셀 16px 밉 컷, `--all` 병렬, per-page 패킹 힌트(자주 같이 그리는 것 같은 페이지).
 - `assets/atlas/atlas.groups` + 최초 그룹(`ui`, `char/unitychan`) + `assets/src/` 재배치.
 - `.gitignore` 에 `assets/atlas/*.cache`.
 - 로더: 최소 `.dds` 파서(`DXGI_FORMAT` + 밉 수) + `.atlas` 파서 → `AtlasIndex`. `loading-and-streaming` 의 `AssetKind::Atlas` 경로와 함께.

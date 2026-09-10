@@ -154,11 +154,13 @@ namespace engine::game
                 out.push_back(s);
             };
 
-            place("icon_a", 44.0f, 320.0f, 96.0f, {});                       // unclipped
-            place("icon_b", 160.0f, 320.0f, 96.0f, {});                      // unclipped
+            // Sprite names come from tools/atlas_pack (file stems under
+            // assets/src/ui/); see assets/atlas/ui.atlas.
+            place("icon_play", 44.0f, 320.0f, 96.0f, {});                    // unclipped
+            place("icon_settings", 160.0f, 320.0f, 96.0f, {});              // unclipped
             // Same sprite again, scissored to a rect that cuts it in half -
             // proves RSSetScissorRects.
-            place("icon_a", 44.0f, 430.0f, 96.0f, { 24.0f, 430.0f, 320.0f, 40.0f });
+            place("icon_play", 44.0f, 430.0f, 96.0f, { 24.0f, 430.0f, 320.0f, 40.0f });
         }
     }
 

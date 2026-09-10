@@ -23,13 +23,15 @@
     <ClCompile Include="src\game\Application.cpp" />
     <ClCompile Include="src\game\CharacterAnimationState.cpp" />
     <ClCompile Include="src\game\InGameHud.cpp" />
+    <ClCompile Include="src\game\InventoryScreen.cpp" />
     <ClCompile Include="src\game\SettingsScreen.cpp" />
     <ClCompile Include="src\game\Simulation.cpp" />
     <ClCompile Include="src\game\SnapshotBuilder.cpp" />
     <ClCompile Include="src\game\TitleScreen.cpp" />
     <ClCompile Include="src\import\CreaseLines.cpp" />
+    <ClCompile Include="src\import\ImageData.cpp" />
+    <ClCompile Include="src\import\ImageFile.cpp" />
     <ClCompile Include="src\import\ModelImporter.cpp" />
-    <ClCompile Include="src\import\TgaImage.cpp" />
     <ClCompile Include="src\platform\Win32Window.cpp" />
     <ClCompile Include="src\physics\p2d\CollisionWorld2D.cpp" />
     <ClCompile Include="src\physics\p3d\CollisionWorld3D.cpp" />
@@ -40,7 +42,11 @@
     <ClCompile Include="src\render\r3d\MeshPass3D.cpp" />
     <ClCompile Include="src\render\r3d\ModelMeshPass3D.cpp" />
     <ClCompile Include="src\render\shader\ShaderLibrary.cpp" />
+    <ClCompile Include="src\ui\ScrollList.cpp" />
     <ClCompile Include="src\ui\UI.cpp" />
+    <ClCompile Include="src\vendor\stb\stb_image_impl.cpp">
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+    </ClCompile>
     <ClCompile Include="src\vendor\ufbx\ufbx.c">
       <CompileAs>CompileAsCpp</CompileAs>
       <WarningLevel>TurnOffAllWarnings</WarningLevel>
@@ -58,14 +64,16 @@
     <ClInclude Include="src\game\Application.h" />
     <ClInclude Include="src\game\CharacterAnimationState.h" />
     <ClInclude Include="src\game\InGameHud.h" />
+    <ClInclude Include="src\game\InventoryScreen.h" />
     <ClInclude Include="src\game\SettingsScreen.h" />
     <ClInclude Include="src\game\Simulation.h" />
     <ClInclude Include="src\game\SnapshotBuilder.h" />
     <ClInclude Include="src\game\TitleScreen.h" />
     <ClInclude Include="src\import\CreaseLines.h" />
+    <ClInclude Include="src\import\ImageData.h" />
+    <ClInclude Include="src\import\ImageFile.h" />
     <ClInclude Include="src\import\Model.h" />
     <ClInclude Include="src\import\ModelImporter.h" />
-    <ClInclude Include="src\import\TgaImage.h" />
     <ClInclude Include="src\input\InputState.h" />
     <ClInclude Include="src\math\Math.h" />
     <ClInclude Include="src\math\Math2D.h" />
@@ -91,7 +99,9 @@
     <ClInclude Include="src\render\r3d\ModelMeshPass3D.h" />
     <ClInclude Include="src\render\r3d\Scene3D.h" />
     <ClInclude Include="src\render\shader\ShaderLibrary.h" />
+    <ClInclude Include="src\ui\ScrollList.h" />
     <ClInclude Include="src\ui\UI.h" />
+    <ClInclude Include="src\vendor\stb\stb_image.h" />
     <ClInclude Include="src\vendor\ufbx\ufbx.h" />
   </ItemGroup>
   <ItemGroup>

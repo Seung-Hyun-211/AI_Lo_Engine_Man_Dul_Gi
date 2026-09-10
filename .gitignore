@@ -17,6 +17,9 @@ build/
 assets/**/*.tga
 assets/**/*.psd
 
+# tools/atlas_pack incremental-build hashes (regenerated; the .dds/.atlas are committed)
+assets/atlas/*.cache
+
 # Visual Studio local state
 .vs/
 *.user

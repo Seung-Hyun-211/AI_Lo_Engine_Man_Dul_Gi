@@ -56,6 +56,7 @@ namespace engine::game
         void OnMouseMove(math::Vec2 position) override;
         void OnMouseDelta(math::Vec2 delta) override;
         void OnMouseButton(int button, bool down) override;
+        void OnMouseWheel(float notches) override;
         void OnFocusLost() override;
         void OnResize(int width, int height) override;
         void OnClose() override;
@@ -75,6 +76,8 @@ namespace engine::game
         // Scene transitions: swap the UIContext's screen and update m_state.
         void EnterTitle();
         void EnterInGame();
+        // Menu-side screen (not gameplay): the ScrollList item demo.
+        void EnterItems();
         // Settings overlay: layered on top of whichever screen is active.
         void OpenSettings();
         void CloseSettings();

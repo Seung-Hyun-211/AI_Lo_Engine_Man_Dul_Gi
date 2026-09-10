@@ -6,6 +6,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -15,6 +16,14 @@ namespace engine::ui
     using math::Color;
     using math::Rect;
     using math::Vec2;
+
+    // Low-level pixel-space primitives, shared by widgets that draw outside the
+    // standard Build path (e.g. ScrollList's virtualized rows clip their own
+    // Quads). DrawText uses the built-in 5x7 ASCII bitmap (uppercase, digits,
+    // `: - . %`) - the same font TextLine renders.
+    void DrawRect(std::vector<engine::render::Quad>& output, Rect rect, Color color);
+    void DrawText(std::vector<engine::render::Quad>& output, std::string_view text,
+                  Vec2 origin, float pixelScale, Color color);
 
     // Widgets use local coordinates. The parent turns them into screen-space
     // render commands, keeping UI independent from Direct3D and the render thread.
@@ -28,6 +37,10 @@ namespace engine::ui
         virtual bool PointerMove(Vec2 position, Vec2 parentOrigin);
         virtual bool PointerDown(Vec2 position, Vec2 parentOrigin);
         virtual bool PointerUp(Vec2 position, Vec2 parentOrigin);
+        // Vertical wheel over `position`; `delta` in notches (up = positive).
+        // Return true when consumed. Base forwards to children (front-most
+        // first) and otherwise does not consume - only widgets that scroll do.
+        virtual bool PointerWheel(Vec2 position, float delta, Vec2 parentOrigin);
 
     protected:
         [[nodiscard]] Rect AbsoluteBounds(Vec2 parentOrigin) const;
@@ -136,6 +149,7 @@ namespace engine::ui
         bool PointerMove(Vec2 position);
         bool PointerDown(Vec2 position);
         bool PointerUp(Vec2 position);
+        bool PointerWheel(Vec2 position, float delta);
         void Build(std::vector<engine::render::Quad>& output, float viewportWidth, float viewportHeight) const;
     private:
         std::unique_ptr<Widget> m_screen;

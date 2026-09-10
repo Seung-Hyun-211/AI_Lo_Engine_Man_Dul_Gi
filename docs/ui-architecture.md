@@ -115,6 +115,7 @@ protected:
 | `CheckBox` | on/off 토글, 체크박스 + 라벨 렌더링, `onChanged(bool)` | 없음(라벨은 내부에서 텍스트로 그림) |
 | `Slider` | `[min,max]` 값을 가로 드래그로 설정, 트랙+핸들 렌더링, `onChanged(float)` | 없음 |
 | `TextLine` | UTF-8 문자열 한 줄, 글꼴·색상·정렬, 줄바꿈 없음 | 없음 |
+| `ScrollList` | 긴 목록의 스크롤 뷰(가상화 — 뷰포트+overscan 행만 live, 스크롤 시 재바인딩). `ListModel`(DIP)에서 데이터, `RowView`(ISP)로 행 1개 기록. 휠(`PointerWheel`) + 스크롤바 드래그 + 행 클릭 선택. 클리핑은 자기 Quad 를 뷰포트로 clamp(옵션 A). 상세 `docs/scrollable-list-and-pool.md` | 생성 시 고정(`poolSize` 행 + 바), add/remove 안 함 |
 
 `Button`/`CheckBox`의 클릭(토글)은 마우스 down과 up이 모두 같은 위젯 내부에서 일어날 때만 발생한다. 이 규칙은 드래그 중 실수로 클릭되는 것을 막는다.
 
@@ -230,6 +231,7 @@ Slider/CheckBox를 곁들인 예시(설정 화면, `docs/game-settings.md`)는 `
 4. **완료:** hit test(앞에 그린 자식부터 역순), `Button` normal/hover/pressed 전이, `onClick`(down·up 동일 버튼 내부). `UIContext::PointerXxx`가 소비 여부를 `bool`로 반환.
 5. **완료(임시):** 내장 5×7 ASCII 비트맵 폰트(대문자 A-Z, 0-9, `: - . %`) + `TextLine`. glyph atlas는 로컬라이제이션 시 교체 — 그때까진 위젯 라벨이 영어로 고정.
 6. **완료:** `CheckBox`, `Slider`. `UIContext`의 화면/오버레이 전환(`SetScreen`/`SetOverlay`/`ClearOverlay`) — `docs/scene-flow-design.md`.
-7. **미구현:** `VerticalStack`(지금은 좌표를 손으로 계산), clipping(`PushClipRect`), keyboard focus, Slider의 진짜 입력 캡처.
+7. **완료(부분):** `ScrollList`(가상화 목록 + 휠 + 스크롤바). clipping 은 `PushClipRect` 스택이 아니라 `ScrollList`가 자기 Quad 를 뷰포트로 clamp(옵션 A). 마우스 휠: `Widget::PointerWheel` / `UIContext::PointerWheel` / `IWindowEventSink::OnMouseWheel`. 저수준 프리미티브 `ui::DrawRect`/`ui::DrawText`(`UI.h`) — Build 밖에서 그리는 위젯용. 상세 `docs/scrollable-list-and-pool.md`.
+8. **미구현:** `VerticalStack`(지금은 좌표를 손으로 계산), 진짜 scissor clipping(`PushClipRect`, 옵션 B — `texture-atlas-and-sprite-pass.md`), keyboard focus, Slider의 진짜 입력 캡처.
 
 IME, 여러 줄 편집, 접근성, 반응형 레이아웃은 `TextBox` 같은 입력 위젯을 만들 때 별도 단계로 다룬다. 현재의 `TextLine`은 표시 전용이다.

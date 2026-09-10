@@ -204,6 +204,11 @@ namespace engine::platform
             return 0;
         }
 
+        case WM_MOUSEWHEEL:
+            if (m_sink != nullptr)
+                m_sink->OnMouseWheel(static_cast<float>(GET_WHEEL_DELTA_WPARAM(wParam)) / WHEEL_DELTA);
+            return 0;
+
         case WM_SIZE:
             if (wParam != SIZE_MINIMIZED)
             {

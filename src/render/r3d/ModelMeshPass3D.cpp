@@ -6,8 +6,9 @@
 // simplest way to get an FBX on screen for the current milestone. A neutral
 // model-upload API on IRenderer replaces this when models become first-class.
 #include "import/CreaseLines.h"
+#include "import/ImageData.h"
+#include "import/ImageFile.h"
 #include "import/ModelImporter.h"
-#include "import/TgaImage.h"
 #include "math/Math3D.h"
 #include "render/r3d/CharacterAnimationClips.h"
 #include "render/r3d/FrameConstants.h"
@@ -125,7 +126,7 @@ namespace engine::render
     ModelMeshPass3D::ModelMeshPass3D(std::string modelPath) : m_modelPath(std::move(modelPath)) {}
 
     ID3D11ShaderResourceView* ModelMeshPass3D::CreateTextureSrv(ID3D11Device* device, const std::string& fileName,
-                                                               const import::TgaImage& image)
+                                                               const import::ImageData& image)
     {
         if (const auto it = m_textures.find(fileName); it != m_textures.end()) return it->second;
 
@@ -137,7 +138,9 @@ namespace engine::render
             desc.Height = static_cast<UINT>(image.height);
             desc.MipLevels = 1;
             desc.ArraySize = 1;
-            desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+            // Diffuse / albedo is colour -> sRGB so the sample is linearised
+            // before lighting (docs/image-assets.md §3; matches SpritePass2D).
+            desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
             desc.SampleDesc.Count = 1;
             desc.Usage = D3D11_USAGE_IMMUTABLE;
             desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
@@ -203,15 +206,17 @@ namespace engine::render
         }
 
         // Decoded textures, kept only for the duration of the load (crease line
-        // colours sample them at face centroids).
-        std::unordered_map<std::string, import::TgaImage> tgaCache;
-        auto getTga = [&](const std::string& fileName) -> const import::TgaImage*
+        // colours sample them at face centroids). import::LoadImageFromFile
+        // decodes .tga (hand-rolled) or .png/.jpg/.bmp/.gif (stb_image,
+        // src/vendor/stb) into an import::ImageData (RGBA8, top-down).
+        std::unordered_map<std::string, import::ImageData> imageCache;
+        auto loadImage = [&](const std::string& fileName) -> const import::ImageData*
         {
             if (fileName.empty()) return nullptr;
-            const auto it = tgaCache.find(fileName);
-            if (it != tgaCache.end()) return &it->second;
-            import::TgaImage image = import::LoadTga(m_resolvedDir + fileName);
-            return &tgaCache.emplace(fileName, std::move(image)).first->second;
+            const auto it = imageCache.find(fileName);
+            if (it != imageCache.end()) return &it->second;
+            import::ImageData image = import::LoadImageFromFile(m_resolvedDir + fileName);
+            return &imageCache.emplace(fileName, std::move(image)).first->second;
         };
 
         std::vector<CreaseVertexGpu> creaseVerts;
@@ -238,7 +243,7 @@ namespace engine::render
                 sub.color = { 0.8f, 0.8f, 0.82f, 1.0f };
             }
 
-            const import::TgaImage* tga = getTga(fileName);
+            const import::ImageData* tga = loadImage(fileName);
             sub.texture = tga != nullptr ? CreateTextureSrv(device, fileName, *tga) : nullptr;
 
             // Skinned submeshes get DYNAMIC buffers re-filled every frame by
@@ -298,7 +303,7 @@ namespace engine::render
             ThrowIfFailed(device->CreateBuffer(&hullDesc, &hullInit, &sub.hullVertexBuffer), "CreateBuffer (hull) failed");
 
             // Interior crease lines for this submesh.
-            const import::TgaImage* creaseTex = tga != nullptr && tga->ok ? tga : nullptr;
+            const import::ImageData* creaseTex = tga != nullptr && tga->ok ? tga : nullptr;
             const std::vector<import::CreaseVertex> creases = import::BuildCreaseLines(mesh, creaseTex, material, {});
             for (const import::CreaseVertex& v : creases)
                 creaseVerts.push_back({ v.position.x, v.position.y, v.position.z,

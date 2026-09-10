@@ -4,7 +4,9 @@
 화면에 보이는 ~M개만 두고, 스크롤할 때 파괴/재생성이 아니라 **재바인딩(recycle)** 한다
 (가상화 / UI virtualization — RecyclerView·UITableView cell reuse 와 같은 패턴).
 
-**상태: 설계만 (구현 전).** 이 문서가 계약. §5 에 지을 것.
+**상태: `ui::ScrollList` 구현됨 (v1).** 고정 행 높이 · 클리핑 A · 휠 입력 · 스크롤바 드래그 ·
+데모 화면(`game/InventoryScreen`, 타이틀 → ITEMS). 미구현: `core::ObjectPool<T>`(§1.1, 범용 풀은
+아직 안 지음), 가변 행 높이, 키보드 네비. 이 문서가 계약.
 
 관련: `docs/ui-architecture.md`(Widget·UIContext·Quad 방출·clipping 미구현), `docs/scene-flow-design.md`(화면을 자유 함수가 만든다), `docs/entity-lifecycle-design.md` §4(같은 타입 → 연속 메모리, 이 문서의 풀도 그 규칙), `docs/collider-design.md`(메인 스레드 전용 규칙 선례).
 
@@ -18,7 +20,7 @@
 - 힙 할당 N회, 상주 위젯 N개(항목 수에 비례).
 - 매 프레임 트리 순회 O(N).
 - 스크롤하면 트리를 다시 만들거나(파괴+재생성 churn, 프레임 스파이크) 전부 유지(메모리 낭비).
-- clipping 이 없어서(`ui-architecture.md` #7) 창 밖 행도 그려진다.
+- clipping 이 없어서(`ui-architecture.md`) 창 밖 행도 그려진다.
 
 → **가상화**: 위젯은 뷰포트에 들어가는 만큼(+overscan)만. 스크롤 = 그 위젯들을 다른 데이터 인덱스로 다시 바인딩.
 
@@ -160,7 +162,7 @@ m_bar.Build(...) : thumbH ∝ viewportH / contentH,  thumbY ∝ scrollOffset / (
   리스크 0.
 - **B. 진짜 scissor rect (제대로, 나중)** — `render::Quad` 에 clip rect 필드 추가(또는 quad
   스트림에 `SetClip` 커맨드) + `QuadPass2D` 가 `RSSetScissorRects` + rasterizer `ScissorEnable`.
-  `RenderSnapshot.h` + 2D 패스 변경. 중첩 스크롤·임의 마스킹까지 열린다. `ui-architecture.md` #7
+  `RenderSnapshot.h` + 2D 패스 변경. 중첩 스크롤·임의 마스킹까지 열린다. `ui-architecture.md` #8
   의 `PushClipRect` 를 실제로 구현하는 길.
   → **B 의 상세 설계는 `docs/texture-atlas-and-sprite-pass.md`** (아틀라스 + `SpriteDraw` 와 한 덩어리).
   이미지 아틀라스를 구현하면 텍스처 콘텐츠에는 A 의 rect clamp 가 UV 재계산·엣지 블리딩을
@@ -214,6 +216,9 @@ m_bar.Build(...) : thumbH ∝ viewportH / contentH,  thumbY ∝ scrollOffset / (
 ---
 
 ## 4. 사용 방법 (How to use)
+
+구현: `src/ui/ScrollList.{h,cpp}`, 데모 `src/game/InventoryScreen.{h,cpp}`. 배선(휠 경로,
+클리핑 A, 저수준 프리미티브)은 §5.
 
 ### 목록 화면 하나 만들기
 
@@ -276,16 +281,29 @@ for (Tooltip& t : m_tooltips.Active())   // 연속 순회
 
 ### 행 모양 바꾸기
 
-`ui::ScrollList::Row`(내부) = 배경 rect + `TextLine` + 하이라이트. 아이콘·다열이 필요하면
-`Row::Build` 에 Quad 를 추가하고 `RowView` 에 세터를 추가한다. `ScrollList`/`ListModel` 계약은 안 바뀐다(OCP).
+`ui::ScrollList::Row`(내부, `ScrollList.cpp`) = `Row::Emit` 이 배경 Quad(`tint`) + 선택/hover
+오버레이 + `ui::DrawText`(글리프 Quad) 를 스크래치 버퍼에 그린 뒤 뷰포트로 clamp 해 출력에 붙인다.
+아이콘·다열이 필요하면 `Row::Emit` 에 Quad 를 추가하고 `RowView` 에 세터를 추가한다.
+`ScrollList`/`ListModel` 계약은 안 바뀐다(OCP).
 
 ---
 
-## 5. 지을 것 (설계에 미포함)
+## 5. 지은 것 / 남은 것
 
-- `src/core/ObjectPool.h` — 헤더 전용 템플릿(§1.1).
-- `src/ui/ScrollList.{h,cpp}` — `ScrollList` · `ListModel` · `RowView` · 내부 `Row`/recycler/`ScrollBar`. (위젯이 늘면 `ui-architecture.md` "파일 분리" 규칙대로 `UI.cpp` 에서 뺀다.)
-- 휠 입력: `IWindowEventSink::OnMouseWheel` + `Win32Window` `WM_MOUSEWHEEL` + `InputState` 누적 + `UIContext::PointerWheel`.
-- 클리핑: (A) `ScrollList` 내부 Quad clamp 유틸 / (B) `render::Quad` clip rect + `QuadPass2D` scissor.
-- `src/game/<X>ListScreen.{h,cpp}` + 데모 (예: Unity-chan 클립 26개 목록, 설정 항목 목록).
-- 문서: `ui-architecture.md` #7(clipping)·위젯 표에 `ScrollList` 반영, `command-playbook.md` 행.
+지음 (v1):
+
+- `src/ui/ScrollList.{h,cpp}` — `ScrollList` · `ListModel` · `RowView` · 내부 `Row`(recycler는
+  `std::vector<std::unique_ptr<Row>>` ring, 뷰포트+overscan 만큼만, 스크롤 중 `assign`/`clear` 만).
+- 휠 입력: `IWindowEventSink::OnMouseWheel` + `Win32Window` `WM_MOUSEWHEEL` + `InputState` 누적
+  (`MouseWheel()`, `BeginFrame` 리셋) + `Widget::PointerWheel` + `UIContext::PointerWheel`.
+- 클리핑 **A**: `ScrollList` 내부 `ClampQuad`. `render::Quad`/`QuadPass2D` 무변경.
+- `ui::DrawRect`/`ui::DrawText` — `UI.h` 에 노출한 저수준 프리미티브(행이 자기 Quad 를 직접 그림).
+- `src/game/InventoryScreen.{h,cpp}` + 데모(색상별 200개), 타이틀 화면 ITEMS 버튼.
+
+남음:
+
+- `src/core/ObjectPool.h` — 범용 풀 템플릿(§1.1). ScrollList 는 ring 이라 안 씀 — 툴팁/이펙트/단명
+  엔티티 같은 다른 소비자가 생길 때 지음.
+- 클리핑 B(진짜 scissor) — 텍스처 아틀라스 작업(`texture-atlas-and-sprite-pass.md`)과 한 덩어리.
+- 가변 행 높이(누적합 인덱스), 키보드 네비(↑/↓·PageUp/Down + `EnsureVisible`).
+- 문서: `ui-architecture.md` #7(clipping)·위젯 표에 `ScrollList` 반영(했음), `command-playbook.md` 행(했음).

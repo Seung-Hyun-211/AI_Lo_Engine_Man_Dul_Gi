@@ -46,7 +46,7 @@ namespace
         }
     }
 
-    void AddText(std::vector<Quad>& output, const std::string& text, Vec2 origin, float scale, Color color)
+    void AddText(std::vector<Quad>& output, std::string_view text, Vec2 origin, float scale, Color color)
     {
         float x = origin.x;
         for (const char character : text)
@@ -66,6 +66,12 @@ namespace
 
 namespace engine::ui
 {
+    void DrawRect(std::vector<Quad>& output, Rect rect, Color color) { AddQuad(output, rect, color); }
+    void DrawText(std::vector<Quad>& output, std::string_view text, Vec2 origin, float pixelScale, Color color)
+    {
+        AddText(output, text, origin, pixelScale, color);
+    }
+
     void Widget::AddChild(std::unique_ptr<Widget> child) { m_children.push_back(std::move(child)); }
     Rect Widget::AbsoluteBounds(Vec2 origin) const { return { origin.x + m_bounds.x, origin.y + m_bounds.y, m_bounds.width, m_bounds.height }; }
     void Widget::Build(std::vector<Quad>& output, Vec2 parentOrigin) const
@@ -96,6 +102,13 @@ namespace engine::ui
         for (auto child = m_children.rbegin(); child != m_children.rend(); ++child)
             if ((*child)->PointerUp(position, { bounds.x, bounds.y })) return true;
         return bounds.Contains(position);
+    }
+    bool Widget::PointerWheel(Vec2 position, float delta, Vec2 parentOrigin)
+    {
+        const Rect bounds = AbsoluteBounds(parentOrigin);
+        for (auto child = m_children.rbegin(); child != m_children.rend(); ++child)
+            if ((*child)->PointerWheel(position, delta, { bounds.x, bounds.y })) return true;
+        return false;   // a plain container does not consume the wheel
     }
 
     void UIWindow::Build(std::vector<Quad>& output, Vec2 parentOrigin) const
@@ -228,6 +241,11 @@ namespace engine::ui
     {
         if (m_overlay) return m_overlay->PointerUp(position, {});
         return m_screen ? m_screen->PointerUp(position, {}) : false;
+    }
+    bool UIContext::PointerWheel(Vec2 position, float delta)
+    {
+        if (m_overlay) return m_overlay->PointerWheel(position, delta, {});
+        return m_screen ? m_screen->PointerWheel(position, delta, {}) : false;
     }
     void UIContext::Build(std::vector<Quad>& output, float viewportWidth, float viewportHeight) const
     {

@@ -184,7 +184,7 @@ sampler.Evaluate(model.skeleton, model.animations[0], timeSeconds, skin);
 | `ModelImporter` — 머티리얼 | ✅ 이름·컬러 추출. `pbr.base_color` 없으면 `fbx.diffuse_color` 폴백 |
 | `ModelImporter` — 애니메이션 bake | ✅ 컴파일. **애니메이션 있는 FBX 로 미검증** (Unity-chan 모델 FBX 엔 클립 없음 — 별도 파일) |
 | `AnimationSampler` (CPU 포즈 평가, loop) | ✅ 컴파일. 실데이터 미검증, 블렌딩 미구현 |
-| `ModelMeshPass3D` — 텍스처 + 스키닝 | ✅ FBX 를 시작 시 로드해 VB/IB 생성(스킨드 서브메시는 DYNAMIC). `import::LoadTga` 로 디퓨즈 텍스처 → SRV + linear-wrap 샘플러(V flip + alpha cutout). 머티리얼→파일은 FBX ref basename 우선, 없으면 이름 테이블. **CPU 스키닝**(§5.2a): `animClipIndex`/`animClipTime` 이 있으면 매 프레임 `AnimationSampler::Evaluate` + LBS 로 정점 재계산 후 `Map/Unmap` 업로드, 없으면 기존 바인드 포즈 그대로. 셰이더 변경 없음. 크리즈 라인은 바인드 포즈 고정(한계) |
+| `ModelMeshPass3D` — 텍스처 + 스키닝 | ✅ FBX 를 시작 시 로드해 VB/IB 생성(스킨드 서브메시는 DYNAMIC). `import::LoadImageFromFile`(png/jpg/tga) 로 디퓨즈 텍스처 → SRV + linear-wrap 샘플러(V flip + alpha cutout). 머티리얼→파일은 FBX ref basename 우선, 없으면 이름 테이블. **CPU 스키닝**(§5.2a): `animClipIndex`/`animClipTime` 이 있으면 매 프레임 `AnimationSampler::Evaluate` + LBS 로 정점 재계산 후 `Map/Unmap` 업로드, 없으면 기존 바인드 포즈 그대로. 셰이더 변경 없음. 크리즈 라인은 바인드 포즈 고정(한계) |
 | 클립 리타깃 로딩 (`import::LoadAnimationClipsFromFile`) | ✅ 본 이름 매칭으로 클립 전용(메시 없는) FBX를 대상 스켈레톤에 구움. Unity-chan 26개 클립(`render/r3d/CharacterAnimationClips.h`)에 사용 |
 | `SkinnedMeshPass3D` (새 GPU 스킨 패스, §5.2 원안) | ❌ 설계만 — 실제로는 §5.2a 의 CPU 경로가 대신 구현됨. 인스턴스 여럿을 각자 다른 애니메이션으로 세우려면 여전히 필요 |
 | 조건부 클립 재생 (`game::CharacterAnimationState`) | ✅ §5.3a — 타이머 조건의 라운드로빈만. 크로스페이드/블렌딩/루트 모션은 여전히 ❌ 설계만 (§5.3) |

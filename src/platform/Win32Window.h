@@ -23,6 +23,9 @@ namespace engine::platform
         virtual void OnMouseDelta(math::Vec2 delta) = 0;
         // button: 0 = left, 1 = right, 2 = middle.
         virtual void OnMouseButton(int button, bool down) = 0;
+        // Vertical mouse wheel, in notches (WM_MOUSEWHEEL delta / WHEEL_DELTA);
+        // up = positive. Absolute, not clipped to the client area.
+        virtual void OnMouseWheel(float notches) = 0;
         virtual void OnFocusLost() = 0;
         virtual void OnResize(int width, int height) = 0;
         virtual void OnClose() = 0;

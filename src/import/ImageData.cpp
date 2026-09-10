@@ -1,12 +1,12 @@
-#include "import/TgaImage.h"
+#include "import/ImageData.h"
 
 #include <cstdio>
 
 namespace engine::import
 {
-    TgaImage LoadTga(const std::string& path)
+    ImageData LoadTga(const std::string& path)
     {
-        TgaImage image;
+        ImageData image;
 
         std::FILE* file = nullptr;
         if (fopen_s(&file, path.c_str(), "rb") != 0 || file == nullptr) return image;

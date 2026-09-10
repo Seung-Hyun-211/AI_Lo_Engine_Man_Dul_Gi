@@ -1,6 +1,7 @@
 #include "game/Application.h"
 
 #include "game/InGameHud.h"
+#include "game/InventoryScreen.h"
 #include "game/SettingsScreen.h"
 #include "game/TitleScreen.h"
 
@@ -107,8 +108,17 @@ namespace engine::game
         m_ui.ClearOverlay();
         m_ui.SetScreen(BuildTitleScreen(
             [this] { EnterInGame(); },
+            [this] { EnterItems(); },
             [this] { OpenSettings(); },
             [this] { m_window.RequestClose(); }));
+    }
+
+    void Application::EnterItems()
+    {
+        m_state = GameState::Title;   // still a menu context: no simulation step
+        m_window.SetPointerLocked(false);
+        m_ui.ClearOverlay();
+        m_ui.SetScreen(BuildInventoryScreen([this] { EnterTitle(); }));
     }
 
     void Application::EnterInGame()
@@ -168,6 +178,14 @@ namespace engine::game
     void Application::OnMouseDelta(math::Vec2 delta)
     {
         m_input.OnMouseDelta(delta);
+    }
+
+    void Application::OnMouseWheel(float notches)
+    {
+        // UI first (a ScrollList under the cursor consumes it); otherwise it is
+        // gameplay input for the frame.
+        if (m_ui.PointerWheel(m_pointerPosition, notches)) return;
+        m_input.OnMouseWheel(notches);
     }
 
     void Application::OnKey(int virtualKey, bool down)
