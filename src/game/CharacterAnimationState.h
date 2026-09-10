@@ -1,6 +1,5 @@
 #pragma once
 
-#include "core/NonCopyable.h"
 #include "render/r3d/CharacterAnimationClips.h"
 
 #include <span>
@@ -27,11 +26,20 @@ namespace engine::game
     // clock (AnimationSampler loops it over the clip duration). No crossfade /
     // blending yet - that is still design-only (docs/animation-design.md §5).
     // Runs on the sim thread inside Simulation::Step (fixed timestep).
-    class CharacterAnimationState final : private core::NonCopyable
+    class CharacterAnimationState final
     {
     public:
         explicit CharacterAnimationState(std::span<const render::CharacterAnimationClipInfo> clips)
             : m_clips(clips) {}
+
+        // Pure value data (a non-owning span + a few scalars). Not copyable so a
+        // clone is always a deliberate act, but relocatable so it can live in a
+        // Simulation::Actor held in a std::vector. (Deriving core::NonCopyable
+        // would also delete the move ctor, which the vector needs.)
+        CharacterAnimationState(const CharacterAnimationState&) = delete;
+        CharacterAnimationState& operator=(const CharacterAnimationState&) = delete;
+        CharacterAnimationState(CharacterAnimationState&&) = default;
+        CharacterAnimationState& operator=(CharacterAnimationState&&) = default;
 
         // desired: this fixed step's locomotion state. dt: the fixed step.
         void Update(float fixedDeltaSeconds, Locomotion desired);

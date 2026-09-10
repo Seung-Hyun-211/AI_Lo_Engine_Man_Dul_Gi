@@ -14,6 +14,11 @@ namespace engine::game
 
 #if defined(ENGINE_WITH_3D)
         constexpr float kPi = 3.14159265358979323846f;
+
+        // A local timeScale > 1 is run as this many sub-steps of the fixed step
+        // (so a hasted actor integrates in small increments, not one big jump).
+        constexpr int kMaxActorSubSteps = 8;
+        constexpr float kDemoActorSpeed = 3.0f;   // m/s the canned demo actors wander at
 #endif
     }
 
@@ -27,7 +32,37 @@ namespace engine::game
         m_particles.resize(kParticleCount);
         SeedParticles();
         LayOutObstacles();
+#if defined(ENGINE_WITH_3D)
+        SpawnActors();
+#endif
     }
+
+#if defined(ENGINE_WITH_3D)
+    void Simulation::SpawnActors()
+    {
+        m_actors.reserve(3);
+
+        Actor player;
+        player.playerControlled = true;
+        m_actors.push_back(std::move(player));
+
+        // A "hasted" demo actor: 3x local time, wanders visibly faster than the
+        // player even at global scale 1. Keeps moving while the world is paused.
+        Actor fast;
+        fast.pos = { -3.0f, 0.0f, -2.5f };
+        fast.facingYaw = 0.6f;
+        fast.timeScale = 3.0f;
+        fast.ignoreGlobalPause = true;
+        m_actors.push_back(std::move(fast));
+
+        // A "slowed" demo actor: 0.35x local time.
+        Actor slow;
+        slow.pos = { 3.0f, 0.0f, 2.5f };
+        slow.facingYaw = -2.2f;
+        slow.timeScale = 0.35f;
+        m_actors.push_back(std::move(slow));
+    }
+#endif
 
     void Simulation::SetWorldSize(int width, int height)
     {
@@ -59,8 +94,21 @@ namespace engine::game
         m_obstacles[2] = { w * 0.44f, h * 0.72f, 170.0f, 90.0f };
     }
 
-    void Simulation::Step(float fixedDelta, const PlayerIntent& intent)
+    void Simulation::Step(float fixedDelta, const PlayerIntent& intent, bool globalPaused)
     {
+        if (globalPaused)
+        {
+            // Global time scale is 0: the world is frozen. Only actors that
+            // opted out of the pause take a step.
+#if defined(ENGINE_WITH_3D)
+            StepActors(fixedDelta, /*globalPaused=*/true, intent);
+#else
+            (void)fixedDelta;
+            (void)intent;
+#endif
+            return;
+        }
+
         m_elapsed += fixedDelta;
 
         const math::Vec2 direction = math::Normalized(intent.move);
@@ -89,7 +137,7 @@ namespace engine::game
 
         StepCollision2D();
 #if defined(ENGINE_WITH_3D)
-        StepCharacter3D(fixedDelta, intent);
+        StepActors(fixedDelta, /*globalPaused=*/false, intent);
 #endif
     }
 
@@ -137,66 +185,119 @@ namespace engine::game
                                     kCamPitchMin, kCamPitchMax);
     }
 
-    void Simulation::StepCharacter3D(float fixedDelta, const PlayerIntent& intent)
+    void Simulation::StepActors(float fixedDelta, bool globalPaused, const PlayerIntent& intent)
     {
-        // Move relative to where the camera is looking: the camera's yaw rotates
-        // the WASD axes, so "W" is always "into the screen" regardless of orbit.
-        const float cy = std::cos(m_cameraYaw), sy = std::sin(m_cameraYaw);
-        const math::Vec3 camForward{ sy, 0.0f, cy };   // ground-plane forward of the camera
-        const math::Vec3 camRight{ cy, 0.0f, -sy };
+        for (Actor& actor : m_actors)
+        {
+            if (globalPaused && !actor.ignoreGlobalPause) continue;
 
-        math::Vec3 wish = camForward * intent.move.y + camRight * intent.move.x;
-        const float wishLen = math::Length(wish);
-        const bool moving = wishLen > 1e-3f;
-        if (moving) wish = wish * (1.0f / wishLen);
+            // Local time dilation: the actor's own step is fixedDelta * timeScale.
+            // timeScale > 1 is run as sub-steps so movement/gravity integrate in
+            // small increments instead of one large jump (tunneling, blow-up).
+            const float scaled = fixedDelta * actor.timeScale;
+            const int sub = actor.timeScale <= 1.0f
+                ? 1
+                : std::min(static_cast<int>(std::ceil(actor.timeScale)), kMaxActorSubSteps);
+            const float subDt = scaled / static_cast<float>(sub);
 
-        const float speed = intent.run ? kCharRunSpeed : kCharWalkSpeed;
+            const PlayerIntent* actorIntent = actor.playerControlled ? &intent : nullptr;
+            for (int i = 0; i < sub; ++i)
+                StepOneActor(actor, subDt, actorIntent);
+        }
+    }
+
+    void Simulation::StepOneActor(Actor& actor, float dt, const PlayerIntent* intent) const
+    {
+        math::Vec3 wish{};
+        bool moving = false;
+        float speed = kCharWalkSpeed;
+        bool run = false;
+
+        if (intent != nullptr)
+        {
+            // Move relative to where the camera is looking: the camera's yaw
+            // rotates the WASD axes, so "W" is always "into the screen".
+            const float cy = std::cos(m_cameraYaw), sy = std::sin(m_cameraYaw);
+            const math::Vec3 camForward{ sy, 0.0f, cy };
+            const math::Vec3 camRight{ cy, 0.0f, -sy };
+            wish = camForward * intent->move.y + camRight * intent->move.x;
+            const float wishLen = math::Length(wish);
+            moving = wishLen > 1e-3f;
+            if (moving) wish = wish * (1.0f / wishLen);
+            run = intent->run;
+            speed = run ? kCharRunSpeed : kCharWalkSpeed;
+        }
+        else
+        {
+            // Canned path for the local-time-scale demo actors: wander along the
+            // current heading, reflecting off the ground-slab edges, with a
+            // gentle vertical bob. No input, no gravity.
+            wish = { std::sin(actor.facingYaw), 0.0f, std::cos(actor.facingYaw) };
+            moving = true;
+            speed = kDemoActorSpeed;
+            actor.phase += dt * 6.0f;
+        }
+
         if (moving)
         {
-            m_charPos = m_charPos + wish * (speed * fixedDelta);
+            actor.pos = actor.pos + wish * (speed * dt);
 
             // Turn toward the movement direction along the shortest arc.
             const float targetYaw = std::atan2(wish.x, wish.z);
-            float delta = targetYaw - m_charFacingYaw;
+            float delta = targetYaw - actor.facingYaw;
             while (delta > kPi) delta -= 2.0f * kPi;
             while (delta < -kPi) delta += 2.0f * kPi;
-            const float maxTurn = kCharTurnRate * fixedDelta;
-            m_charFacingYaw += math::Clamp(delta, -maxTurn, maxTurn);
+            const float maxTurn = kCharTurnRate * dt;
+            actor.facingYaw += math::Clamp(delta, -maxTurn, maxTurn);
         }
 
-        // Jump + gravity against the ground plane y = 0. The request is latched
-        // (QueueJump) and consumed here regardless of grounded state so it never
-        // carries over into a later step.
-        if (m_jumpQueued && m_charGrounded)
+        if (intent != nullptr)
         {
-            m_charVerticalVel = kCharJumpSpeed;
-            m_charGrounded = false;
-        }
-        m_jumpQueued = false;
-        if (!m_charGrounded)
-        {
-            m_charVerticalVel -= kCharGravity * fixedDelta;
-            m_charPos.y += m_charVerticalVel * fixedDelta;
-            if (m_charPos.y <= 0.0f)
+            // Jump + gravity against the ground plane y = 0. Latched by
+            // QueueJump(), consumed here regardless of grounded state.
+            if (actor.jumpQueued && actor.grounded)
             {
-                m_charPos.y = 0.0f;
-                m_charVerticalVel = 0.0f;
-                m_charGrounded = true;
+                actor.verticalVel = kCharJumpSpeed;
+                actor.grounded = false;
+            }
+            actor.jumpQueued = false;
+            if (!actor.grounded)
+            {
+                actor.verticalVel -= kCharGravity * dt;
+                actor.pos.y += actor.verticalVel * dt;
+                if (actor.pos.y <= 0.0f)
+                {
+                    actor.pos.y = 0.0f;
+                    actor.verticalVel = 0.0f;
+                    actor.grounded = true;
+                }
             }
         }
+        else
+        {
+            actor.pos.y = 0.4f + 0.25f * std::sin(actor.phase);
+        }
 
-        m_charPos.x = math::Clamp(m_charPos.x, -kCharHalfRange, kCharHalfRange);
-        m_charPos.z = math::Clamp(m_charPos.z, -kCharHalfRange, kCharHalfRange);
+        // Reflect the canned actors off the slab edge instead of sticking there.
+        if (intent == nullptr)
+        {
+            if (actor.pos.x < -kCharHalfRange || actor.pos.x > kCharHalfRange)
+                actor.facingYaw = std::atan2(-std::sin(actor.facingYaw), std::cos(actor.facingYaw));
+            if (actor.pos.z < -kCharHalfRange || actor.pos.z > kCharHalfRange)
+                actor.facingYaw = std::atan2(std::sin(actor.facingYaw), -std::cos(actor.facingYaw));
+        }
+        actor.pos.x = math::Clamp(actor.pos.x, -kCharHalfRange, kCharHalfRange);
+        actor.pos.z = math::Clamp(actor.pos.z, -kCharHalfRange, kCharHalfRange);
 
         // Locomotion -> which clip the animation state plays. Only
         // (clipIndex, clipTime) crosses into the snapshot; ModelMeshPass3D owns
         // the clip data and does the pose evaluation + CPU skinning.
         Locomotion loco;
-        if (!m_charGrounded)  loco = Locomotion::Jump;
-        else if (!moving)     loco = Locomotion::Wait;
-        else if (intent.run) loco = Locomotion::Run;
-        else                 loco = Locomotion::Walk;
-        m_heroAnimation.Update(fixedDelta, loco);
+        if (!actor.grounded)     loco = Locomotion::Jump;
+        else if (!moving)        loco = Locomotion::Wait;
+        else if (run)            loco = Locomotion::Run;
+        else                     loco = Locomotion::Walk;
+        actor.anim.Update(dt, loco);
     }
 #endif
 }

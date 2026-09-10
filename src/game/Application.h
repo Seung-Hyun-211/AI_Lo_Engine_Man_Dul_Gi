@@ -59,6 +59,15 @@ namespace engine::game
         void OnResize(int width, int height) override;
         void OnClose() override;
 
+        // Global time scale for the simulation: 1 = normal, 0 = paused,
+        // 0.5 = slow-mo, 2 = fast-forward. Applied by scaling the delta fed to
+        // FixedTimestep (docs/time-design.md) - the fixed step size never
+        // changes, so determinism holds. Per-actor local scale is separate and
+        // lives in Simulation::Actor. A real game drives this from gameplay; the
+        // demo cycles it from the keyboard (see OnKey).
+        void SetGlobalTimeScale(float scale) { m_globalTimeScale = scale < 0.0f ? 0.0f : scale; }
+        [[nodiscard]] float GlobalTimeScale() const { return m_globalTimeScale; }
+
     private:
         [[nodiscard]] PlayerIntent BuildPlayerIntent() const;
 
@@ -87,6 +96,7 @@ namespace engine::game
         core::FrameClock m_clock;
         core::FixedTimestep m_timestep;
         GameState m_state{ GameState::Title };
+        float m_globalTimeScale{ 1.0f };
 
         std::uint64_t m_frameNumber{};
         math::Vec2 m_pointerPosition{};

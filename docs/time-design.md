@@ -56,14 +56,54 @@ Application::Run 루프:
 3. `FixedTimestep`의 스텝 크기는 런타임 중 바꾸지 않는다 (결정성 깨짐). 바꾸려면 누적기를 리셋한다.
 4. 애니메이션·파티클처럼 "보이기만 하고 되감기 불필요"한 것도 일관성을 위해 고정 스텝에서 돈다.
 
+## 시간 배율 (Time Scale) — 구현
+
+두 겹이다. 둘 다 스텝 **크기**(`1/60`s)는 안 건드린다 — 결정성 유지(불변 규칙 3). 스텝 **수**만 달라진다.
+
+### 전역 배율 — `Application` 소유
+
+```cpp
+const int steps = m_timestep.Advance(delta * m_globalTimeScale);   // Application::Run
+```
+
+- `Application::SetGlobalTimeScale(float)` / `GlobalTimeScale()`. `1` = 정상, `0` = 일시정지, `0.5` = 슬로모, `2` = 배속.
+- `scale == 0` → `Advance` 가 0 → `Step` 이 루프에서 안 불림(비용 0). 이때도 `ignoreGlobalPause` 액터를 위해 `Application` 이 프레임당 1회 `m_simulation.Step(m_timestep.Step(), intent, /*globalPaused=*/true)` 를 부른다.
+- Settings 오버레이 pause(스텝 블록 게이팅)와 **별개**로 겹친다.
+- 데모: `Application::OnKey` 의 PageUp/PageDown 이 `{0, 0.25, 0.5, 1, 2}` 순환. **디버그 배선** — 실게임은 게임플레이가 `SetGlobalTimeScale` 을 부른다(불릿타임 발동, 일시정지 메뉴 등).
+
+### 개체별 로컬 배율 — `Simulation::Actor`
+
+```cpp
+struct Actor { ...; float timeScale{ 1.0f }; bool ignoreGlobalPause{ false }; ...; };
+```
+
+`Simulation::StepActors` 가 액터마다:
+
+```cpp
+const float scaled = fixedDelta * actor.timeScale;
+const int sub = actor.timeScale <= 1.0f ? 1
+              : min((int)ceil(actor.timeScale), kMaxActorSubSteps);   // kMaxActorSubSteps = 8
+const float subDt = scaled / sub;
+for (i in [0, sub)) StepOneActor(actor, subDt, ...);
+```
+
+- `timeScale > 1` (가속)은 **서브스텝** 으로 나눠 적분 — `fixedDelta*배율` 한 번이면 이동/중력이 크게 튀어 터널링·발산. `subDt` 는 항상 `fixedDelta` 이하.
+- `timeScale <= 1` (슬로모)은 서브스텝 1개, `subDt = fixedDelta * timeScale`.
+- 유효 배율 = `globalTimeScale × actor.timeScale` (전역이 이미 `Advance` 에서 스텝 수로 반영되므로 `StepActors` 는 `actor.timeScale` 만 곱함). 전역 `0` + `ignoreGlobalPause` 액터면 `globalPaused` 경로로 `actor.timeScale` 만 적용돼 계속 움직임(타임스톱 시전자 패턴).
+- 데모: `Simulation::SpawnActors` 가 액터 3개 — `[0]` 플레이어(1×), `[1]` 3× + `ignoreGlobalPause`, `[2]` 0.35×. `SnapshotBuilder` 가 `[1..]` 를 큐브로 그림(색: 따뜻=빠름, 차가움=느림).
+
+### 아직 안 한 것
+
+- **unscaled 클럭 분리**: UI/로딩 화면 애니메이션이 pause·배속에 안 물리게 `struct TimeContext { float scaled, unscaled; }` 로 나누는 것. 현재 `UpdateCameraLook` 만 사실상 unscaled(프레임당 1회, 스텝 밖). `m_elapsed`(조명 스윕)는 의도적으로 scaled.
+- 액터 간 상호작용(빠른 액터 ↔ 보통 액터 충돌 순서), 로컬 배율의 부모/자식 합성.
+
 ## 확장 로드맵 (미구현)
 
 | 항목 | 스케치 |
 |---|---|
 | `Alpha()` 보간 | `FixedTimestep`가 `accumulator / step` (0..1) 노출. `SnapshotBuilder`가 이전/현재 상태를 lerp해 고프레임에서 부드럽게. |
-| `TimeScale` / pause | `FixedTimestep::Advance(dt * scale)`. `scale = 0`이면 일시정지. slow-mo·bullet-time·디버그 스텝. |
-| 시스템별 클럭 | UI 애니메이션은 pause에 영향 안 받아야 함 → unscaled 클럭 별도. `struct TimeContext { float scaled, unscaled; }`. |
-| Replay / 결정성 검증 | 고정 dt + 시드 고정 입력 로그 → 재생. 프레임 해시 비교로 desync 탐지. |
+| 시스템별 클럭 | 위 "unscaled 클럭 분리". `struct TimeContext { float scaled, unscaled; }`. |
+| Replay / 결정성 검증 | 고정 dt + 시드 고정 입력 로그 → 재생. 프레임 해시 비교로 desync 탐지. 로컬 배율·서브스텝 수가 게임플레이로 결정되면(벽시계 X) 결정성 유지. |
 | 프로파일 타이머 | `ScopedTimer`가 구간 시간 수집 → frame-time HUD (로드맵 6). |
 
 ## 사용 방법 (How to use)
@@ -72,4 +112,6 @@ Application::Run 루프:
 - **"N초마다" 하는 로직**: 시스템 안에 `float m_accum{}; m_accum += fixedDelta; if (m_accum >= period) { ...; m_accum -= period; }`.
 - **경과 시간이 필요하면**: 시스템이 `m_elapsed += fixedDelta`를 누적하고 getter로 노출한다 (예: `Simulation::ElapsedTime()`가 3D 데모 카메라·큐브 회전에 쓰임).
 - **스텝 레이트 변경**: `Application` 멤버 `core::FixedTimestep m_timestep{ 1.0f/120.0f };` 처럼 생성자 인자로. 기본은 60Hz.
-- **하지 말 것**: 워커 잡·렌더 패스 안에서 `FrameClock` 접근, `Step()` 밖에서 `chrono` 호출, 프레임마다 스텝 크기 바꾸기.
+- **전역 배속/슬로모/일시정지 걸기**: `application.SetGlobalTimeScale(0.3f)` 같은 식. `0` = 일시정지. 프레임마다 바꿔도 안전(누적기가 알아서 흡수). 스텝 크기는 안 변하므로 불변 규칙 3 위반 아님.
+- **특정 개체만 가속/감속**: 그 개체를 `Simulation::Actor` 로 만들고 `timeScale` 설정(`>1` 은 자동 서브스텝). 전역 일시정지 중에도 움직여야 하면 `ignoreGlobalPause = true`. `SpawnActors` 가 조립 예시.
+- **하지 말 것**: 워커 잡·렌더 패스 안에서 `FrameClock`/타임스케일 접근, `Step()` 밖에서 `chrono` 호출, 프레임마다 스텝 크기 바꾸기, `timeScale > 1` 을 서브스텝 없이 `dt` 한 번에 곱하기(터널링), `kMaxActorSubSteps` 캡 무시(느린 프레임에서 서브스텝 폭주).

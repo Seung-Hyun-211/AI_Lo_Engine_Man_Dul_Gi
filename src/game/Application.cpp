@@ -53,7 +53,11 @@ namespace engine::game
 
                 const float delta = m_clock.Tick();
                 const PlayerIntent intent = BuildPlayerIntent();
-                const int steps = m_timestep.Advance(delta);
+                // Global time scale: 0 = pause, 0.5 = slow-mo, 2 = fast-forward.
+                // Scaling the delta (not the fixed step size) keeps the sim
+                // deterministic - it just runs more/fewer fixed steps this frame
+                // (docs/time-design.md). Per-actor local scale is separate.
+                const int steps = m_timestep.Advance(delta * m_globalTimeScale);
                 // The world only advances in-game, and not while Settings (or
                 // any future modal) sits on top of it - both read as "paused".
                 if (m_state == GameState::InGame && !m_ui.HasOverlay())
@@ -66,8 +70,17 @@ namespace engine::game
                     m_simulation.UpdateCameraLook(intent.look);
                     if (m_input.KeyPressed(VK_SPACE)) m_simulation.QueueJump();
 #endif
-                    for (int step = 0; step < steps; ++step)
-                        m_simulation.Step(m_timestep.Step(), intent);
+                    if (steps > 0)
+                    {
+                        for (int step = 0; step < steps; ++step)
+                            m_simulation.Step(m_timestep.Step(), intent);
+                    }
+                    else if (m_globalTimeScale <= 0.0f)
+                    {
+                        // Global pause: the world is frozen, but actors flagged
+                        // ignoreGlobalPause still take one fixed step per frame.
+                        m_simulation.Step(m_timestep.Step(), intent, /*globalPaused=*/true);
+                    }
                 }
 
                 // Submit every frame even with zero sim steps: the UI overlay may
@@ -164,6 +177,22 @@ namespace engine::game
             else if (m_state == GameState::InGame) OpenSettings();
             return;   // consumed by the menu, not gameplay
         }
+
+        // Demo wiring for the global time scale: PageUp / PageDown cycle
+        // {0, 0.25, 0.5, 1, 2}. A real game would call SetGlobalTimeScale from
+        // gameplay (a bullet-time ability, a pause menu, ...), not the keyboard.
+        if (down && (virtualKey == VK_PRIOR || virtualKey == VK_NEXT))
+        {
+            constexpr float kScales[] = { 0.0f, 0.25f, 0.5f, 1.0f, 2.0f };
+            int index = 3;
+            for (int i = 0; i < 5; ++i)
+                if (kScales[i] == m_globalTimeScale) { index = i; break; }
+            index += (virtualKey == VK_PRIOR) ? 1 : -1;
+            index = index < 0 ? 0 : (index > 4 ? 4 : index);
+            SetGlobalTimeScale(kScales[index]);
+            return;
+        }
+
         m_input.OnKey(virtualKey, down);
     }
 

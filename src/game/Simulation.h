@@ -33,6 +33,30 @@ namespace engine::game
         float x{}, y{}, vx{}, vy{};
     };
 
+#if defined(ENGINE_WITH_3D)
+    // One moving thing in the 3D demo scene. Homogeneous, so it lives in a plain
+    // std::vector (docs/entity-lifecycle-design.md §3A - no EntityId needed until
+    // there are entity *kinds* with different component sets).
+    //
+    // `timeScale` is this actor's LOCAL time dilation, on top of the global
+    // scale: its effective step is `fixedDelta * timeScale`, sub-stepped when
+    // > 1 so integration stays stable (docs/time-design.md). `ignoreGlobalPause`
+    // keeps it advancing while the global scale is 0 (a "time-stop caster").
+    struct Actor
+    {
+        math::Vec3 pos{ 0.0f, 0.0f, 0.0f };   // feet on the ground plane (y = 0)
+        float facingYaw{ 0.0f };              // radians; 0 faces +Z
+        float verticalVel{ 0.0f };
+        bool  grounded{ true };
+        bool  jumpQueued{ false };            // set by QueueJump(), consumed by the next step
+        bool  playerControlled{ false };      // [0] only: reads PlayerIntent; others run a canned path
+        float timeScale{ 1.0f };
+        bool  ignoreGlobalPause{ false };
+        float phase{ 0.0f };                  // canned-behaviour clock (unused for the player)
+        CharacterAnimationState anim{ render::kUnityChanClips };
+    };
+#endif
+
     // Owns the mutable game world and advances it on a fixed timestep. The only
     // writer of world state; the SnapshotBuilder reads it afterwards. Also owns
     // the collision worlds and runs detection each step (no response - contacts
@@ -61,7 +85,13 @@ namespace engine::game
         Simulation(core::JobSystem& jobs, int worldWidth, int worldHeight);
 
         void SetWorldSize(int width, int height);
-        void Step(float fixedDelta, const PlayerIntent& intent);
+
+        // `globalPaused` (global time scale == 0): the world does not advance,
+        // but actors flagged `ignoreGlobalPause` still get one step so a
+        // "time-stop" effect can keep one thing moving. Normal frames pass
+        // false. Global slow-mo / fast-forward is handled upstream by scaling
+        // the delta fed to FixedTimestep::Advance, not here.
+        void Step(float fixedDelta, const PlayerIntent& intent, bool globalPaused = false);
 
 #if defined(ENGINE_WITH_3D)
         // Mouse-look for the orbit camera. Called once per frame (not per fixed
@@ -71,7 +101,7 @@ namespace engine::game
 
         // Latches a jump request until the next fixed step consumes it, so a
         // Space press on a frame that runs zero steps is not dropped.
-        void QueueJump() { m_jumpQueued = true; }
+        void QueueJump() { m_actors[0].jumpQueued = true; }
 #endif
 
         // --- reads for the snapshot builder ---
@@ -82,12 +112,15 @@ namespace engine::game
         [[nodiscard]] const std::vector<Particle>& Particles() const { return m_particles; }
 
 #if defined(ENGINE_WITH_3D)
-        [[nodiscard]] math::Vec3 CharacterPosition() const { return m_charPos; }   // feet on y = 0
-        [[nodiscard]] float CharacterFacingYaw() const { return m_charFacingYaw; }
+        // The player is actor 0; these stay as thin accessors so the snapshot
+        // builder and camera code do not need to know about the actor list.
+        [[nodiscard]] math::Vec3 CharacterPosition() const { return m_actors[0].pos; }   // feet on y = 0
+        [[nodiscard]] float CharacterFacingYaw() const { return m_actors[0].facingYaw; }
         [[nodiscard]] float CameraYaw() const { return m_cameraYaw; }
         [[nodiscard]] float CameraPitch() const { return m_cameraPitch; }
-        [[nodiscard]] int HeroAnimClipIndex() const { return m_heroAnimation.ClipIndex(); }
-        [[nodiscard]] float HeroAnimClipTime() const { return m_heroAnimation.ClipTime(); }
+        [[nodiscard]] int HeroAnimClipIndex() const { return m_actors[0].anim.ClipIndex(); }
+        [[nodiscard]] float HeroAnimClipTime() const { return m_actors[0].anim.ClipTime(); }
+        [[nodiscard]] const std::vector<Actor>& Actors() const { return m_actors; }
 #endif
 
     private:
@@ -95,7 +128,13 @@ namespace engine::game
         void LayOutObstacles();
         void StepCollision2D();
 #if defined(ENGINE_WITH_3D)
-        void StepCharacter3D(float fixedDelta, const PlayerIntent& intent);
+        void SpawnActors();
+        // Advances every actor by its own local-time-scaled step (sub-stepped
+        // when timeScale > 1). `globalPaused` restricts the pass to actors that
+        // set `ignoreGlobalPause`.
+        void StepActors(float fixedDelta, bool globalPaused, const PlayerIntent& intent);
+        // One actor, one sub-step. `intent == nullptr` runs the canned path.
+        void StepOneActor(Actor& actor, float dt, const PlayerIntent* intent) const;
 #endif
 
         core::JobSystem& m_jobs;
@@ -110,14 +149,9 @@ namespace engine::game
         physics::CollisionWorld2D m_collision2d;
 
 #if defined(ENGINE_WITH_3D)
-        math::Vec3 m_charPos{ 0.0f, 0.0f, 0.0f };   // feet on the ground plane (y = 0)
-        float m_charFacingYaw{ 0.0f };              // radians; 0 faces +Z
-        float m_charVerticalVel{ 0.0f };
-        bool m_charGrounded{ true };
-        bool m_jumpQueued{ false };                 // set by QueueJump(), consumed by the next fixed step
-        float m_cameraYaw{ 0.0f };                  // radians; orbit angle around the character
-        float m_cameraPitch{ -0.28f };             // radians; negative looks down at the character
-        CharacterAnimationState m_heroAnimation{ render::kUnityChanClips };
+        std::vector<Actor> m_actors;               // [0] = player; [1..] = local-time-scale demo
+        float m_cameraYaw{ 0.0f };                 // radians; orbit angle around the player
+        float m_cameraPitch{ -0.28f };            // radians; negative looks down at the player
 #endif
     };
 }

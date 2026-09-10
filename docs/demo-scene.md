@@ -22,10 +22,12 @@ Application (game/)
                                     for step: m_simulation.Step(dt, intent)      ← 고정 timestep
 Simulation (game/)
   · UpdateCameraLook  : m_cameraYaw += dx*sens;  m_cameraPitch = clamp(m_cameraPitch - dy*sens, ...)
-  · StepCharacter3D   : 카메라 yaw 로 WASD 축을 회전 → 이동 방향, 캐릭터가 그 방향으로 회전(kCharTurnRate)
+  · StepActors        : 액터마다 로컬 timeScale 로 dt 스케일(>1 은 서브스텝) → StepOneActor 호출 (time-design.md)
+  · StepOneActor      : [플레이어 = m_actors[0]] 카메라 yaw 로 WASD 축을 회전 → 이동 방향, 그 방향으로 회전(kCharTurnRate)
                         Space+접지 → 수직속도 = kCharJumpSpeed, 중력 적분, y=0 에서 착지
                         Locomotion(Jump/Wait/Run/Walk) 결정 → CharacterAnimationState::Update
-  · getter           : CharacterPosition / CharacterFacingYaw / CameraYaw / CameraPitch / HeroAnimClip{Index,Time}
+                        (m_actors[1..] 은 입력 없는 캔드 배회 — 로컬 배속 데모용)
+  · getter           : CharacterPosition / CharacterFacingYaw / CameraYaw / CameraPitch / HeroAnimClip{Index,Time}  (전부 m_actors[0] 래퍼)
 CharacterAnimationState (game/)
   · Update(dt, Locomotion) : 상태가 바뀌면 해당 클립으로 스냅 + clipTime=0, 아니면 clipTime += dt
                              Locomotion→클립 매핑은 render/r3d/CharacterAnimationClips.h 의 kUnityChan{Wait,Walk,Run,Jump}Clip
@@ -55,7 +57,7 @@ SnapshotBuilder (game/)
    (없으면 `assets/models/unitychan/animation/` 에 FBX 추가 + 배열에 항목).
 2. 같은 헤더의 `kUnityChan{Wait,Walk,Run,Jump}Clip` 인덱스를 원하는 클립으로.
 3. 상태를 늘리려면: `game/CharacterAnimationState.h` 의 `enum class Locomotion` 에 값 추가 →
-   `CharacterAnimationState::ClipFor` 에 매핑 한 줄 → `Simulation::StepCharacter3D` 의 `loco` 결정 분기에 조건.
+   `CharacterAnimationState::ClipFor` 에 매핑 한 줄 → `Simulation::StepOneActor` 의 `loco` 결정 분기에 조건.
    호출부(`SnapshotBuilder`, `ModelMeshPass3D`)는 `ClipIndex()/ClipTime()` 만 읽으므로 안 건드린다.
 
 ### 하지 말 것

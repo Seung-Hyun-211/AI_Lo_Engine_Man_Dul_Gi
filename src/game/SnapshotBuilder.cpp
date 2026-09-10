@@ -82,12 +82,31 @@ namespace engine::game
 
         void BuildScene3D(render::Scene3D& scene, const Simulation& simulation)
         {
+            // Actor 0 is the player - drawn as the skinned model (ModelMeshPass3D
+            // skins one instance). The local-time-scale demo actors (1..) are
+            // plain cubes so their differing speeds are obvious without touching
+            // the skinning path.
             render::ModelDraw model{};
             model.world = math::RotationY(simulation.CharacterFacingYaw() + kModelYawOffset)
                         * math::Translation(simulation.CharacterPosition());
             model.animClipIndex = simulation.HeroAnimClipIndex();
             model.animClipTime = simulation.HeroAnimClipTime();
             scene.modelDraws.push_back(model);
+
+            const std::vector<Actor>& actors = simulation.Actors();
+            for (std::size_t i = 1; i < actors.size(); ++i)
+            {
+                const Actor& a = actors[i];
+                render::MeshDraw draw{};
+                draw.mesh = render::MeshId::Cube;
+                draw.world = math::Scaling({ 0.4f, 0.4f, 0.4f })
+                           * math::Translation(a.pos + math::Vec3{ 0.0f, 0.4f, 0.0f });
+                // Warm = faster than real time, cool = slower.
+                draw.color = a.timeScale >= 1.0f
+                    ? math::Color{ 0.95f, 0.55f, 0.30f, 1.0f }
+                    : math::Color{ 0.35f, 0.60f, 0.95f, 1.0f };
+                scene.meshDraws.push_back(draw);
+            }
 
             render::MeshDraw ground{};
             ground.mesh = render::MeshId::Plane;
