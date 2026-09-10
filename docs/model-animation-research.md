@@ -173,6 +173,7 @@ sampler.Evaluate(model.skeleton, model.animations[0], timeSeconds, skin);
   };
   ```
 - **판단할 것(실사용 시점)**: 본 행렬 텍스처 vs VAT는 양자택일이 아니라 대상이 다름(캐릭터 군중 vs 정점 단위 변형) — 실제로 군중이 필요해질 때 결정. 로드 시점 굽기(단순, 시작 시간 ↑) vs 오프라인 툴 산출물 커밋(복잡, 시작 시간 절약) 도 그때 판단.
+- **구체 유스케이스(설계됨)**: 대규모 좀비 웨이브 — VAT + 플로우필드로 [horde-design.md](horde-design.md) §5 에 이 절을 실제 파이프라인(`HordePass3D`, `Scene3D::hordeInstances`, 로드 시 굽기, LOD/임포스터)으로 전개해 뒀다. playbook 2d.
 
 ## 6. 현재 상태 / 검증 필요
 

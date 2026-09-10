@@ -18,6 +18,7 @@ namespace engine::game
     // member - see BuildSettingsScreen's definition for why that's safe).
     struct SettingsScreenActions
     {
+        std::function<void()> onVolumeChanged;   // any of master/music/sfx moved
         std::function<void()> onVsyncToggled;
         std::function<void()> onResolutionChanged;
         std::function<void()> onClose;

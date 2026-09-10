@@ -11,11 +11,12 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ItemDefinitionGroup>
     <ClCompile><WarningLevel>Level4</WarningLevel><LanguageStandard>stdcpp20</LanguageStandard><AdditionalIncludeDirectories>src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories><PreprocessorDefinitions>UNICODE;_UNICODE;WIN32_LEAN_AND_MEAN;NOMINMAX;ENGINE_WITH_2D;ENGINE_WITH_3D;%(PreprocessorDefinitions)</PreprocessorDefinitions><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions></ClCompile>
-    <Link><SubSystem>Windows</SubSystem><AdditionalDependencies>d3d11.lib;dxgi.lib;d3dcompiler.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
+    <Link><SubSystem>Windows</SubSystem><AdditionalDependencies>d3d11.lib;dxgi.lib;d3dcompiler.lib;xaudio2.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\anim\AnimationSampler.cpp" />
+    <ClCompile Include="src\audio\AudioEngine.cpp" />
     <ClCompile Include="src\core\AssetPaths.cpp" />
     <ClCompile Include="src\core\EntityRegistry.cpp" />
     <ClCompile Include="src\core\JobSystem.cpp" />
@@ -39,6 +40,7 @@
     <ClCompile Include="src\render\r2d\QuadPass2D.cpp" />
     <ClCompile Include="src\render\r2d\SpritePass2D.cpp" />
     <ClCompile Include="src\render\r2d\TextureAtlas.cpp" />
+    <ClCompile Include="src\render\r3d\DebugDrawPass.cpp" />
     <ClCompile Include="src\render\r3d\MeshPass3D.cpp" />
     <ClCompile Include="src\render\r3d\ModelMeshPass3D.cpp" />
     <ClCompile Include="src\render\shader\ShaderLibrary.cpp" />
@@ -54,6 +56,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\anim\AnimationSampler.h" />
+    <ClInclude Include="src\audio\AudioEngine.h" />
     <ClInclude Include="src\core\AssetPaths.h" />
     <ClInclude Include="src\core\EntityId.h" />
     <ClInclude Include="src\core\EntityRegistry.h" />
@@ -95,6 +98,7 @@
     <ClInclude Include="src\render\r3d\CharacterAnimationClips.h" />
     <ClInclude Include="src\render\r3d\FrameConstants.h" />
     <ClInclude Include="src\render\r3d\Lighting.h" />
+    <ClInclude Include="src\render\r3d\DebugDrawPass.h" />
     <ClInclude Include="src\render\r3d\MeshPass3D.h" />
     <ClInclude Include="src\render\r3d\ModelMeshPass3D.h" />
     <ClInclude Include="src\render\r3d\Scene3D.h" />
@@ -113,6 +117,7 @@
     <None Include="assets\shaders\outline.hlsl" />
     <None Include="assets\shaders\quad2d.hlsl" />
     <None Include="assets\shaders\sprite2d.hlsl" />
+    <None Include="assets\shaders\debugline.hlsl" />
     <None Include="assets\shaders\shadow.hlsl" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

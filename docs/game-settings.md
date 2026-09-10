@@ -6,15 +6,15 @@
 
 | 필드 | 범위/기본값 | UI | 실제로 적용되는가 |
 |---|---|---|---|
-| `masterVolume` | 0..1, 기본 1.0 | Slider + `NN%` | ❌ **저장만** — 오디오 서브시스템 자체가 아직 없음 |
-| `musicVolume` | 0..1, 기본 1.0 | Slider + `NN%` | ❌ 저장만 |
-| `sfxVolume` | 0..1, 기본 1.0 | Slider + `NN%` | ❌ 저장만 |
+| `masterVolume` | 0..1, 기본 1.0 | Slider + `NN%` | ✅ `Application::ApplyVolumes` → `AudioEngine::SetMasterVolume` (시작 시 + 슬라이더 실시간, `docs/audio-design.md` §3) |
+| `musicVolume` | 0..1, 기본 1.0 | Slider + `NN%` | ✅ `AudioEngine::SetMusicVolume` (music 서브믹스) |
+| `sfxVolume` | 0..1, 기본 1.0 | Slider + `NN%` | ✅ `AudioEngine::SetSfxVolume` (sfx 서브믹스) |
 | `mouseSensitivity` | 0.1..3.0, 기본 1.0 | Slider + `N.NX` | ❌ 저장만 — 마우스로 조작하는 카메라/조준이 아직 없음 |
 | `invertMouseY` | bool, 기본 false | CheckBox | ❌ 저장만 (위와 같은 이유) |
 | `vsync` | bool, 기본 true | CheckBox | ✅ `IRenderer::SetFrameSettings`로 즉시 적용 |
 | `resolutionIndex` | `kResolutionPresets`(1280x720/1600x900/1920x1080) 인덱스, 기본 1(1600x900) | PREV/NEXT 버튼 + 값 표시 | ✅ `Win32Window::RequestResize`로 즉시 적용(`docs/scene-flow-design.md` §4) |
 
-**"저장만"인 항목은 거짓말이 아니라 정직한 상태 표시다** — 값은 UI·파일에 실존하고 다음 세션에도 유지되지만, 그 값을 읽어서 뭔가 하는 코드가 아직 없다(오디오 서브시스템 자체 미구현, 마우스 카메라 미구현). 그 서브시스템이 생기면 `Settings`에서 값만 읽으면 된다 — 설정 인프라를 먼저 깔아둔 것.
+**볼륨 3개는 이제 실제로 적용된다** (`docs/audio-design.md`). 남은 "저장만" 항목(마우스 감도/반전)은 거짓말이 아니라 정직한 상태 표시다 — 값은 UI·파일에 실존하고 다음 세션에도 유지되지만, 그 값을 읽어서 뭔가 하는 코드가 아직 없다(마우스 카메라 미구현). 그 서브시스템이 생기면 `Settings`에서 값만 읽으면 된다 — 설정 인프라를 먼저 깔아둔 것(볼륨이 그렇게 살아났다).
 
 **시작할 때부터 적용된다**: `Application`은 `Win32Window`를 만들기 전에 `Settings::LoadOrDefault`부터 하고, 그 `resolutionIndex`로 초기 창 크기를 정한다(생성자에서 `m_settings`가 `m_window`보다 먼저 선언·초기화됨) — 창이 하드코딩된 크기로 열렸다가 나중에야 저장된 해상도와 맞아떨어지는 어긋남이 없다. vsync도 `Run()` 진입 시 `m_settings.vsync`로 `SetFrameSettings`.
 

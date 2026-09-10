@@ -49,8 +49,32 @@ namespace engine::render
     {
         math::Mat4 world{ math::Mat4::Identity() };
         math::Color tint{ 1.0f, 1.0f, 1.0f, 1.0f };
-        int animClipIndex{ -1 };
+
+        // Pose selection. `animClipIndex < 0` = bind pose. `animParametric` means
+        // `animClipTime` is a 0..1 phase (renderer scales by the clip's
+        // duration, PlayMode::Once); otherwise it is seconds mapped by
+        // `animPlayMode` (0 Loop / 1 Once / 2 PingPong - see anim::PlayMode).
+        // When `animBlend` > 0 the renderer also evaluates `animFrom*` and lerps
+        // toward the current clip. See docs/roadmap.md §2.1.
+        int   animClipIndex{ -1 };
         float animClipTime{ 0.0f };
+        int   animPlayMode{ 0 };
+        bool  animParametric{ false };
+        int   animFromClipIndex{ -1 };
+        float animFromClipTime{ 0.0f };
+        int   animFromPlayMode{ 0 };
+        float animBlend{ 0.0f };
+    };
+
+    // One world-space line segment for DebugDrawPass. Value type, so game/sim
+    // code fills these into the snapshot and the render thread just draws them.
+    // Not for shipping visuals - collider/ray/skeleton visualisation. See
+    // docs/roadmap.md §D1.
+    struct DebugLine
+    {
+        math::Vec3 a{};
+        math::Vec3 b{};
+        math::Color color{ 1.0f, 1.0f, 0.0f, 1.0f };
     };
 
     // The 3D half of a RenderSnapshot.
@@ -60,5 +84,57 @@ namespace engine::render
         Lighting lighting{};
         std::vector<MeshDraw> meshDraws;
         std::vector<ModelDraw> modelDraws;
+        std::vector<DebugLine> debugLines;
     };
+
+    // --- debug-line builders (header-only; call from wherever fills a Scene3D) ---
+    namespace debug
+    {
+        inline void Line(std::vector<DebugLine>& out, math::Vec3 a, math::Vec3 b, math::Color c)
+        {
+            out.push_back({ a, b, c });
+        }
+
+        // Axis-aligned box from centre + half-extents (12 edges).
+        inline void Box(std::vector<DebugLine>& out, math::Vec3 center, math::Vec3 half, math::Color c)
+        {
+            const float xs[2]{ center.x - half.x, center.x + half.x };
+            const float ys[2]{ center.y - half.y, center.y + half.y };
+            const float zs[2]{ center.z - half.z, center.z + half.z };
+            for (int i = 0; i < 2; ++i)
+                for (int j = 0; j < 2; ++j)
+                {
+                    Line(out, { xs[0], ys[i], zs[j] }, { xs[1], ys[i], zs[j] }, c);
+                    Line(out, { xs[i], ys[0], zs[j] }, { xs[i], ys[1], zs[j] }, c);
+                    Line(out, { xs[i], ys[j], zs[0] }, { xs[i], ys[j], zs[1] }, c);
+                }
+        }
+
+        // Sphere as three axis-aligned rings.
+        inline void Sphere(std::vector<DebugLine>& out, math::Vec3 center, float radius, math::Color c, int segments = 16)
+        {
+            const int n = segments < 3 ? 3 : segments;
+            for (int s = 0; s < n; ++s)
+            {
+                const float a0 = (6.2831853f * static_cast<float>(s)) / static_cast<float>(n);
+                const float a1 = (6.2831853f * static_cast<float>(s + 1)) / static_cast<float>(n);
+                const float c0 = std::cos(a0) * radius, s0 = std::sin(a0) * radius;
+                const float c1 = std::cos(a1) * radius, s1 = std::sin(a1) * radius;
+                Line(out, { center.x + c0, center.y + s0, center.z }, { center.x + c1, center.y + s1, center.z }, c);
+                Line(out, { center.x + c0, center.y, center.z + s0 }, { center.x + c1, center.y, center.z + s1 }, c);
+                Line(out, { center.x, center.y + c0, center.z + s0 }, { center.x, center.y + c1, center.z + s1 }, c);
+            }
+        }
+
+        // A ray as a line plus a small "+" at the hit end.
+        inline void Ray(std::vector<DebugLine>& out, math::Vec3 origin, math::Vec3 dir, float length, math::Color c)
+        {
+            const math::Vec3 end{ origin.x + dir.x * length, origin.y + dir.y * length, origin.z + dir.z * length };
+            Line(out, origin, end, c);
+            const float k = 0.06f;
+            Line(out, { end.x - k, end.y, end.z }, { end.x + k, end.y, end.z }, c);
+            Line(out, { end.x, end.y - k, end.z }, { end.x, end.y + k, end.z }, c);
+            Line(out, { end.x, end.y, end.z - k }, { end.x, end.y, end.z + k }, c);
+        }
+    }
 }

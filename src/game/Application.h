@@ -1,5 +1,6 @@
 #pragma once
 
+#include "audio/AudioEngine.h"
 #include "core/JobSystem.h"
 #include "core/NonCopyable.h"
 #include "core/Settings.h"
@@ -85,9 +86,11 @@ namespace engine::game
         // itself; everything else SettingsScreen mutates directly (see there).
         void ApplyVsync();
         void ApplyResolution();
+        void ApplyVolumes();   // push master/music/sfx from m_settings to m_audio
 
         render::IRenderer& m_renderer;
         core::JobSystem m_jobs;
+        audio::AudioEngine m_audio;
         // Loaded before m_window so the very first window size already
         // reflects the saved resolution instead of opening at a hardcoded
         // size and only matching Settings after the user touches it.

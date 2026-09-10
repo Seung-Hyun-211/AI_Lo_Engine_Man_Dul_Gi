@@ -292,12 +292,23 @@ namespace engine::game
         // Locomotion -> which clip the animation state plays. Only
         // (clipIndex, clipTime) crosses into the snapshot; ModelMeshPass3D owns
         // the clip data and does the pose evaluation + CPU skinning.
-        Locomotion loco;
-        if (!actor.grounded)     loco = Locomotion::Jump;
-        else if (!moving)        loco = Locomotion::Wait;
-        else if (run)            loco = Locomotion::Run;
-        else                     loco = Locomotion::Walk;
-        actor.anim.Update(dt, loco);
+        if (intent != nullptr && !actor.grounded)
+        {
+            // Jump: drive the clip by the arc phase (launch 0 -> apex 0.5 ->
+            // land 1) instead of wall time, so it stays natural whatever the
+            // air time. docs/roadmap.md §2.1.
+            const float jumpPhase = math::Clamp(
+                0.5f - 0.5f * (actor.verticalVel / kCharJumpSpeed), 0.0f, 1.0f);
+            actor.anim.UpdateParametric(dt, Locomotion::Jump, jumpPhase);
+        }
+        else
+        {
+            Locomotion loco;
+            if (!moving)          loco = Locomotion::Wait;
+            else if (run)         loco = Locomotion::Run;
+            else                  loco = Locomotion::Walk;
+            actor.anim.Update(dt, loco);
+        }
     }
 #endif
 }

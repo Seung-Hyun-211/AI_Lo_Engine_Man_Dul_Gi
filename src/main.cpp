@@ -2,6 +2,7 @@
 #include "render/Dx11Renderer.h"
 #include "render/r2d/SpritePass2D.h"
 #if defined(ENGINE_WITH_3D)
+#include "render/r3d/DebugDrawPass.h"
 #include "render/r3d/ModelMeshPass3D.h"
 #endif
 
@@ -25,6 +26,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 #if defined(ENGINE_WITH_3D)
         renderer.AddRenderPass(std::make_unique<engine::render::ModelMeshPass3D>(
             "assets/models/unitychan/unitychan.fbx"));
+        // Dev line visualisation (colliders, rays, skeletons) - over 3D, under UI.
+        renderer.AddRenderPass(std::make_unique<engine::render::DebugDrawPass>());
 #endif
         // Textured UI sprites + scissor clipping. Runs last (atEnd) so its
         // scissor rasterizer state does not leak into QuadPass2D.

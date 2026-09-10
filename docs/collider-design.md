@@ -100,9 +100,37 @@ Simulation::Step(fixedDt, intent):
 
 - [x] 2D: Box/Circle, `Overlaps`, `CollisionWorld2D` (N²), 데모에서 플레이어-장애물 겹침 감지
 - [x] 3D: Box/Sphere, `Overlaps`, `CollisionWorld3D` (N²), 데모에서 위성 큐브-중심 큐브 겹침 감지
-- [ ] 브로드페이즈, 병렬 쌍 검사
-- [ ] 레이캐스트 / 셰이프캐스트, 트리거 enter/exit 이벤트 (현재는 매 스텝 "지금 겹침" 리스트뿐)
+- [x] **3D 레이캐스트** — `Ray3D` + `RayHit3D` + `RaycastCollider`(Ray-Box slab / Ray-Sphere) + `CollisionWorld3D::{RaycastClosest, RaycastAny, RaycastAll}` (선형 스캔). §"레이캐스트" 참고
+- [ ] 브로드페이즈(레이캐스트도 이걸로 가속), 병렬 쌍 검사
+- [ ] 2D 레이캐스트(`Ray2D` 대칭), 셰이프/스윕 캐스트, 트리거 enter/exit 이벤트 (현재는 매 스텝 "지금 겹침" 리스트뿐)
 - [ ] 물리 응답 (별도 모듈)
+
+## 레이캐스트
+
+`p1` 에서 `v1` 방향으로 쏘아 부딪히는 콜라이더를 찾는다. **탐지만·메인 스레드만** (`Step()` 과 같은 규칙). 현재 선형 스캔(전 콜라이더 순회) — 브로드페이즈가 붙으면 레이 AABB 로 후보만 거른다.
+
+```cpp
+struct Ray3D {
+    math::Vec3     origin;                 // p1
+    math::Vec3     dir { 0,0,1 };          // v1, 단위 벡터(호출부 책임)
+    float          maxDistance = FLT_MAX;  // 이 거리까지만  →  "일정 거리 안" 질의
+    CollisionLayer mask = kAllLayers;      // 이 마스크에 layer 가 든 콜라이더만
+    ColliderId     ignoreId = kInvalidCollider;   // 자기 자신 제외
+};
+struct RayHit3D { ColliderId id; std::uint64_t user; float distance; math::Vec3 point, normal; };
+```
+
+| 질의 | 반환 | 용도 |
+|---|---|---|
+| `RaycastClosest(ray)` | `std::optional<RayHit3D>` — **가장 가까운 1개** | 타워 타겟팅, 지면 검사, 카메라 벽 |
+| `RaycastAny(ray)` | `bool` — 맞았나만 (가장 빠름) | 시야(LOS) 판정 |
+| `RaycastAll(ray, out)` | `out` 에 **전부**, `distance` 오름차순 | 관통 투사체, 광역 스캔 |
+
+"p1 에서 v1 방향, 일정 거리 안의 물체" = `maxDistance` 를 유한값으로 준 `RaycastAll`(또는 `RaycastClosest`). 별도 API 아님.
+
+- 교차: **Ray-Box** = slab 법(`(min-o)/d`, `(max-o)/d` 의 `tmin/tmax`, `d` 성분 0 은 슬랩 안/밖만 검사). **Ray-Sphere** = 2차방정식. `t<0`(뒤) 또는 `t>maxDistance` 는 miss. 레이가 콜라이더 안에서 출발하면 `t=0`, `normal` 은 `-dir`.
+- 필터: `LayersInteract` 대신 `ray.mask & collider.layer`(레이는 layer 가 없으니 단방향).
+- **아직 `Simulation` 에 미연결** — `core::EntityRegistry` 처럼 뼈대만. 디펜스 게임의 타워 타겟팅/지면 검사에서 처음 쓰인다(`docs/roadmap.md` D1).
 
 ## 사용 방법 (How to use)
 

@@ -89,8 +89,15 @@ namespace engine::game
             render::ModelDraw model{};
             model.world = math::RotationY(simulation.CharacterFacingYaw() + kModelYawOffset)
                         * math::Translation(simulation.CharacterPosition());
-            model.animClipIndex = simulation.HeroAnimClipIndex();
-            model.animClipTime = simulation.HeroAnimClipTime();
+            const AnimPose pose = simulation.HeroAnimPose();
+            model.animClipIndex     = pose.clipIndex;
+            model.animClipTime      = pose.clipTime;
+            model.animPlayMode      = pose.playMode;
+            model.animParametric    = pose.parametric;
+            model.animFromClipIndex = pose.fromClipIndex;
+            model.animFromClipTime  = pose.fromClipTime;
+            model.animFromPlayMode  = pose.fromPlayMode;
+            model.animBlend         = pose.blend;
             scene.modelDraws.push_back(model);
 
             const std::vector<Actor>& actors = simulation.Actors();
@@ -122,6 +129,19 @@ namespace engine::game
                 draw.color = box.color;
                 scene.meshDraws.push_back(draw);
             }
+
+            // Temporary: exercises DebugDrawPass. The character's AABB, its
+            // forward vector, and the downward "ground check" ray a raycast
+            // would use. Replaced when gameplay drives debug draw (roadmap D1).
+            const math::Vec3 feet = simulation.CharacterPosition();
+            const math::Vec3 boxCenter{ feet.x, feet.y + 0.9f, feet.z };
+            render::debug::Box(scene.debugLines, boxCenter, { 0.30f, 0.90f, 0.30f },
+                               { 0.20f, 1.0f, 0.35f, 1.0f });
+            const float yaw = simulation.CharacterFacingYaw();
+            const math::Vec3 fwd{ std::sin(yaw), 0.0f, std::cos(yaw) };
+            render::debug::Ray(scene.debugLines, boxCenter, fwd, 1.2f, { 1.0f, 0.85f, 0.2f, 1.0f });
+            render::debug::Ray(scene.debugLines, { feet.x, feet.y + 0.2f, feet.z }, { 0.0f, -1.0f, 0.0f },
+                               0.6f, { 0.4f, 0.7f, 1.0f, 1.0f });
         }
 #endif
 

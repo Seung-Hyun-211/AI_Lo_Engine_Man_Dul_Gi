@@ -71,15 +71,16 @@ namespace engine::game
         title->pixelScale = 2.0f;
         panel->AddChild(std::move(title));
 
+        const auto onVolume = actions.onVolumeChanged;
         float y = 60.0f;
         AddSliderRow(*panel, y, "MASTER VOLUME", 0.0f, 1.0f, settings.masterVolume, FormatPercent,
-                     [&settings](float v) { settings.masterVolume = v; });
+                     [&settings, onVolume](float v) { settings.masterVolume = v; if (onVolume) onVolume(); });
         y += 60.0f;
         AddSliderRow(*panel, y, "MUSIC VOLUME", 0.0f, 1.0f, settings.musicVolume, FormatPercent,
-                     [&settings](float v) { settings.musicVolume = v; });
+                     [&settings, onVolume](float v) { settings.musicVolume = v; if (onVolume) onVolume(); });
         y += 60.0f;
         AddSliderRow(*panel, y, "SFX VOLUME", 0.0f, 1.0f, settings.sfxVolume, FormatPercent,
-                     [&settings](float v) { settings.sfxVolume = v; });
+                     [&settings, onVolume](float v) { settings.sfxVolume = v; if (onVolume) onVolume(); });
         y += 60.0f;
         AddSliderRow(*panel, y, "MOUSE SENSITIVITY", 0.1f, 3.0f, settings.mouseSensitivity, FormatSensitivity,
                      [&settings](float v) { settings.mouseSensitivity = v; });

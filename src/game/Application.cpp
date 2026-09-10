@@ -22,6 +22,7 @@ namespace engine::game
         , m_simulation(m_jobs, m_window.Width(), m_window.Height())
     {
         m_uiAtlas.Load("assets/atlas/ui.atlas", render::kUiAtlasId);
+        ApplyVolumes();
         EnterTitle();
     }
 
@@ -43,6 +44,7 @@ namespace engine::game
             {
                 m_input.BeginFrame();
                 if (!m_window.PumpMessages()) break;
+                m_audio.Update();   // reap finished one-shot voices
 
                 if (m_pendingResize)
                 {
@@ -70,7 +72,11 @@ namespace engine::game
                     // is an edge, so latch it the same way - a press on a
                     // zero-step frame must survive to the next step.
                     m_simulation.UpdateCameraLook(intent.look);
-                    if (m_input.KeyPressed(VK_SPACE)) m_simulation.QueueJump();
+                    if (m_input.KeyPressed(VK_SPACE))
+                    {
+                        m_simulation.QueueJump();
+                        m_audio.PlaySfx("assets/audio/blip.wav");   // demo hook
+                    }
 #endif
                     if (steps > 0)
                     {
@@ -133,6 +139,7 @@ namespace engine::game
     {
         m_window.SetPointerLocked(false);   // give the cursor back for the menu
         m_ui.SetOverlay(BuildSettingsScreen(m_settings, SettingsScreenActions{
+            .onVolumeChanged = [this] { ApplyVolumes(); },
             .onVsyncToggled = [this] { ApplyVsync(); },
             .onResolutionChanged = [this] { ApplyResolution(); },
             .onClose = [this] { CloseSettings(); },
@@ -144,6 +151,13 @@ namespace engine::game
         m_ui.ClearOverlay();
         m_settings.Save(core::kSettingsFilePath);
         if (m_state == GameState::InGame) m_window.SetPointerLocked(true);
+    }
+
+    void Application::ApplyVolumes()
+    {
+        m_audio.SetMasterVolume(m_settings.masterVolume);
+        m_audio.SetMusicVolume(m_settings.musicVolume);
+        m_audio.SetSfxVolume(m_settings.sfxVolume);
     }
 
     void Application::ApplyVsync()

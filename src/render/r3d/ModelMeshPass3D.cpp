@@ -340,15 +340,38 @@ namespace engine::render
         if (m_skeleton.Empty() || m_clips.empty() || scene.modelDraws.empty()) return;
 
         const ModelDraw& draw = scene.modelDraws.front();
-        const bool hasClip = draw.animClipIndex >= 0
-            && static_cast<std::size_t>(draw.animClipIndex) < m_clips.size()
-            && !m_clips[static_cast<std::size_t>(draw.animClipIndex)].tracks.empty();
+        const auto clipOk = [&](int i)
+        {
+            return i >= 0 && static_cast<std::size_t>(i) < m_clips.size()
+                && !m_clips[static_cast<std::size_t>(i)].tracks.empty();
+        };
 
-        if (hasClip)
-            m_animSampler.Evaluate(m_skeleton, m_clips[static_cast<std::size_t>(draw.animClipIndex)],
-                                    draw.animClipTime, m_boneScratch);
-        else
+        if (!clipOk(draw.animClipIndex))
+        {
             m_animSampler.EvaluateBindPose(m_skeleton, m_boneScratch);
+        }
+        else
+        {
+            const import::AnimationClip& toClip = m_clips[static_cast<std::size_t>(draw.animClipIndex)];
+            // Parametric: animClipTime is a 0..1 phase to scale by the clip's own
+            // duration; PlayMode::Once so it clamps at the ends.
+            const float toTime = draw.animParametric ? draw.animClipTime * toClip.duration : draw.animClipTime;
+            const anim::PlayMode toMode = draw.animParametric
+                ? anim::PlayMode::Once
+                : static_cast<anim::PlayMode>(draw.animPlayMode);
+
+            if (draw.animBlend > 0.0f && clipOk(draw.animFromClipIndex))
+            {
+                const import::AnimationClip& fromClip = m_clips[static_cast<std::size_t>(draw.animFromClipIndex)];
+                m_animSampler.EvaluateBlended(m_skeleton,
+                    fromClip, draw.animFromClipTime, static_cast<anim::PlayMode>(draw.animFromPlayMode),
+                    toClip, toTime, toMode, draw.animBlend, m_boneScratch);
+            }
+            else
+            {
+                m_animSampler.Evaluate(m_skeleton, toClip, toTime, m_boneScratch, toMode);
+            }
+        }
 
         for (SubMesh& sub : m_subMeshes) SkinAndUpload(context, sub);
     }

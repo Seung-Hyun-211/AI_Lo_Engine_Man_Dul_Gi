@@ -118,8 +118,7 @@ namespace engine::game
         [[nodiscard]] float CharacterFacingYaw() const { return m_actors[0].facingYaw; }
         [[nodiscard]] float CameraYaw() const { return m_cameraYaw; }
         [[nodiscard]] float CameraPitch() const { return m_cameraPitch; }
-        [[nodiscard]] int HeroAnimClipIndex() const { return m_actors[0].anim.ClipIndex(); }
-        [[nodiscard]] float HeroAnimClipTime() const { return m_actors[0].anim.ClipTime(); }
+        [[nodiscard]] AnimPose HeroAnimPose() const { return m_actors[0].anim.Pose(); }
         [[nodiscard]] const std::vector<Actor>& Actors() const { return m_actors; }
 #endif
 
