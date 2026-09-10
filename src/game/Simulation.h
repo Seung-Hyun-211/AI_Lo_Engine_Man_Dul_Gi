@@ -13,6 +13,7 @@
 #if defined(ENGINE_WITH_3D)
 #include "core/ObjectPool.h"
 #include "game/CharacterAnimationState.h"
+#include "physics/p3d/CollisionWorld3D.h"
 #endif
 
 namespace engine::game
@@ -75,6 +76,20 @@ namespace engine::game
         // state (SpawnSimAgents / the churn pass then fill the fields).
         void Reset() { *this = SimAgent{}; }
     };
+
+    // Result of the demo "what is the player looking at" raycast against the
+    // crowd (CollisionWorld3D). Render-only - it does not feed the simulation.
+    // SnapshotBuilder draws the ray + a marker + highlights the hit agent.
+    struct LookRayResult
+    {
+        math::Vec3    origin{};
+        math::Vec3    dir{ 0.0f, 0.0f, 1.0f };
+        float         length{ 0.0f };          // to the hit, or the full range on a miss
+        bool          hit{ false };
+        math::Vec3    point{};
+        math::Vec3    normal{};
+        std::uint32_t agentSlot{ 0 };          // crowd slot index of the hit agent (valid iff hit)
+    };
 #endif
 
     // Owns the mutable game world and advances it on a fixed timestep. The only
@@ -110,6 +125,8 @@ namespace engine::game
         static constexpr float kFieldHalf = 30.0f;       // scene 2: lower field half-size
         static constexpr int   kSimAgentCount = 600;      // scene 2: crowd alive on the field (one instanced draw)
         static constexpr int   kSimAgentCapacity = 1024;  // scene 2: ObjectPool slot count (headroom for spawn/despawn)
+        static constexpr float kSimAgentRadius = 0.3f;    // scene 2: crowd collision sphere radius (gameplay truth)
+        static constexpr float kLookRayRange = 80.0f;     // scene 2: player look-ray max distance
 #endif
 
         Simulation(core::JobSystem& jobs, int worldWidth, int worldHeight);
@@ -151,6 +168,7 @@ namespace engine::game
         [[nodiscard]] AnimPose HeroAnimPose() const { return m_actors[0].anim.Pose(); }
         [[nodiscard]] const std::vector<Actor>& Actors() const { return m_actors; }
         [[nodiscard]] const core::ObjectPool<SimAgent>& SimAgents() const { return m_agents; }
+        [[nodiscard]] const LookRayResult& LookRay() const { return m_lookRay; }
 #endif
 
     private:
@@ -173,6 +191,11 @@ namespace engine::game
         // Advances the demo-scene-2 crowd (JobSystem::ParallelFor, contiguous
         // ranges). No-op when the crowd is empty (scene 1).
         void StepSimAgents(float fixedDelta);
+        // Rebuilds m_collision3d from the current crowd (rebuild-every-step, like
+        // StepCollision2D) and casts the player look-ray into it, storing
+        // m_lookRay for the snapshot. Detection only; does not touch sim state.
+        // No-op outside demo scene 2.
+        void StepCollision3D();
 #endif
 
         core::JobSystem& m_jobs;
@@ -191,6 +214,8 @@ namespace engine::game
         core::ObjectPool<SimAgent> m_agents;       // scene 2: wandering crowd on the lower field
         std::vector<core::ObjectPool<SimAgent>::Handle> m_agentHandles;   // one per live crowd member (for the churn pass)
         std::size_t m_agentChurnCursor{ 0 };       // round-robin index into m_agentHandles
+        physics::CollisionWorld3D m_collision3d;   // scene 2: crowd colliders, rebuilt each step (raycast target)
+        LookRayResult m_lookRay;                   // scene 2: last player look-ray result (render-only)
         float m_cameraYaw{ 0.0f };                 // radians; orbit angle around the player
         float m_cameraPitch{ -0.28f };            // radians; negative looks down at the player
 #endif

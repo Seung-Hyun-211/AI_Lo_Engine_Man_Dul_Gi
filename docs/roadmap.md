@@ -14,7 +14,7 @@
 |---|---|---|---|
 | 렌더 | MSAA 씬타깃, 셀+아웃라인+크리즈, 방향광 1개 + 단일 셰도우맵, MeshPass3D(큐브/평면 + **인스턴스드 드로우** + 프러스텀·거리 컬), QuadPass2D, 디버그 드로우 패스 | SpritePass2D + 아틀라스(무압축), ModelMeshPass3D(정적+CPU스키닝) | 포인트/스팟광, CSM, 투명 정렬, 인스턴스 LOD/빌보드, sRGB 파이프라인, 메시 LOD |
 | 애니메이션 | CPU LBS 스키닝, 클립 리타깃, Locomotion→클립 스냅, 재생 모드(Once/PingPong), 크로스페이드(로컬 TRS lerp), 파라메트릭 점프 | 2D 프레임 애니(설계만) | **루트 모션, GPU 스키닝, IK, 블렌드 트리** |
-| 물리/충돌 | Box/Sphere 탐지, layer/mask, Contacts, 레이캐스트 3D(Closest/Any/All) | — | **레이캐스트 2D, `Simulation` 연동, 브로드페이즈, 스윕/CCD, 캡슐, 트리거 enter/exit 이벤트, 재사용 캐릭터 컨트롤러** |
+| 물리/충돌 | Box/Sphere 탐지, layer/mask, Contacts, 레이캐스트 2D·3D(Closest/Any/All) + 데모 씬 2 `Simulation` 연동 | — | **브로드페이즈, 스윕/CCD, 캡슐, 트리거 enter/exit 이벤트, 재사용 캐릭터 컨트롤러** |
 | 에셋 | FBX+스키닝, 이미지 디코드 seam, atlas_pack v1(무압축) | — | BC7 압축, AssetRegistry, 비동기 로더, 핫리로드(아틀라스/모델), 글리프 아틀라스 |
 | 게임 프레임워크 | 씬 상태(Title/InGame/Settings), 고정 스텝 + time scale, EntityId 뼈대, `core::ObjectPool<T>`, 오디오 최소 믹서(XAudio2) | ScrollList v1 | **오디오 스트리밍/3D음, 세이브, 이벤트 버스, 프리팹/직렬화, 게임 루프(장르 미정)** |
 | 입력 | 키보드/마우스/휠 | — | 게임패드(XInput), 리바인딩, 액션맵 레이어 |
@@ -63,11 +63,11 @@
 
 착수 시 → `docs/animation-design.md` §5 로 상세 이동.
 
-### 2.2 레이캐스트 + 디버그 드로우 — ✅ 구현 (3D. 2D 대칭·`Simulation` 연동만 남음)
+### 2.2 레이캐스트 + 디버그 드로우 — ✅ 구현 (2D·3D + `Simulation` 연동 완료)
 
-- **레이캐스트**: `physics/p3d` 에 `Ray3D` + `RayHit3D` + `RaycastCollider`(Ray-Box slab / Ray-Sphere) + `CollisionWorld3D::{RaycastClosest, RaycastAny, RaycastAll}`(선형 스캔, `RaycastAll` 거리순). "일정 거리 안" = `maxDistance`. 상세 `collider-design.md` "레이캐스트".
-- **디버그 드로우**: `render/r3d/DebugDrawPass` + `Scene3D::debugLines`(`DebugLine{a,b,color}`) + `render::debug::{Line,Box,Sphere,Ray}` 헬퍼(`Scene3D.h`, 헤더 전용) + `debugline.hlsl`(월드 라인리스트, depth-test/no-write). `SnapshotBuilder` 가 캐릭터 AABB + 전방·지면 레이를 임시 방출.
-- **남음**: 2D 대칭(`Ray2D`/`RayHit2D`), `Simulation`↔`CollisionWorld3D` 연동(현재 `EntityRegistry` 처럼 미연결 — 디펜스 타워 타겟팅에서 처음 쓰임).
+- **레이캐스트**: `physics/p2d`·`p3d` 대칭 — `Ray{2D,3D}` + `RayHit{2D,3D}` + `RaycastCollider`(Ray-Box slab / Ray-Circle·Sphere) + `CollisionWorld{2D,3D}::{RaycastClosest, RaycastAny, RaycastAll}`(선형 스캔, `Step()` 과 독립). "일정 거리 안" = `maxDistance`. 상세 `collider-design.md` "레이캐스트".
+- **`Simulation` 연동**: 데모 씬 2 의 `Simulation::StepCollision3D()` 가 매 스텝 `m_collision3d` 를 크라우드 스피어로 rebuild → 플레이어 시선 레이(`RaycastClosest`) → `LookRayResult` → `SnapshotBuilder` 가 디버그 레이·마커 + 피격 개체 색 하이라이트. 타워 타겟팅·지면 검사도 같은 패턴.
+- **디버그 드로우**: `render/r3d/DebugDrawPass` + `Scene3D::debugLines`(`DebugLine{a,b,color}`) + `render::debug::{Line,Box,Sphere,Ray}` 헬퍼(`Scene3D.h`, 헤더 전용) + `debugline.hlsl`(월드 라인리스트, depth-test/no-write).
 
 **(원 설계 — 참고)**
 
@@ -170,7 +170,7 @@ if (auto hit = world.RaycastClosest(down)) { actor.pos.y = hit->point.y; actor.g
 
 | # | 항목 | 왜 (디펜스) | 기존 표 |
 |---|---|---|---|
-| ~~D1~~ ✅ | **레이캐스트 + 범위 질의 + 디버그 드로우** | 타워가 사거리 안 적을 고르고, 투사체가 다수를 맞춘다 | §2.2 (구현). `Simulation` 연동만 남음 |
+| ~~D1~~ ✅ | **레이캐스트 + 범위 질의 + 디버그 드로우** | 타워가 사거리 안 적을 고르고, 투사체가 다수를 맞춘다 | §2.2 (구현 — 2D·3D + `Simulation` 연동 완료) |
 | D2 | **다수 엔티티 풀 + `core::ObjectPool<T>`** — ✅ `ObjectPool` 구현·크라우드 이주(AoS), SoA 승격(`game/AgentStore`)은 측정 게이트 | 수백~수천 적/투사체를 개별 `new` 없이 스폰·재사용 | `src/core/ObjectPool.h`, **`instanced-rendering.md` §6**, `scrollable-list-and-pool.md` §1.1 |
 | D3 | **브로드페이즈(균일 그리드)** | 다수 대 다수 충돌·타겟 질의 — 선형 스캔 N² 불가 | P1, `instanced-rendering.md` §6.4 |
 | D4 | **인스턴싱 렌더** — ✅ 인스턴스드 드로우 + 프러스텀·거리 컬 + 거리 LOD 2단계(그림자 컷)(§8-1·2·3). 빌보드/중간 티어·`AgentStore` 남음 | 같은 메시 수천 개를 draw call 소수로 | **`instanced-rendering.md`** (§3~§5, 구현순서 §8) |
@@ -190,12 +190,12 @@ if (auto hit = world.RaycastClosest(down)) { actor.pos.y = hit->point.y; actor.g
 
 착수 순서 제안: **1·2·3 완료 → (4 결정) → 5**.
 
-**현재 위치 (2026-09 기준)**: D1 ✅ · D2(`ObjectPool`) ✅ · D4(인스턴싱 + 거리 컬 + LOD 2단계) ✅. 남은 갈래:
-- **D4 잔여 — 빌보드/중간 LOD 티어** (`instanced-rendering.md` §5.3): 규모가 훨씬 커질 때 실효. 지금은 우선순위 낮음.
-- **D1 잔여 — `Simulation`↔`CollisionWorld3D` 연동 + `Ray2D`/`RayHit2D`** (`collider-design.md`): 타워 타겟팅·지면 검사 실제 배선. 게임플레이 쪽으로 한 발.
-- **D3 — 브로드페이즈(균일 그리드)** → **D5 — 웨이브/HP/목표·패배**: 게임 루프.
+**현재 위치 (2026-09 기준)**: D1 ✅(2D·3D 레이캐스트 + `Simulation` 연동) · D2(`ObjectPool`) ✅ · D4(인스턴싱 + 거리 컬 + LOD 2단계) ✅. 남은 갈래:
+- **D3 — 브로드페이즈(균일 그리드)**: N² 탈출. 크라우드 콜라이더 rebuild(`StepCollision3D` — 지금 600개 선형)·개체끼리 질의·레이캐스트 후보 필터를 O(n) 으로. 게임 사이클 전 마지막 인프라.
+- **D4 잔여 — 빌보드/중간 LOD 티어** (`instanced-rendering.md` §5.3): 규모가 훨씬 커질 때 실효. 우선순위 낮음.
+- **D5 — 웨이브/스폰 + HP/데미지 + 목표·패배**: 게임 루프 본체.
 
-게임 사이클 전이면 **D1 잔여**(레이캐스트 실사용 배선)가 다음으로 자연스럽다 — 인프라(D2·D4)가 얼추 준비됨.
+게임 사이클 전이면 **D3(브로드페이즈)** 가 다음으로 자연스럽다.
 
 ---
 

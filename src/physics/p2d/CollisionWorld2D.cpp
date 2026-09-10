@@ -85,4 +85,67 @@ namespace engine::physics
                     || (c.userA == userB && c.userB == userA);
             });
     }
+
+    std::optional<RayHit2D> CollisionWorld2D::RaycastClosest(const Ray2D& ray) const
+    {
+        std::optional<RayHit2D> best;
+        for (std::size_t i = 0; i < m_colliders.size(); ++i)
+        {
+            if (m_ids[i] == ray.ignoreId) continue;
+            if ((ray.mask & m_colliders[i].layer) == 0u) continue;
+
+            float distance = 0.0f;
+            math::Vec2 normal{};
+            const float bound = best ? best->distance : ray.maxDistance;
+            if (!RaycastCollider(m_colliders[i], ray.origin, ray.dir, bound, distance, normal)) continue;
+
+            RayHit2D hit;
+            hit.id = m_ids[i];
+            hit.user = m_colliders[i].user;
+            hit.distance = distance;
+            hit.point = ray.origin + ray.dir * distance;
+            hit.normal = normal;
+            best = hit;   // `bound` above guarantees this is the closest so far
+        }
+        return best;
+    }
+
+    bool CollisionWorld2D::RaycastAny(const Ray2D& ray) const
+    {
+        for (std::size_t i = 0; i < m_colliders.size(); ++i)
+        {
+            if (m_ids[i] == ray.ignoreId) continue;
+            if ((ray.mask & m_colliders[i].layer) == 0u) continue;
+
+            float distance = 0.0f;
+            math::Vec2 normal{};
+            if (RaycastCollider(m_colliders[i], ray.origin, ray.dir, ray.maxDistance, distance, normal))
+                return true;
+        }
+        return false;
+    }
+
+    void CollisionWorld2D::RaycastAll(const Ray2D& ray, std::vector<RayHit2D>& outHits) const
+    {
+        outHits.clear();
+        for (std::size_t i = 0; i < m_colliders.size(); ++i)
+        {
+            if (m_ids[i] == ray.ignoreId) continue;
+            if ((ray.mask & m_colliders[i].layer) == 0u) continue;
+
+            float distance = 0.0f;
+            math::Vec2 normal{};
+            if (!RaycastCollider(m_colliders[i], ray.origin, ray.dir, ray.maxDistance, distance, normal)) continue;
+
+            RayHit2D hit;
+            hit.id = m_ids[i];
+            hit.user = m_colliders[i].user;
+            hit.distance = distance;
+            hit.point = ray.origin + ray.dir * distance;
+            hit.normal = normal;
+            outHits.push_back(hit);
+        }
+        std::sort(outHits.begin(), outHits.end(),
+            [](const RayHit2D& l, const RayHit2D& r) { return l.distance < r.distance; });
+    }
 }

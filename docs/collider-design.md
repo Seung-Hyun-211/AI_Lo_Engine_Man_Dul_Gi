@@ -100,14 +100,17 @@ Simulation::Step(fixedDt, intent):
 
 - [x] 2D: Box/Circle, `Overlaps`, `CollisionWorld2D` (N²), 데모에서 플레이어-장애물 겹침 감지
 - [x] 3D: Box/Sphere, `Overlaps`, `CollisionWorld3D` (N²), 데모에서 위성 큐브-중심 큐브 겹침 감지
-- [x] **3D 레이캐스트** — `Ray3D` + `RayHit3D` + `RaycastCollider`(Ray-Box slab / Ray-Sphere) + `CollisionWorld3D::{RaycastClosest, RaycastAny, RaycastAll}` (선형 스캔). §"레이캐스트" 참고
+- [x] **레이캐스트 (2D · 3D 대칭)** — `Ray{2D,3D}` + `RayHit{2D,3D}` + `RaycastCollider`(Ray-Box slab / Ray-Circle·Sphere, `Collider{2D,3D}.h` 인라인) + `CollisionWorld{2D,3D}::{RaycastClosest, RaycastAny, RaycastAll}` (선형 스캔, `Step()` 과 독립). §"레이캐스트" 참고
+- [x] **`Simulation` 연동** — 데모 씬 2 가 `m_collision3d` 를 매 스텝 rebuild(크라우드 스피어) 후 플레이어 시선 레이(`RaycastClosest`) → `LookRayResult` → 스냅샷(디버그 레이 + 마커 + 피격 개체 하이라이트)
 - [ ] 브로드페이즈(레이캐스트도 이걸로 가속), 병렬 쌍 검사
-- [ ] 2D 레이캐스트(`Ray2D` 대칭), 셰이프/스윕 캐스트, 트리거 enter/exit 이벤트 (현재는 매 스텝 "지금 겹침" 리스트뿐)
+- [ ] 셰이프/스윕 캐스트, 트리거 enter/exit 이벤트 (현재는 매 스텝 "지금 겹침" 리스트뿐)
 - [ ] 물리 응답 (별도 모듈)
 
 ## 레이캐스트
 
 `p1` 에서 `v1` 방향으로 쏘아 부딪히는 콜라이더를 찾는다. **탐지만·메인 스레드만** (`Step()` 과 같은 규칙). 현재 선형 스캔(전 콜라이더 순회) — 브로드페이즈가 붙으면 레이 AABB 로 후보만 거른다.
+
+`p2d` · `p3d` 대칭 — 아래는 3D. 2D 는 `Vec2` 로 바꾼 `Ray2D`/`RayHit2D` + 같은 3 질의(`CollisionWorld2D`).
 
 ```cpp
 struct Ray3D {
@@ -128,9 +131,10 @@ struct RayHit3D { ColliderId id; std::uint64_t user; float distance; math::Vec3 
 
 "p1 에서 v1 방향, 일정 거리 안의 물체" = `maxDistance` 를 유한값으로 준 `RaycastAll`(또는 `RaycastClosest`). 별도 API 아님.
 
-- 교차: **Ray-Box** = slab 법(`(min-o)/d`, `(max-o)/d` 의 `tmin/tmax`, `d` 성분 0 은 슬랩 안/밖만 검사). **Ray-Sphere** = 2차방정식. `t<0`(뒤) 또는 `t>maxDistance` 는 miss. 레이가 콜라이더 안에서 출발하면 `t=0`, `normal` 은 `-dir`.
+- 교차: **Ray-Box** = slab 법(`(min-o)/d`, `(max-o)/d` 의 `tmin/tmax`, `d` 성분 0 은 슬랩 안/밖만 검사). **Ray-Sphere/Circle** = 2차방정식. `t<0`(뒤) 또는 `t>maxDistance` 는 miss. 레이가 콜라이더 안에서 출발하면 `t=0`, `normal` 은 `-dir`.
 - 필터: `LayersInteract` 대신 `ray.mask & collider.layer`(레이는 layer 가 없으니 단방향).
-- **아직 `Simulation` 에 미연결** — `core::EntityRegistry` 처럼 뼈대만. 디펜스 게임의 타워 타겟팅/지면 검사에서 처음 쓰인다(`docs/roadmap.md` D1).
+- **`Step()` 과 독립** — 3 질의는 `m_colliders` 를 직접 훑는다. 레이캐스트만 쓸 거면 `Step()`(N² 쌍 검사) 안 불러도 된다.
+- **`Simulation` 연동됨** (데모 씬 2): `Simulation::StepCollision3D()` 가 매 스텝 `m_collision3d.Clear()` + 크라우드 개체마다 `Collider3D`(Sphere, `user` = 풀 슬롯) `Add`, 그 뒤 플레이어 시선 레이(`RaycastClosest`, `mask = kLayerCrowd3D`)를 쏴 `LookRayResult` 에 저장 → `SnapshotBuilder` 가 디버그 레이/마커 + 피격 개체 색 하이라이트. 타워 타겟팅·지면 검사도 이 패턴.
 
 ## 사용 방법 (How to use)
 
@@ -159,4 +163,22 @@ for (const physics::Contact& c : m_collision2d.Contacts()) { /* 반응 */ }
 
 **"닿았나?" 한 번만 물어보기**: `world.AreTouching(entityA, entityB)` (그 스텝 `Contacts()` 선형 검색).
 
-**하지 말 것**: 렌더/잡 스레드에서 `CollisionWorld` 접근, `Step()` 후 콜라이더가 밀려났다고 가정(응답 없음), 스냅샷에 콜라이더 싣기, 프레임마다 `Add`한 id를 저장해두고 다음 프레임에 재사용(데모는 매 스텝 `Clear`+`Add`; 영속 id가 필요하면 `Update` 패턴으로).
+**레이캐스트** (탐지만·메인 스레드만, `Step()` 불필요):
+
+```cpp
+// 콜라이더를 Add 해둔 상태에서 (Clear+Add 매 스텝 패턴 or 영속 Update 패턴)
+physics::Ray3D ray{};
+ray.origin = headPos;
+ray.dir    = math::Normalized(forward);   // 반드시 단위 벡터
+ray.maxDistance = kRange;                  // "일정 거리 안" 질의
+ray.mask   = kLayerEnemy;                  // 이 layer 만
+ray.ignoreId = selfColliderId;            // 자기 자신 제외(있으면)
+if (auto hit = world.RaycastClosest(ray)) {
+    // hit->id / hit->user(엔티티/슬롯) / hit->distance / hit->point / hit->normal
+}
+// LOS: world.RaycastAny(ray).  관통: world.RaycastAll(ray, outVec)(distance 오름차순).
+```
+
+2D 는 `physics::Ray2D` / `RayHit2D` / `CollisionWorld2D` 로 완전히 같은 형태(`Vec2`).
+
+**하지 말 것**: 렌더/잡 스레드에서 `CollisionWorld` 접근, `Step()` 후 콜라이더가 밀려났다고 가정(응답 없음), 스냅샷에 콜라이더 싣기(레이 결과는 값 POD 로 — `LookRayResult` 처럼), 정규화 안 한 `ray.dir`(거리 계산이 틀어짐), 프레임마다 `Add`한 id를 저장해두고 다음 프레임에 재사용(데모는 매 스텝 `Clear`+`Add`; 영속 id가 필요하면 `Update` 패턴으로).

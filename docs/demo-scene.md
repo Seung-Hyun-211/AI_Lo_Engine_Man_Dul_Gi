@@ -89,6 +89,10 @@ Simulation (game/)
                          없음). heading 드리프트 + 전진 + bob + 필드 경계 반사. 그 뒤 메인에서
                          churn: 12스텝마다 1마리 Release→Acquire→SeedAgent (풀 상시 검증, 게임
                          메커닉 아님). ActiveIndices() 가 비면(씬 1) 즉시 반환.
+  · StepCollision3D() : (씬 2만) m_collision3d.Clear() + 크라우드마다 Sphere Collider3D
+                        (user=슬롯) Add → 플레이어 시선 레이(head + 카메라 forward,
+                        maxDist=kLookRayRange, mask=kLayerCrowd3D) RaycastClosest →
+                        LookRayResult 저장. Step() 안 부름(레이만). 시뮬 상태 안 건드림.
   · Actor.groundY/halfRange : 액터별 바닥 높이·이동 반경. 씬 1 은 기본값(0 / 7.5)이라 동작 불변.
 SnapshotBuilder (game/)
   · BuildCamera   : kDemoScene==2 면 orbit 거리 3.6→6.0 (필드·군중이 프레임에 들어오게).
@@ -96,7 +100,9 @@ SnapshotBuilder (game/)
   · BuildScene3D  : kDemoScene==2 → BuildCliffScene (넓은 평지 Plane + 메사 Cube +
                     기둥 마커 + **크라우드 = 인스턴스드**: m_agents.ActiveIndices() 순회,
                     프러스텀·최대거리 컬 + 거리 LOD 2단계(d2 <= kAgentShadowDist² → 근 lod0,
-                    아니면 원 lod2)로 lodBucket 나눠 배치 0~2개 + 디버그). 씬 1(kBoxes)은 else.
+                    아니면 원 lod2)로 lodBucket 나눠 배치 0~2개. LookRay().agentSlot 개체는
+                    노란색 하이라이트 + 디버그로 시선 레이(hit 녹색/miss 회색) + hit 마커).
+                    씬 1(kBoxes)은 else.
   · MeshPass3D    : instanceBatches 를 배치당 DrawIndexedInstanced 1콜 (mesh_instanced.hlsl).
                     셰도우 패스는 lod>=2(원거리) 배치 스킵. 상세 [instanced-rendering.md](instanced-rendering.md).
 ```
@@ -124,6 +130,10 @@ SnapshotBuilder (game/)
 - **군중 거동**: `Simulation::StepSimAgents` 의 heading 드리프트 계수·`speed` 범위·bob 진폭,
   초기 배치는 `SeedAgent`. 실제 게임 AI(추적·경로)로 바꿀 때 이 함수만 교체하면 렌더/스냅샷은
   안 건드린다.
+- **시선 레이 / 개체 충돌**: `Simulation::kSimAgentRadius`(0.3, 크라우드 스피어 반경 = 게임플레이
+  진실값), `kLookRayRange`(80). `StepCollision3D` 가 `m_collision3d` 를 매 스텝 rebuild + 시선
+  레이. 타워 타겟팅·투사체를 붙일 때 이 `CollisionWorld3D` 에 `RaycastClosest/Any/All` 로 질의
+  ([collider-design.md](collider-design.md) "레이캐스트"). 수백 넘어가면 브로드페이즈(roadmap D3) 선행.
 
 ### 하지 말 것 (씬 2 추가분)
 
@@ -134,6 +144,10 @@ SnapshotBuilder (game/)
 - 군중을 스킨드 모델(`ModelDraw`)이나 개체마다 `MeshDraw` 로 그리지 말 것 — 전자는 CPU 스킨
   1개 상한, 후자는 draw call 폭증. `MeshInstance` + `InstanceBatch` 로
   ([instanced-rendering.md](instanced-rendering.md) §9). 애니메이션 군중은 VAT(§5·horde).
+- `LookRayResult` 를 시뮬 입력으로 쓰지 말 것 — 렌더 전용(카메라 기반이라 프레임당 1회 성격).
+  게임플레이가 레이 결과를 필요로 하면 `Step()` 안에서 직접 `RaycastClosest` 질의.
+- `StepCollision3D` 에서 `m_collision3d.Step()` 을 부르지 말 것 — 레이만 필요하면 N² 쌍 검사
+  낭비. 겹침 리스트(`Contacts()`)가 필요할 때만.
 
 ## 알려진 한계
 

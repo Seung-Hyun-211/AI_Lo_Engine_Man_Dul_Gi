@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 namespace engine::game
 {
@@ -25,6 +26,10 @@ namespace engine::game
         constexpr float kFieldAgentZLo = 8.0f;
         constexpr float kFieldAgentZHi = Simulation::kFieldHalf + 10.0f;
         constexpr int   kAgentChurnIntervalSteps = 12;   // recycle 1 crowd member every N fixed steps
+
+        // Collision layer for the demo-scene-2 crowd colliders. The player
+        // look-ray masks to exactly this.
+        constexpr physics::CollisionLayer kLayerCrowd3D = 1u;
 #endif
     }
 
@@ -190,6 +195,7 @@ namespace engine::game
 #if defined(ENGINE_WITH_3D)
         StepActors(fixedDelta, /*globalPaused=*/false, intent);
         StepSimAgents(fixedDelta);
+        StepCollision3D();
 #endif
     }
 
@@ -418,6 +424,60 @@ namespace engine::game
                               + static_cast<float>(k) * 2.11f);
         }
         ++m_agentChurnCursor;
+    }
+
+    void Simulation::StepCollision3D()
+    {
+        if constexpr (kDemoScene != 2) { return; }
+        else
+        {
+            const std::vector<std::uint32_t>& active = m_agents.ActiveIndices();
+
+            // Rebuild-every-step (same pattern as StepCollision2D): cheap for a
+            // few hundred colliders, no id bookkeeping needed. One sphere per
+            // crowd member; `user` carries the pool slot index so the snapshot
+            // can highlight the hit agent. Step() is NOT called - the raycast
+            // queries scan the collider list directly.
+            m_collision3d.Clear();
+            const SimAgent* slots = m_agents.Slots();
+            for (const std::uint32_t slotIdx : active)
+            {
+                const SimAgent& a = slots[slotIdx];
+                physics::Collider3D c{};
+                c.shape = physics::Collider3D::Shape::Sphere;
+                c.center = a.pos + math::Vec3{ 0.0f, kSimAgentRadius, 0.0f };
+                c.radius = kSimAgentRadius;
+                c.layer = kLayerCrowd3D;
+                c.user = slotIdx;
+                m_collision3d.Add(c);
+            }
+
+            // "What is the player looking at": a ray from the head along the
+            // camera's forward (same basis SnapshotBuilder::BuildCamera uses).
+            const float cp = std::cos(m_cameraPitch);
+            const float sp = std::sin(m_cameraPitch);
+            const math::Vec3 forward{ cp * std::sin(m_cameraYaw), sp, cp * std::cos(m_cameraYaw) };
+            const math::Vec3 origin = m_actors[0].pos + math::Vec3{ 0.0f, 1.3f, 0.0f };
+
+            physics::Ray3D ray{};
+            ray.origin = origin;
+            ray.dir = forward;   // unit: cp^2(s^2+c^2) + sp^2 == 1
+            ray.maxDistance = kLookRayRange;
+            ray.mask = kLayerCrowd3D;
+
+            m_lookRay = LookRayResult{};
+            m_lookRay.origin = origin;
+            m_lookRay.dir = forward;
+            m_lookRay.length = kLookRayRange;
+            if (const std::optional<physics::RayHit3D> hit = m_collision3d.RaycastClosest(ray))
+            {
+                m_lookRay.hit = true;
+                m_lookRay.length = hit->distance;
+                m_lookRay.point = hit->point;
+                m_lookRay.normal = hit->normal;
+                m_lookRay.agentSlot = static_cast<std::uint32_t>(hit->user);
+            }
+        }
     }
 #endif
 }

@@ -205,6 +205,7 @@ namespace engine::game
 
             const core::ObjectPool<SimAgent>& pool = simulation.SimAgents();
             const SimAgent* agentSlots = pool.Slots();
+            const LookRayResult& look = simulation.LookRay();
 
             std::vector<render::MeshInstance> lodBucket[3];
             for (const std::uint32_t slotIdx : pool.ActiveIndices())
@@ -216,13 +217,20 @@ namespace engine::game
                 const float d2 = math::Dot(d, d);
                 if (d2 > kAgentCullDist * kAgentCullDist) continue;
 
-                const float hot = math::Clamp((a.speed - 0.8f) / 1.4f, 0.0f, 1.0f);
                 render::MeshInstance inst{};
                 inst.pos = center;
                 inst.yaw = a.heading;
                 inst.scale = kAgentScale;
-                inst.colorRgba = PackRgba(0.25f + 0.65f * hot, 0.62f - 0.22f * hot,
-                                          0.70f - 0.45f * hot, 1.0f);
+                if (look.hit && look.agentSlot == slotIdx)
+                {
+                    inst.colorRgba = PackRgba(1.0f, 0.9f, 0.2f, 1.0f);   // look-ray target
+                }
+                else
+                {
+                    const float hot = math::Clamp((a.speed - 0.8f) / 1.4f, 0.0f, 1.0f);
+                    inst.colorRgba = PackRgba(0.25f + 0.65f * hot, 0.62f - 0.22f * hot,
+                                              0.70f - 0.45f * hot, 1.0f);
+                }
 
                 const int lod = d2 <= kAgentShadowDist * kAgentShadowDist ? 0 : 2;
                 lodBucket[lod].push_back(inst);
@@ -247,6 +255,14 @@ namespace engine::game
                                { 0.30f, 0.90f, 0.30f }, { 0.20f, 1.0f, 0.35f, 1.0f });
             render::debug::Line(scene.debugLines, { -fieldHalf * 0.5f, cliffTop + 0.02f, mesaFrontZ },
                                 { fieldHalf * 0.5f, cliffTop + 0.02f, mesaFrontZ }, { 1.0f, 0.85f, 0.2f, 1.0f });
+
+            // The player look-ray (CollisionWorld3D raycast): green to the hit
+            // point + a marker there, or grey out to the full range on a miss.
+            const math::Color rayColor = look.hit ? math::Color{ 0.3f, 1.0f, 0.4f, 1.0f }
+                                                  : math::Color{ 0.5f, 0.5f, 0.55f, 1.0f };
+            render::debug::Ray(scene.debugLines, look.origin, look.dir, look.length, rayColor);
+            if (look.hit)
+                render::debug::Sphere(scene.debugLines, look.point, 0.35f, { 1.0f, 0.4f, 0.2f, 1.0f });
         }
 
         void BuildScene3D(render::Scene3D& scene, const Simulation& simulation)
