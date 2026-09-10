@@ -200,6 +200,9 @@ namespace engine::game
             const bool crowdIsModel = CrowdUsesModel();
             const render::MeshId crowdMesh =
                 crowdIsModel ? render::MeshId::CrowdModel : render::MeshId::Cube;
+            const render::InstanceShader crowdShader =
+                kActiveCrowd.shading == CrowdShading::Toon ? render::InstanceShader::Toon
+                                                          : render::InstanceShader::Lit;
             const float crowdHeight = kActiveCrowd.height;
             const math::Vec3 pivotLift =
                 crowdIsModel ? math::Vec3{ 0.0f, 0.0f, 0.0f }               // FBX pivot at the feet
@@ -254,6 +257,7 @@ namespace engine::game
                 if (lodBucket[lod].empty()) continue;
                 render::InstanceBatch batch{};
                 batch.mesh = crowdMesh;
+                batch.shader = crowdShader;
                 batch.first = static_cast<std::uint32_t>(scene.meshInstances.size());
                 batch.count = static_cast<std::uint32_t>(lodBucket[lod].size());
                 batch.lod = static_cast<std::uint16_t>(lod);

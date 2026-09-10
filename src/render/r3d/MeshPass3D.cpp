@@ -174,7 +174,13 @@ namespace engine::render
             { "COLOR",    0, DXGI_FORMAT_R8G8B8A8_UNORM,  1, 20, D3D11_INPUT_PER_INSTANCE_DATA, 1 },   // colorRgba
             { "TEXCOORD", 4, DXGI_FORMAT_R32_FLOAT,       1, 24, D3D11_INPUT_PER_INSTANCE_DATA, 1 },   // animTime
         };
-        m_instShader = shaders.Get(device, "mesh_instanced", instanced, ARRAYSIZE(instanced));
+        // One shader per InstanceShader value; all share the layout above.
+        static constexpr const char* kInstShaderNames[static_cast<std::size_t>(InstanceShader::Count)] = {
+            "mesh_instanced",       // InstanceShader::Lit
+            "mesh_instanced_toon",  // InstanceShader::Toon
+        };
+        for (std::size_t i = 0; i < m_instShaders.size(); ++i)
+            m_instShaders[i] = shaders.Get(device, kInstShaderNames[i], instanced, ARRAYSIZE(instanced));
 
         const D3D11_INPUT_ELEMENT_DESC instancedShadow[] = {
             { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,  0, D3D11_INPUT_PER_VERTEX_DATA,   0 },
@@ -483,7 +489,7 @@ namespace engine::render
     {
         const Scene3D& scene = context.snapshot->scene3d;
         const bool hasUnique = !scene.meshDraws.empty() && m_shader != nullptr;
-        const bool hasInstanced = !scene.instanceBatches.empty() && m_instShader != nullptr;
+        const bool hasInstanced = !scene.instanceBatches.empty() && m_instShaders[0] != nullptr;
         if (!hasUnique && !hasInstanced) return;
 
         ID3D11DeviceContext* device = context.context;
@@ -573,8 +579,12 @@ namespace engine::render
     // skips far-LOD batches (their shadows do not read). docs/instanced-rendering.md §4.
     void MeshPass3D::DrawInstanced(ID3D11DeviceContext* device, const Scene3D& scene, bool shadow)
     {
-        const ShaderProgram* program = shadow ? m_shadowInstShader : m_instShader;
-        if (program == nullptr || m_instanceBuffer == nullptr) return;
+        // Shadow: one depth-only shader for every batch. Colour: per-batch, from
+        // m_instShaders[batch.shader] - bound lazily in the loop below.
+        const ShaderProgram* shadowProg = m_shadowInstShader;
+        if (m_instanceBuffer == nullptr) return;
+        if (shadow && shadowProg == nullptr) return;
+        if (!shadow && m_instShaders[0] == nullptr) return;
 
         const UINT total = static_cast<UINT>(
             std::min<std::size_t>(scene.meshInstances.size(), kMaxInstances));
@@ -595,11 +605,13 @@ namespace engine::render
         std::memcpy(mapped.pData, scene.meshInstances.data(), total * sizeof(MeshInstance));
         device->Unmap(m_instanceBuffer, 0);
 
-        device->IASetInputLayout(program->inputLayout);
-        device->VSSetShader(program->vs, nullptr, 0);
-        if (!shadow)
+        if (shadow)
         {
-            device->PSSetShader(program->ps, nullptr, 0);
+            device->IASetInputLayout(shadowProg->inputLayout);
+            device->VSSetShader(shadowProg->vs, nullptr, 0);
+        }
+        else
+        {
             ID3D11ShaderResourceView* srv = m_crowdDiffuseSrv != nullptr ? m_crowdDiffuseSrv : m_whiteSrv;
             device->PSSetShaderResources(0, 1, &srv);
             device->PSSetSamplers(0, 1, &m_sampler);
@@ -607,7 +619,8 @@ namespace engine::render
             device->VSSetShaderResources(2, 1, &m_vatSrv);   // used only by the CrowdModel batch below
         }
 
-        MeshId vatArmedFor = MeshId::Count;   // avoid redundant cbuffer writes across batches
+        MeshId vatArmedFor = MeshId::Count;                // avoid redundant cbuffer writes across batches
+        InstanceShader boundShader = InstanceShader::Count;// colour pass: last shader bound
         for (const InstanceBatch& batch : scene.instanceBatches)
         {
             if (shadow && batch.lod >= 2) continue;                 // far crowd casts no shadow
@@ -617,6 +630,18 @@ namespace engine::render
 
             const GpuMesh& mesh = m_meshes[static_cast<std::size_t>(batch.mesh)];
             if (mesh.vertexBuffer == nullptr) continue;
+
+            // Colour pass: bind the batch's shader (all variants share the layout).
+            if (!shadow && batch.shader != boundShader)
+            {
+                const std::size_t si = static_cast<std::size_t>(batch.shader);
+                const ShaderProgram* prog = si < m_instShaders.size() ? m_instShaders[si] : m_instShaders[0];
+                if (prog == nullptr) prog = m_instShaders[0];
+                device->IASetInputLayout(prog->inputLayout);
+                device->VSSetShader(prog->vs, nullptr, 0);
+                device->PSSetShader(prog->ps, nullptr, 0);
+                boundShader = batch.shader;
+            }
 
             // VAT applies only to the CrowdModel mesh; other meshes (cube) must
             // draw their bind pose (frameCount 0). One cbuffer write per switch.
@@ -647,7 +672,7 @@ namespace engine::render
         }
         m_shader = nullptr;             // owned by ShaderLibrary
         m_shadowShader = nullptr;       // owned by ShaderLibrary
-        m_instShader = nullptr;         // owned by ShaderLibrary
+        for (const ShaderProgram*& p : m_instShaders) p = nullptr;   // owned by ShaderLibrary
         m_shadowInstShader = nullptr;   // owned by ShaderLibrary
         SafeRelease(m_vatSrv);
         SafeRelease(m_vatInfo);

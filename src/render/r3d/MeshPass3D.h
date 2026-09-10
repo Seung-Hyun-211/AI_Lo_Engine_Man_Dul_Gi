@@ -55,7 +55,8 @@ namespace engine::render
         std::array<GpuMesh, static_cast<std::size_t>(MeshId::Count)> m_meshes{};
         const ShaderProgram* m_shader{};              // owned by ShaderLibrary
         const ShaderProgram* m_shadowShader{};        // depth-only, owned by ShaderLibrary
-        const ShaderProgram* m_instShader{};          // instanced crowd, owned by ShaderLibrary
+        // One per InstanceShader value; a batch picks m_instShaders[batch.shader].
+        std::array<const ShaderProgram*, static_cast<std::size_t>(InstanceShader::Count)> m_instShaders{};
         const ShaderProgram* m_shadowInstShader{};    // instanced depth-only, owned by ShaderLibrary
         ID3D11Buffer* m_frameConstants{};
         ID3D11Buffer* m_objectConstants{};

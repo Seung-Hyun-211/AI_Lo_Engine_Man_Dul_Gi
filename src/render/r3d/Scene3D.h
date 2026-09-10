@@ -45,14 +45,26 @@ namespace engine::render
         float         animTime{ 0.0f };   // seconds into the crowd VAT clip; ignored when no VAT (offset 24)
     };                                    // 28 bytes, no padding
 
-    // A contiguous run of Scene3D::meshInstances that share a mesh (and LOD).
-    // One batch == one DrawIndexedInstanced call. docs/instanced-rendering.md §3.
+    // Which instanced shader a batch draws with. Every variant consumes the
+    // same input layout (mesh vertex + per-instance stream + VAT), so the
+    // SnapshotBuilder can pick one per batch without touching the pipeline.
+    // Add a value + its assets/shaders/<name>.hlsl in MeshPass3D::kInstShaderNames.
+    enum class InstanceShader : std::uint16_t
+    {
+        Lit = 0,    // mesh_instanced.hlsl       - smooth hemisphere + key
+        Toon = 1,   // mesh_instanced_toon.hlsl  - cel bands + key
+        Count
+    };
+
+    // A contiguous run of Scene3D::meshInstances that share a mesh, shader and
+    // LOD. One batch == one DrawIndexedInstanced call. docs/instanced-rendering.md §3.
     struct InstanceBatch
     {
-        MeshId        mesh{ MeshId::Cube };
-        std::uint32_t first{ 0 };         // start index into Scene3D::meshInstances
-        std::uint32_t count{ 0 };
-        std::uint16_t lod{ 0 };           // 0 near / 1 mid / 2 far - reserved (LOD buckets: §5)
+        MeshId         mesh{ MeshId::Cube };
+        InstanceShader shader{ InstanceShader::Lit };
+        std::uint32_t  first{ 0 };        // start index into Scene3D::meshInstances
+        std::uint32_t  count{ 0 };
+        std::uint16_t  lod{ 0 };          // 0 near / 1 mid / 2 far - reserved (LOD buckets: §5)
     };
 
     // Camera for the 3D passes this frame.

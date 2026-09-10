@@ -15,23 +15,34 @@ namespace engine::game
         Model,   // the FBX MeshPass3D loads into MeshId::CrowdModel (kCrowdModelFbx)
     };
 
+    // Which instanced shader the crowd batch draws with. SnapshotBuilder maps
+    // this to render::InstanceShader (so game/ stays render-header-free).
+    enum class CrowdShading : std::uint8_t
+    {
+        Smooth,  // mesh_instanced.hlsl      (hemisphere + smooth key)
+        Toon,    // mesh_instanced_toon.hlsl (cel bands)
+    };
+
     struct CrowdConfig
     {
-        int       count;           // live agents on the field
-        int       capacity;        // core::ObjectPool slot count (>= count, spawn/despawn headroom)
-        CrowdMesh mesh;            // which mesh each agent is drawn as
-        float     height;          // rendered instance height in metres (inst.scale)
-        float     colliderRadius;  // gameplay collision sphere radius (centre = height * 0.5 above the feet)
+        int          count;           // live agents on the field
+        int          capacity;        // core::ObjectPool slot count (>= count, spawn/despawn headroom)
+        CrowdMesh    mesh;            // which mesh each agent is drawn as
+        CrowdShading shading;         // which instanced shader the batch uses
+        float        height;          // rendered instance height in metres (inst.scale)
+        float        colliderRadius;  // gameplay collision sphere radius (centre = height * 0.5 above the feet)
     };
 
     // --- presets -------------------------------------------------------------
     // The original demo: 600 cubes. Restore with `kActiveCrowd = kCrowdBoxes`.
     inline constexpr CrowdConfig kCrowdBoxes{
-        /*count*/ 600, /*capacity*/ 1024, CrowdMesh::Cube, /*height*/ 0.5f, /*colliderRadius*/ 0.30f };
+        /*count*/ 600, /*capacity*/ 1024, CrowdMesh::Cube, CrowdShading::Smooth,
+        /*height*/ 0.5f, /*colliderRadius*/ 0.30f };
 
-    // 1500 instanced zombie meshes (assets/models/zombie/Zombie1.FBX, static).
+    // 1500 instanced zombie meshes (assets/models/zombie/Zombie1.FBX, VAT run clip).
     inline constexpr CrowdConfig kCrowdZombies{
-        /*count*/ 1500, /*capacity*/ 2048, CrowdMesh::Model, /*height*/ 1.8f, /*colliderRadius*/ 0.50f };
+        /*count*/ 1500, /*capacity*/ 2048, CrowdMesh::Model, CrowdShading::Smooth,
+        /*height*/ 1.8f, /*colliderRadius*/ 0.50f };
 
     // ---- the one knob ----
     inline constexpr CrowdConfig kActiveCrowd = kCrowdZombies;

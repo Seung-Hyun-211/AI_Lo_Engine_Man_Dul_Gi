@@ -131,10 +131,10 @@ SnapshotBuilder (game/)
 - **씬 전환**: `src/game/Simulation.h` 의 `Simulation::kDemoScene` 를 `1` 또는 `2` 로. 리빌드.
   (런타임 토글이 필요해지면 생성자 인자로 승격 — 지금은 YAGNI.)
 - **군중 설정 = `game/CrowdConfig.h` 의 `kActiveCrowd`** (한 줄). 프리셋: `kCrowdBoxes`(600 큐브,
-  원래 데모) / `kCrowdZombies`(1500, `Zombie1.FBX` 정적). `CrowdConfig{count, capacity, mesh,
-  height, colliderRadius}` — `Simulation`(스폰·풀·콜라이더)·`SnapshotBuilder`(메시·높이·피벗)가
-  전부 이걸 읽는다. 수치만 바꾸려면 프리셋 필드 조정. 모델 파일은
-  `MeshPass3D.cpp` 의 `kCrowdModelFbx`. 상세 [instanced-rendering.md](instanced-rendering.md) §9.5.
+  원래 데모) / `kCrowdZombies`(1500, `Zombie1.FBX` + VAT). `CrowdConfig{count, capacity, mesh,
+  shading, height, colliderRadius}` — `Simulation`(스폰·풀·콜라이더)·`SnapshotBuilder`(메시·셰이더·
+  높이·피벗)가 전부 이걸 읽는다. `shading`(`Smooth`/`Toon`)이 배치 셰이더를 고른다(§9.7). 모델
+  파일은 `MeshPass3D.cpp` 의 `kCrowdModelFbx`. 상세 [instanced-rendering.md](instanced-rendering.md) §9.5·§9.7.
   렌더는 배치 1~2개 = `DrawIndexedInstanced`, 상한 `MeshPass3D::kMaxInstances`(16384). 좀비
   ~4.8k tris → 1500 ≈ 7M tris/프레임(실 GPU 여유, WARP 느림).
 - **좀비 메시**: `Zombie1.FBX`(정적 bind pose, T포즈). **Z-up** 으로 들어와서(ufbx axis target

@@ -116,6 +116,7 @@
     <None Include="assets\shaders\crease.hlsl" />
     <None Include="assets\shaders\mesh.hlsl" />
     <None Include="assets\shaders\mesh_instanced.hlsl" />
+    <None Include="assets\shaders\mesh_instanced_toon.hlsl" />
     <None Include="assets\shaders\shadow_instanced.hlsl" />
     <None Include="assets\shaders\model.hlsl" />
     <None Include="assets\shaders\outline.hlsl" />

@@ -302,9 +302,10 @@ for (std::uint32_t i : pool.ActiveIndices())
 for (int lod = 0; lod < 3; ++lod)
 {
     if (lodBucket[lod].empty()) continue;
-    render::InstanceBatch b{ mesh /*Cube 또는 CrowdModel*/,
-        (std::uint32_t)scene.meshInstances.size(), (std::uint32_t)lodBucket[lod].size(),
-        (std::uint16_t)lod };
+    render::InstanceBatch b{};
+    b.mesh = mesh; b.shader = crowdShader; b.lod = (std::uint16_t)lod;   // §9.7
+    b.first = (std::uint32_t)scene.meshInstances.size();
+    b.count = (std::uint32_t)lodBucket[lod].size();
     scene.meshInstances.insert(scene.meshInstances.end(),
                                lodBucket[lod].begin(), lodBucket[lod].end());
     scene.instanceBatches.push_back(b);
@@ -626,6 +627,24 @@ inline constexpr CrowdConfig kActiveCrowd = kCrowdZombies;   // ← 이 줄만 �
 (`src/anim/`, `animation-design.md` §1) · `import::LoadImageFromFile`(`image-assets.md`) ·
 `ModelMeshPass3D` 의 디퓨즈 SRV·스키닝 코드(복붙 템플릿) · 이 문서의 인스턴스 버퍼+컬+LOD ·
 VAT 상세 `horde-design.md` §5(레이아웃·베이크·`horde.hlsl`·LOD·구현순서 §7).
+
+### 9.7 배치별 셰이더 매치 — **구현됨**
+
+배치(= 엔티티 그룹)마다 다른 인스턴스 셰이더를 고를 수 있다.
+
+- `render::InstanceShader` enum (`Scene3D.h`): `Lit`(`mesh_instanced.hlsl`) / `Toon`
+  (`mesh_instanced_toon.hlsl`, `ApplyCelLighting`). `InstanceBatch.shader` 필드.
+- **모든 변형은 같은 입력 레이아웃**(mesh 정점 + per-instance 스트림 + VAT)을 쓴다 → IA·VB·VAT
+  바인딩 그대로, VS/PS 만 갈아끼운다. 값 추가 = enum + `MeshPass3D::kInstShaderNames[]` 에
+  `assets/shaders/<name>.hlsl` 한 줄.
+- `MeshPass3D::Initialize` 가 `m_instShaders[]`(값당 하나) 로드. `DrawInstanced` 가 배치 루프에서
+  `batch.shader` 바뀔 때만 VS/PS/IL 재바인딩(`boundShader` 추적). 셰도우 패스는 depth-only 라
+  셰이더 1개로 전 배치.
+- `SnapshotBuilder` 가 `kActiveCrowd.shading`(`game/CrowdConfig.h` 의 `CrowdShading{Smooth,Toon}`)
+  → `crowdShader` → 모든 크라우드 배치에 세팅. 지금은 크라우드 전체가 한 셰이더지만,
+  **엔티티 종류별로 다른 셰이더**를 쓰려면 배치 조립 키를 `(mesh, shader, lod)` 로 늘리고
+  `SimAgent`(또는 kind 테이블)에서 `shader` 를 읽어 버킷을 나눈다.
+- 유니크 프롭(`meshDraws`)은 아직 `mesh.hlsl` 고정 — 필요하면 `MeshDraw` 에 같은 필드 추가.
 
 ---
 
