@@ -216,16 +216,40 @@ namespace engine::render
             return;
         }
 
+        const auto bbox = [&](float& x0, float& y0, float& z0, float& x1, float& y1, float& z1)
+        {
+            x0 = y0 = z0 = 1e30f;  x1 = y1 = z1 = -1e30f;
+            for (const MeshVertex& v : data.vertices)
+            {
+                x0 = std::min(x0, v.px); x1 = std::max(x1, v.px);
+                y0 = std::min(y0, v.py); y1 = std::max(y1, v.py);
+                z0 = std::min(z0, v.pz); z1 = std::max(z1, v.pz);
+            }
+        };
+
+        float minX, minY, minZ, maxX, maxY, maxZ;
+        bbox(minX, minY, minZ, maxX, maxY, maxZ);
+
+        // This asset (and many 3ds Max exports) came through Z-up: feet near
+        // z = 0, head near z = max, and the Z span is the real height. ufbx's
+        // axis target did not reorient it. Rotate Z-up -> Y-up in place:
+        // (x, y, z) -> (-x, z, y). That is a proper rotation (det +1, no mirror,
+        // so lighting stays correct) and, for this rig, leaves the zombie facing
+        // +Z (engine forward = yaw 0). If they moonwalk, use (x, z, -y) instead.
+        const bool zUp = (maxZ - minZ) > (maxY - minY) && minZ > -2.0f;
+        if (zUp)
+        {
+            for (MeshVertex& v : data.vertices)
+            {
+                const float py = v.py, pz = v.pz, ny = v.ny, nz = v.nz;
+                v.px = -v.px;  v.py = pz;  v.pz = py;
+                v.nx = -v.nx;  v.ny = nz;  v.nz = ny;
+            }
+            bbox(minX, minY, minZ, maxX, maxY, maxZ);
+        }
+
         // Normalise: feet at y = 0, centred on x/z, total height 1. The
         // SnapshotBuilder scales each instance to the metre height it wants.
-        float minX = 1e30f, minY = 1e30f, minZ = 1e30f;
-        float maxX = -1e30f, maxY = -1e30f, maxZ = -1e30f;
-        for (const MeshVertex& v : data.vertices)
-        {
-            minX = std::min(minX, v.px); maxX = std::max(maxX, v.px);
-            minY = std::min(minY, v.py); maxY = std::max(maxY, v.py);
-            minZ = std::min(minZ, v.pz); maxZ = std::max(maxZ, v.pz);
-        }
         const float s = 1.0f / std::max(maxY - minY, 1e-4f);
         const float cx = (minX + maxX) * 0.5f;
         const float cz = (minZ + maxZ) * 0.5f;
