@@ -130,9 +130,9 @@ SnapshotBuilder (game/)
   가 프레임 비용. 더 키우려면 SoA·D3b·VAT — [instanced-rendering.md](instanced-rendering.md) §8,
   [collider-design.md](collider-design.md), [horde-design.md](horde-design.md) §5.
 - **좀비 메시**: `assets/models/zombie/Zombie1.FBX`(정적 bind pose, T포즈). 이 FBX 는 **Z-up**
-  으로 들어와서(ufbx axis target 무시됨) `MeshPass3D::LoadZombieMesh` 가 감지해 `(x,y,z)→(-x,z,y)`
-  로 회전(det +1) 후 발 원점·단위 높이 정규화 → `inst.scale`(=1.8) 로 1.8m. 뒤로 걷는(문워크)처럼
-  보이면 그 회전을 `(x,z,-y)` 로 바꾼다. 애니메이션은 VAT 선행.
+  으로 들어와서(ufbx axis target 무시됨) `MeshPass3D::LoadZombieMesh` 가 감지해 `(x,y,z)→(x,z,-y)`
+  로 회전(det +1, 이 릭은 정면이 -Y 라 이 방향이 +Z 를 봄) 후 발 원점·단위 높이 정규화 →
+  `inst.scale`(=1.8) 로 1.8m. 다시 문워크면 `(-x,z,y)` 로. 애니메이션은 VAT 선행.
 - **풀 churn 속도**: `kAgentChurnIntervalSteps`(현재 12스텝마다 1마리 재활용 — 데모용 검증 churn).
   키우면 재활용이 덜 눈에 띈다. 웨이브 스폰/디스폰이 생기면 이 churn 은 제거.
 - **필드·메사 치수**: `kCliffTop`(메사 높이), `kPlateauHalf`(플레이어 이동 반경), `kFieldHalf`

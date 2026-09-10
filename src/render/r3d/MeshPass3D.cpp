@@ -233,17 +233,18 @@ namespace engine::render
         // This asset (and many 3ds Max exports) came through Z-up: feet near
         // z = 0, head near z = max, and the Z span is the real height. ufbx's
         // axis target did not reorient it. Rotate Z-up -> Y-up in place:
-        // (x, y, z) -> (-x, z, y). That is a proper rotation (det +1, no mirror,
-        // so lighting stays correct) and, for this rig, leaves the zombie facing
-        // +Z (engine forward = yaw 0). If they moonwalk, use (x, z, -y) instead.
+        // (x, y, z) -> (x, z, -y). A proper rotation (det +1, no mirror, so
+        // lighting stays correct); this rig's front is -Y, so this leaves the
+        // zombie facing +Z (engine forward = yaw 0). Flip to (-x, z, y) if it
+        // moonwalks.
         const bool zUp = (maxZ - minZ) > (maxY - minY) && minZ > -2.0f;
         if (zUp)
         {
             for (MeshVertex& v : data.vertices)
             {
                 const float py = v.py, pz = v.pz, ny = v.ny, nz = v.nz;
-                v.px = -v.px;  v.py = pz;  v.pz = py;
-                v.nx = -v.nx;  v.ny = nz;  v.nz = ny;
+                v.py = pz;   v.pz = -py;
+                v.ny = nz;   v.nz = -ny;
             }
             bbox(minX, minY, minZ, maxX, maxY, maxZ);
         }
