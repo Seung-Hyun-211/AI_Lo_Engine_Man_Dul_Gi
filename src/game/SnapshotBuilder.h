@@ -2,6 +2,7 @@
 
 #include "game/Simulation.h"
 #include "render/RenderSnapshot.h"
+#include "render/r2d/TextureAtlas.h"
 #include "ui/UI.h"
 
 #include <cstddef>
@@ -20,11 +21,14 @@ namespace engine::game
         // in the simulation as the JobSystem benchmark; they are just not drawn.
         static constexpr std::size_t kVisibleParticleSample = 2'048;
 
-        // viewportWidth/Height set the 3D camera's aspect ratio.
+        // viewportWidth/Height set the 3D camera's aspect ratio. `uiAtlas` (may
+        // be nullptr) is the resident UI atlas manifest used to resolve named
+        // sprites into SpriteDraw uv rects.
         [[nodiscard]] render::RenderSnapshot Build(std::uint64_t frameNumber,
                                                    const Simulation& simulation,
                                                    const ui::UIContext& ui,
                                                    int viewportWidth,
-                                                   int viewportHeight) const;
+                                                   int viewportHeight,
+                                                   const render::AtlasIndex* uiAtlas = nullptr) const;
     };
 }

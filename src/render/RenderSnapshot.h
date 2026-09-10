@@ -32,5 +32,10 @@ namespace engine::render
 
         std::vector<Quad> worldQuads;
         std::vector<Quad> uiQuads;
+
+        // Textured UI (atlas sprites, glyphs once the font moves to an atlas),
+        // drawn by SpritePass2D after the quad passes. Grouped by (atlasId, clip)
+        // at draw time. See docs/texture-atlas-and-sprite-pass.md.
+        std::vector<SpriteDraw> uiSprites;
     };
 }

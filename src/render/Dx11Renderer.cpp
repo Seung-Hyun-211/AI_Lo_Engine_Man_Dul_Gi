@@ -46,14 +46,16 @@ namespace engine::render
 
     Dx11Renderer::~Dx11Renderer() { Stop(); }
 
-    void Dx11Renderer::AddRenderPass(std::unique_ptr<IRenderPass> pass)
+    void Dx11Renderer::AddRenderPass(std::unique_ptr<IRenderPass> pass, bool atEnd)
     {
         std::scoped_lock lock(m_mutex);
         if (m_running) throw std::logic_error("AddRenderPass must be called before Start()");
         if (!pass) return;
-        // Keep the trailing 2D overlay pass last so the UI stays on top; new
-        // passes slot in just before it.
-        if (m_passes.empty()) m_passes.push_back(std::move(pass));
+        // Default: slot in just before the trailing QuadPass2D overlay so the
+        // quad UI stays on top of 3D stages. `atEnd` appends after everything -
+        // for a pass that must run last (e.g. SpritePass2D, whose scissor
+        // rasterizer state would otherwise leak into QuadPass2D).
+        if (atEnd || m_passes.empty()) m_passes.push_back(std::move(pass));
         else m_passes.insert(m_passes.end() - 1, std::move(pass));
     }
 

@@ -1,5 +1,6 @@
 #include "game/Application.h"
 #include "render/Dx11Renderer.h"
+#include "render/r2d/SpritePass2D.h"
 #if defined(ENGINE_WITH_3D)
 #include "render/r3d/ModelMeshPass3D.h"
 #endif
@@ -25,6 +26,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
         renderer.AddRenderPass(std::make_unique<engine::render::ModelMeshPass3D>(
             "assets/models/unitychan/unitychan.fbx"));
 #endif
+        // Textured UI sprites + scissor clipping. Runs last (atEnd) so its
+        // scissor rasterizer state does not leak into QuadPass2D.
+        renderer.AddRenderPass(std::make_unique<engine::render::SpritePass2D>(
+            "assets/atlas/ui.0.dds"), /*atEnd=*/true);
         engine::game::Application application(instance, renderer);
         return application.Run();
     }

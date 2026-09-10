@@ -128,13 +128,46 @@ namespace engine::game
         // The old 2D overlay demo (player + obstacles + particles) is disabled;
         // set true to bring it back.
         constexpr bool kDrawLegacy2D = false;
+
+        // Temporary: exercises the SpritePass2D path end to end (white-sprite
+        // solid rect, two atlas sprites, one scissor-clipped). Replaced by real
+        // widget output once ui::DrawList lands.
+        void BuildDemoUiSprites(std::vector<render::SpriteDraw>& out, const render::AtlasIndex* atlas)
+        {
+            // Solid panel via the built-in white texture (atlasId 0).
+            render::SpriteDraw panel{};
+            panel.x = 24.0f; panel.y = 300.0f; panel.width = 320.0f; panel.height = 176.0f;
+            panel.r = 0.10f; panel.g = 0.13f; panel.b = 0.20f; panel.a = 0.92f;
+            out.push_back(panel);
+
+            if (atlas == nullptr || !atlas->Loaded()) return;
+
+            auto place = [&](const char* name, float x, float y, float size, math::Rect clip)
+            {
+                const render::SpriteRect* r = atlas->Find(name);
+                if (r == nullptr) return;
+                render::SpriteDraw s{};
+                s.x = x; s.y = y; s.width = size; s.height = size;
+                s.u0 = r->u0; s.v0 = r->v0; s.u1 = r->u1; s.v1 = r->v1;
+                s.atlasId = atlas->AtlasId();
+                s.clip = clip;
+                out.push_back(s);
+            };
+
+            place("icon_a", 44.0f, 320.0f, 96.0f, {});                       // unclipped
+            place("icon_b", 160.0f, 320.0f, 96.0f, {});                      // unclipped
+            // Same sprite again, scissored to a rect that cuts it in half -
+            // proves RSSetScissorRects.
+            place("icon_a", 44.0f, 430.0f, 96.0f, { 24.0f, 430.0f, 320.0f, 40.0f });
+        }
     }
 
     render::RenderSnapshot SnapshotBuilder::Build(std::uint64_t frameNumber,
                                                  const Simulation& simulation,
                                                  const ui::UIContext& ui,
                                                  int viewportWidth,
-                                                 int viewportHeight) const
+                                                 int viewportHeight,
+                                                 const render::AtlasIndex* uiAtlas) const
     {
         render::RenderSnapshot snapshot{};
         snapshot.frameNumber = frameNumber;
@@ -175,6 +208,7 @@ namespace engine::game
         }
 
         ui.Build(snapshot.uiQuads, static_cast<float>(viewportWidth), static_cast<float>(viewportHeight));
+        BuildDemoUiSprites(snapshot.uiSprites, uiAtlas);
         return snapshot;
     }
 }

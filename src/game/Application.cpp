@@ -20,6 +20,7 @@ namespace engine::game
                                 core::kResolutionPresets[static_cast<std::size_t>(m_settings.resolutionIndex)].height })
         , m_simulation(m_jobs, m_window.Width(), m_window.Height())
     {
+        m_uiAtlas.Load("assets/atlas/ui.atlas", render::kUiAtlasId);
         EnterTitle();
     }
 
@@ -86,7 +87,7 @@ namespace engine::game
                 // Submit every frame even with zero sim steps: the UI overlay may
                 // have changed and still needs to be redrawn.
                 m_renderer.Submit(m_snapshotBuilder.Build(m_frameNumber++, m_simulation, m_ui,
-                                                          m_window.Width(), m_window.Height()));
+                                                          m_window.Width(), m_window.Height(), &m_uiAtlas));
             }
         }
         catch (...)

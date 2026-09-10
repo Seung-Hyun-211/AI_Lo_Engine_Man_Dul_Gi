@@ -10,6 +10,7 @@
 #include "math/Math.h"
 #include "platform/Win32Window.h"
 #include "render/IRenderer.h"
+#include "render/r2d/TextureAtlas.h"
 #include "ui/UI.h"
 
 #include <Windows.h>
@@ -93,6 +94,10 @@ namespace engine::game
         ui::UIContext m_ui;
         Simulation m_simulation;
         SnapshotBuilder m_snapshotBuilder;
+        // Resident UI atlas manifest (name -> uv). The matching page pixels are
+        // loaded by SpritePass2D on the render thread; this CPU side is read by
+        // the snapshot builder to resolve named sprites.
+        render::AtlasIndex m_uiAtlas;
         core::FrameClock m_clock;
         core::FixedTimestep m_timestep;
         GameState m_state{ GameState::Title };

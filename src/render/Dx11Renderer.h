@@ -38,8 +38,10 @@ namespace engine::render
         ~Dx11Renderer() override;
 
         // Append a pass to the pipeline. Must be called before Start(); the pass
-        // is Initialize()d on the render thread during Start().
-        void AddRenderPass(std::unique_ptr<IRenderPass> pass);
+        // is Initialize()d on the render thread during Start(). By default the
+        // pass slots in just before the trailing QuadPass2D overlay; pass
+        // `atEnd = true` to append after everything (a pass that must run last).
+        void AddRenderPass(std::unique_ptr<IRenderPass> pass, bool atEnd = false);
 
         void Start(HWND window, std::uint32_t initialWidth, std::uint32_t initialHeight) override;
         void SetFrameSettings(FrameSettings settings) override;

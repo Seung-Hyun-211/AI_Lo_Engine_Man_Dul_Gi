@@ -35,6 +35,8 @@
     <ClCompile Include="src\physics\p3d\CollisionWorld3D.cpp" />
     <ClCompile Include="src\render\Dx11Renderer.cpp" />
     <ClCompile Include="src\render\r2d\QuadPass2D.cpp" />
+    <ClCompile Include="src\render\r2d\SpritePass2D.cpp" />
+    <ClCompile Include="src\render\r2d\TextureAtlas.cpp" />
     <ClCompile Include="src\render\r3d\MeshPass3D.cpp" />
     <ClCompile Include="src\render\r3d\ModelMeshPass3D.cpp" />
     <ClCompile Include="src\render\shader\ShaderLibrary.cpp" />
@@ -80,6 +82,8 @@
     <ClInclude Include="src\render\RenderSnapshot.h" />
     <ClInclude Include="src\render\r2d\QuadPass2D.h" />
     <ClInclude Include="src\render\r2d\Sprite2D.h" />
+    <ClInclude Include="src\render\r2d\SpritePass2D.h" />
+    <ClInclude Include="src\render\r2d\TextureAtlas.h" />
     <ClInclude Include="src\render\r3d\CharacterAnimationClips.h" />
     <ClInclude Include="src\render\r3d\FrameConstants.h" />
     <ClInclude Include="src\render\r3d\Lighting.h" />
@@ -98,6 +102,7 @@
     <None Include="assets\shaders\model.hlsl" />
     <None Include="assets\shaders\outline.hlsl" />
     <None Include="assets\shaders\quad2d.hlsl" />
+    <None Include="assets\shaders\sprite2d.hlsl" />
     <None Include="assets\shaders\shadow.hlsl" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
