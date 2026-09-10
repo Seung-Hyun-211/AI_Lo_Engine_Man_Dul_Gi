@@ -39,13 +39,17 @@ namespace engine::game
         /*count*/ 600, /*capacity*/ 1024, CrowdMesh::Cube, CrowdShading::Smooth,
         /*height*/ 0.5f, /*colliderRadius*/ 0.30f };
 
-    // 1500 instanced zombie meshes (assets/models/zombie/Zombie1.FBX, VAT run clip).
+    // Instanced zombie meshes (assets/models/zombie/Zombie1.FBX, VAT run clip).
+    // Toon shading to match the engine's default character look (cel.hlsl).
     inline constexpr CrowdConfig kCrowdZombies{
-        /*count*/ 1500, /*capacity*/ 2048, CrowdMesh::Model, CrowdShading::Smooth,
+        /*count*/ 5000, /*capacity*/ 8192, CrowdMesh::Model, CrowdShading::Toon,
         /*height*/ 1.8f, /*colliderRadius*/ 0.50f };
 
     // ---- the one knob ----
     inline constexpr CrowdConfig kActiveCrowd = kCrowdZombies;
+
+    static_assert(kActiveCrowd.capacity >= kActiveCrowd.count,
+                  "CrowdConfig.capacity must be >= count (ObjectPool would run out of slots)");
 
     [[nodiscard]] inline constexpr bool CrowdUsesModel() { return kActiveCrowd.mesh == CrowdMesh::Model; }
 }

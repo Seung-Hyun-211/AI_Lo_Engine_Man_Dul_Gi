@@ -56,6 +56,12 @@ namespace engine::game
                 }
 
                 const float delta = m_clock.Tick();
+                if (delta > 1e-6f)
+                {
+                    const float instant = 1.0f / delta;
+                    m_fpsSmoothed = m_fpsSmoothed <= 0.0f ? instant
+                                                          : m_fpsSmoothed * 0.9f + instant * 0.1f;
+                }
                 const PlayerIntent intent = BuildPlayerIntent();
                 // Global time scale: 0 = pause, 0.5 = slow-mo, 2 = fast-forward.
                 // Scaling the delta (not the fixed step size) keeps the sim
@@ -94,7 +100,8 @@ namespace engine::game
                 // Submit every frame even with zero sim steps: the UI overlay may
                 // have changed and still needs to be redrawn.
                 m_renderer.Submit(m_snapshotBuilder.Build(m_frameNumber++, m_simulation, m_ui,
-                                                          m_window.Width(), m_window.Height(), &m_uiAtlas));
+                                                          m_window.Width(), m_window.Height(),
+                                                          &m_uiAtlas, m_fpsSmoothed));
             }
         }
         catch (...)

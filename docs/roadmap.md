@@ -18,7 +18,7 @@
 | 에셋 | FBX+스키닝, 이미지 디코드 seam, atlas_pack v1(무압축) | — | BC7 압축, AssetRegistry, 비동기 로더, 핫리로드(아틀라스/모델), 글리프 아틀라스 |
 | 게임 프레임워크 | 씬 상태(Title/InGame/Settings), 고정 스텝 + time scale, EntityId 뼈대, `core::ObjectPool<T>`, 오디오 최소 믹서(XAudio2) | ScrollList v1 | **오디오 스트리밍/3D음, 세이브, 이벤트 버스, 프리팹/직렬화, 게임 루프(장르 미정)** |
 | 입력 | 키보드/마우스/휠 | — | 게임패드(XInput), 리바인딩, 액션맵 레이어 |
-| 툴/디버그 | entity 메모리 벤치, atlas_pack | — | 프레임타임 HUD/프로파일러, 인게임 콘솔, 엔티티 인스펙터, 리플레이 |
+| 툴/디버그 | entity 메모리 벤치, atlas_pack | — | 프레임타임 HUD/프로파일러(FPS 표시만 됨), 인게임 콘솔, 엔티티 인스펙터, 리플레이 |
 
 ---
 
@@ -149,7 +149,7 @@ if (auto hit = world.RaycastClosest(down)) { actor.pos.y = hit->point.y; actor.g
 | GPU 스키닝(`SkinnedMeshPass3D`) | 여러 캐릭터를 각자 다른 애니로 세우려면 필수 (`model-animation-research.md` §5.2) |
 | sRGB 렌더 파이프라인 | 감마 정확 (`lighting.md`) |
 | 시뮬/렌더 파이프라이닝 | 매 프레임 `ParallelFor().Wait()` 완전 블록 |
-| 프레임타임 HUD / 프로파일러 | 성능 회귀 감지 |
+| 프레임타임 HUD / 프로파일러 | 성능 회귀 감지 (FPS 우상단 표시는 됨 — playbook 9) |
 | 라이트 배열(포인트/스팟) + CSM | 단일 방향광·단일 캐스케이드 (`lighting.md`) |
 | 메시 LOD / 임포스터 | 디스턴스 스왑 없음 (인스턴스 크라우드 LOD 는 `instanced-rendering.md` §5, 메시 자체 LOD 는 별개) |
 | 스왑체인 `FLIP_DISCARD` | 레거시 `DISCARD` (`CLAUDE.md` 알려진 이슈) |

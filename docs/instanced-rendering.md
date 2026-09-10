@@ -561,14 +561,17 @@ m_jobs.ParallelFor(0, n, c, [&](size_t b, size_t e){ for(...) store.Despawn(i); 
 `Simulation`(스폰 수·풀 capacity·콜라이더)·`SnapshotBuilder`(메시·높이·피벗)가 전부 이걸 읽는다.
 
 ```cpp
-struct CrowdConfig { int count, capacity; CrowdMesh mesh; float height, colliderRadius; };
-inline constexpr CrowdConfig kCrowdBoxes  { 600, 1024, CrowdMesh::Cube,  0.5f, 0.30f };  // 원래 데모
-inline constexpr CrowdConfig kCrowdZombies{ 1500, 2048, CrowdMesh::Model, 1.8f, 0.50f };
+struct CrowdConfig { int count, capacity; CrowdMesh mesh; CrowdShading shading; float height, colliderRadius; };
+inline constexpr CrowdConfig kCrowdBoxes  { 600, 1024, CrowdMesh::Cube,  CrowdShading::Smooth, 0.5f, 0.30f };
+inline constexpr CrowdConfig kCrowdZombies{ 5000, 8192, CrowdMesh::Model, CrowdShading::Toon,  1.8f, 0.50f };
 inline constexpr CrowdConfig kActiveCrowd = kCrowdZombies;   // ← 이 줄만 바꾸면 스왑
+static_assert(kActiveCrowd.capacity >= kActiveCrowd.count, ...);   // 슬롯 부족 방지
 ```
 
 - **수치만 조정**: `count`/`capacity`/`height`/`colliderRadius` 를 고친 프리셋으로 교체.
-  `capacity >= count`(스폰/디스폰 여유). 콜라이더 중심은 `height*0.5`(자동).
+  `capacity >= count`(`static_assert` 로 강제). 콜라이더 중심은 `height*0.5`(자동).
+- **셰이딩**: `shading` = `Smooth`(`mesh_instanced.hlsl`) / `Toon`(`mesh_instanced_toon.hlsl`,
+  엔진 기본 셀 룩 — 플레이어 `cel.hlsl` 과 맞춤). 상세 §9.7.
 - **모델 파일 교체**: `render/r3d/MeshPass3D.cpp` 의 `kCrowdModelFbx` 를 새 FBX 경로로.
   `MeshPass3D::LoadCrowdMesh` 가 Z-up 자동 감지·정규화(발 원점·단위 높이) 하므로 임의 캐릭터
   FBX 대응. 정면이 뒤면 회전을 `(x,z,-y)`↔`(-x,z,y)` 로. 새 모델의 실측 키를 `CrowdConfig.height`
@@ -641,7 +644,8 @@ VAT 상세 `horde-design.md` §5(레이아웃·베이크·`horde.hlsl`·LOD·구
   `batch.shader` 바뀔 때만 VS/PS/IL 재바인딩(`boundShader` 추적). 셰도우 패스는 depth-only 라
   셰이더 1개로 전 배치.
 - `SnapshotBuilder` 가 `kActiveCrowd.shading`(`game/CrowdConfig.h` 의 `CrowdShading{Smooth,Toon}`)
-  → `crowdShader` → 모든 크라우드 배치에 세팅. 지금은 크라우드 전체가 한 셰이더지만,
+  → `crowdShader` → 모든 크라우드 배치에 세팅. **`kCrowdZombies` 는 `Toon` 이 기본**(엔진 셀 룩).
+  지금은 크라우드 전체가 한 셰이더지만,
   **엔티티 종류별로 다른 셰이더**를 쓰려면 배치 조립 키를 `(mesh, shader, lod)` 로 늘리고
   `SimAgent`(또는 kind 테이블)에서 `shader` 를 읽어 버킷을 나눈다.
 - 유니크 프롭(`meshDraws`)은 아직 `mesh.hlsl` 고정 — 필요하면 `MeshDraw` 에 같은 필드 추가.

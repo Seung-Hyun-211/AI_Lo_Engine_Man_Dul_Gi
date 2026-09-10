@@ -41,7 +41,7 @@
 | 6 | "렌더 백엔드 바꿔/추가해 (DX12 등)" | 새 클래스가 `render::IRenderer` 구현. `main.cpp`에서 생성 타입만 교체. UI/게임 코드는 불변 | 교체 vs 런타임 선택. 스냅샷 포맷 변경 필요 여부 | 새 `src/render/<Backend>.*`, `src/main.cpp`, (필요 시) `src/render/RenderSnapshot.h` |
 | 7 | "스왑체인 FLIP_DISCARD로" | `DXGI_SWAP_EFFECT_FLIP_DISCARD` + 프레임마다 RTV 재바인딩 확인. 필요 시 `IDXGISwapChain` 최소 버전 상향 | 없음 (권장 기본값). Win10 미만 지원 포기 여부 | `src/render/Dx11Renderer.cpp` |
 | 8 | "시뮬/렌더 파이프라이닝 / 더블 버퍼링" | 스냅샷 더블버퍼 + 프레임 N 시뮬과 N-1 렌더 병렬. `Application` 루프 재구성 | 입력 지연 1프레임 허용치. 스냅샷 보간 여부 | `src/game/Application.*`, `src/render/Dx11Renderer.*` |
-| 9 | "frame-time HUD / 프로파일러" | `core`에 스코프 타이머. `Application`이 프레임 시간·Fence 대기·worker 편차 수집 → UI `TextLine`으로 표시 | 표시 항목. 릴리스 빌드 포함 여부 | 새 `src/core/Profiler.*`, `src/game/Application.*`, `src/ui/UI.*` |
+| 9 | "frame-time HUD / 프로파일러 / FPS 표시" | **FPS 표시 됨**: `Application` 이 `1/delta` 를 EMA(`m_fpsSmoothed`) → `SnapshotBuilder::Build(fps)` → `ui::DrawRect`+`DrawText` 로 우상단(모든 화면 위). 확장(스코프 타이머·Fence 대기·worker 편차)은 새 `core/Profiler` | 표시 항목. 릴리스 빌드 포함 여부 | `src/game/Application.*`, `src/game/SnapshotBuilder.*`, (확장 시) 새 `src/core/Profiler.*` |
 | 10 | "빌드해 / 실행해 / 스모크 테스트" | CLI 빌드(`docs/engine-overview.md` "빌드"), exe 실행 후 수 초 생존 확인, 결과 보고. 이 환경은 GPU 없어 WARP 폴백이 정상 | 없음 | — |
 | 11 | "커밋해" | 변경 스테이징, 한국어 요약 메시지, `Co-Authored-By` 푸터. `main`이면 브랜치 먼저 | 커밋 범위·메시지 | — |
 

@@ -108,6 +108,7 @@ namespace engine::game
         core::FixedTimestep m_timestep;
         GameState m_state{ GameState::Title };
         float m_globalTimeScale{ 1.0f };
+        float m_fpsSmoothed{ 0.0f };   // EMA of 1/delta, shown top-right
 
         std::uint64_t m_frameNumber{};
         math::Vec2 m_pointerPosition{};

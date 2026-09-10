@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 
 #if defined(ENGINE_WITH_3D)
 #include "math/Math3D.h"
@@ -399,7 +401,8 @@ namespace engine::game
                                                  const ui::UIContext& ui,
                                                  int viewportWidth,
                                                  int viewportHeight,
-                                                 const render::AtlasIndex* uiAtlas) const
+                                                 const render::AtlasIndex* uiAtlas,
+                                                 float fps) const
     {
         render::RenderSnapshot snapshot{};
         snapshot.frameNumber = frameNumber;
@@ -441,6 +444,22 @@ namespace engine::game
 
         ui.Build(snapshot.uiQuads, static_cast<float>(viewportWidth), static_cast<float>(viewportHeight));
         BuildDemoUiSprites(snapshot.uiSprites, uiAtlas);
+
+        // Frame-rate readout, top-right, over every screen.
+        if (fps > 0.0f)
+        {
+            char text[24];
+            std::snprintf(text, sizeof(text), "%d FPS", static_cast<int>(fps + 0.5f));
+            constexpr float scale = 2.0f;
+            const float glyph = 6.0f * scale;                       // ui::DrawText advance
+            const float width = static_cast<float>(std::strlen(text)) * glyph;
+            const float x = static_cast<float>(viewportWidth) - width - 12.0f;
+            const float y = 12.0f;
+            ui::DrawRect(snapshot.uiQuads, { x - 6.0f, y - 4.0f, width + 8.0f, 7.0f * scale + 8.0f },
+                         { 0.0f, 0.0f, 0.0f, 0.45f });
+            ui::DrawText(snapshot.uiQuads, text, { x, y }, scale, { 1.0f, 0.95f, 0.35f, 1.0f });
+        }
+
         return snapshot;
     }
 }
