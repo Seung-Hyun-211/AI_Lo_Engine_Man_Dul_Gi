@@ -188,7 +188,14 @@ if (auto hit = world.RaycastClosest(down)) { actor.pos.y = hit->point.y; actor.g
 4. **장르/시놉시스 확정** — 부분 완료: 장르 **대규모 디펜스** 확정(`synopsis.md`). 남은 결정: 시점, 저지 수단, 적 표현.
 5. **AssetRegistry + 비동기 로더** (`loading-and-streaming.md` 설계 완료 → 구현) — 시작 시 검은 창을 없애고, 씬 전환·아틀라스 그룹 로드를 가능하게 한다.
 
-착수 순서 제안: **1·2·3 완료 → (4 결정) → 5**. 다음: 디펜스 게임 우선순위 D2(SoA + `ObjectPool`) → D3(브로드페이즈) → D5(웨이브/HP/목표).
+착수 순서 제안: **1·2·3 완료 → (4 결정) → 5**.
+
+**현재 위치 (2026-09 기준)**: D1 ✅ · D4(인스턴싱) 컬까지 ✅ · D2(`ObjectPool`) ✅. 남은 갈래:
+- **D4 잔여 — LOD 버킷/빌보드** (`instanced-rendering.md` §8-3): 인프라 트랙 계속. 규모가 커질 때 실효.
+- **D1 잔여 — `Simulation`↔`CollisionWorld3D` 연동 + `Ray2D`/`RayHit2D`** (`collider-design.md`): 타워 타겟팅·지면 검사 실제 배선. 게임플레이 쪽으로 한 발.
+- **D3 — 브로드페이즈(균일 그리드)** → **D5 — 웨이브/HP/목표·패배**: 게임 루프.
+
+게임 사이클 전이면 D4-LOD 또는 D1 잔여 중 택1이 자연스럽다.
 
 ---
 

@@ -39,18 +39,20 @@
 
 ---
 
-## 2. 아키텍처 개요
+## 2. 아키텍처 개요 (목표 — `[now]` 표시가 현재 구현)
 
 ```text
 [메인 스레드 / 고정 timestep — Simulation::Step]
-  AgentStore (game/)               고정 capacity SoA: pos/yaw/scale/kind/… + ObjectPool free-list
-    ├─ Spawn/Despawn               스텝 사이에만 (불변 규칙 6)
-    └─ JobSystem::ParallelFor      [begin,end) 범위별 이동/거동 (StepSimAgents 가 프로토타입)
+  개체 저장소 (game/)
+    [now] core::ObjectPool<SimAgent> (AoS) 를 Simulation 이 직접 소유. AgentStore(SoA)는 §6.2.
+    ├─ Spawn/Despawn               스텝 사이에만 (불변 규칙 6). [now] 12스텝마다 1마리 churn
+    └─ JobSystem::ParallelFor      ActiveIndices() 를 [begin,end) 로 쪼개 이동/거동 (StepSimAgents)
 
 [SnapshotBuilder::Build — 메인 스레드, Step 이후]
-  카메라 viewProj → 6 프러스텀 평면
-  for each agent:  프러스텀·최대거리 컬 → LOD 버킷(거리) → tmp[lod] 에 MeshInstance push
-  tmp 를 (meshId, lod) 순으로 이어붙여 scene.meshInstances + scene.instanceBatches 생성
+  카메라 viewProj → 6 프러스텀 평면 (MakeFrustum, SnapshotBuilder 익명)
+  for each agent:  프러스텀·최대거리 컬 → [목표] LOD 버킷(거리) → MeshInstance push
+                   [now] LOD 없음 — 컬 통과분을 배치 1개로
+  scene.meshInstances + scene.instanceBatches
                                    (배치 = 연속 구간 [first, first+count), meshId, lod)
 
 [스레드 경계]  RenderSnapshot (값) — scene3d.meshInstances[], scene3d.instanceBatches[]
@@ -134,7 +136,8 @@ const D3D11_INPUT_ELEMENT_DESC instanced[] = {
 };
 ```
 
-- `InstanceDataStepRate = 1`. slot 1 stride = `sizeof(MeshInstance)` = 20.
+- `InstanceDataStepRate = 1`. slot 1 stride = `sizeof(MeshInstance)` = 24. `MeshPass3D` 는
+  `static_assert(sizeof(MeshInstance) == 24)` 로 이 오프셋 가정을 고정한다.
 - 셰이더는 `assets/shaders/mesh_instanced.hlsl` 로 **별 파일** — 인라인 `D3DCompile` 금지,
   `shaders.Get(device, "mesh_instanced", instanced, ARRAYSIZE(instanced))` ([shader-pipeline.md](shader-pipeline.md)).
   (또는 `ShaderLibrary` 에 매크로 순열이 생기면 `mesh.hlsl` + `#define INSTANCED` 하나로. 지금은
@@ -238,38 +241,46 @@ pos/yaw/scale, depth-only, PS 없음). 원거리 LOD(2)는 셰도우에서 생�
 
 `BuildScene3D` 가 `Step` 이후 메인 스레드에서 돈다 — 여기서 잘라내는 게 가장 싸다(GPU 로 안 보냄).
 
-### 5.1 프러스텀 추출
+### 5.1 프러스텀 추출 — **구현됨** (`SnapshotBuilder.cpp` 익명 네임스페이스)
 
 ```cpp
-// viewProj (= camera.view * camera.projection, row-major, row-vector 규약) 에서 6평면.
-// 평면 p: dot(p.xyz, world) + p.w >= 0 이면 안쪽. 정규화는 반지름 비교 위해 필요.
-struct Frustum { math::Vec4 planes[6]; };
-Frustum MakeFrustum(const math::Mat4& vp);          // 표준 Gribb-Hartmann
-bool SphereInFrustum(const Frustum&, math::Vec3 c, float r);
+struct Plane { float a, b, c, d; };          // a*x + b*y + c*z + d >= 0 이면 안쪽
+struct Frustum { Plane p[6]; };
+Frustum   MakeFrustum(const math::Mat4& vp);            // Gribb-Hartmann, 이 엔진 행렬 규약
+bool      SphereInFrustum(const Frustum&, math::Vec3 c, float r);
+math::Vec3 EyeFromView(const math::Mat4& view);         // LookAtLH view → 카메라 위치
 ```
 
-`math/Math3D.h` 에 `MakeFrustum` / `SphereInFrustum` 를 추가(순수 값 함수, 2D 와 무관 —
-`ENGINE_WITH_3D`). `math::Vec4` 가 없으면 `float[4]` 로.
+- `viewProj = camera.view * camera.projection` (row-major, row-vector). 열 k = `(m[k], m[4+k],
+  m[8+k], m[12+k])`; left=col3+col0, right=col3-col0, bottom=col3+col1, top=col3-col1,
+  **near=col2**(이 엔진 투영은 clip z ∈ [0,w]), far=col3-col2. 각 평면은 `(a,b,c)` 길이로 정규화.
+- 지금은 `math` 가 아니라 `SnapshotBuilder` 익명에 둔다(유일 사용처). **두 번째 사용처가
+  생기면 `math/Math3D.h` 로 승격**(순수 값 함수, `ENGINE_WITH_3D`).
 
-### 5.2 컬 + LOD 버킷
+### 5.2 컬 + LOD 버킷 — **컬만 구현, LOD 버킷은 미구현 (§8-3)**
+
+현재 `BuildCliffScene` 은 LOD 없이 컬만 한다:
 
 ```cpp
-// BuildScene3D 안, 군중 방출부
-const Frustum fr = MakeFrustum(scene.camera.view * scene.camera.projection);
-const math::Vec3 camPos = /* eye — BuildCamera 에서 같이 넘기거나 view 역행렬 */;
-
-std::vector<render::MeshInstance> bucket[3];   // 0 근 / 1 중 / 2 원
-for (const SimAgent& a : simulation.SimAgents())
+const Frustum frustum = MakeFrustum(scene.camera.view * scene.camera.projection);
+const math::Vec3 eye = EyeFromView(scene.camera.view);
+const auto& pool = simulation.SimAgents();               // core::ObjectPool<SimAgent>
+for (std::uint32_t i : pool.ActiveIndices())
 {
-    if (!SphereInFrustum(fr, a.pos, kAgentRadius)) continue;
-    const float d2 = LengthSq(a.pos - camPos);
-    if (d2 > kCullDist * kCullDist) continue;
-    const int lod = d2 < kLodNear*kLodNear ? 0 : (d2 < kLodMid*kLodMid ? 1 : 2);
-    bucket[lod].push_back({ a.pos, a.heading, kAgentScale, PackRgba(ColorFor(a)) });
+    const SimAgent& a = pool.Slots()[i];
+    const math::Vec3 center = a.pos + math::Vec3{ 0, kAgentScale * 0.5f, 0 };
+    if (!SphereInFrustum(frustum, center, kAgentCullRadius)) continue;   // kAgentCullRadius = 0.5
+    const math::Vec3 d = center - eye;
+    if (math::Dot(d, d) > kAgentCullDist * kAgentCullDist) continue;     // kAgentCullDist   = 90
+    scene.meshInstances.push_back({ center, a.heading, kAgentScale, PackRgba(...) });
 }
 ```
 
-### 5.3 배치 조립
+**LOD 목표** (§8-3): `d2` 로 `bucket[0..2]` 를 나누고, `bucket` 을 `(meshId, lod)` 순으로
+`meshInstances` 에 이어붙여 배치를 여러 개 만든다. `InstanceBatch.lod` 필드와
+`MeshPass3D::DrawInstanced` 의 `lod >= 2` 셰도우 컷은 이미 배선돼 있다.
+
+### 5.3 배치 조립 (LOD 시)
 
 ```cpp
 // 지금은 메시가 Cube 하나뿐 → LOD 별로 배치 3개. 메시 종류가 늘면 (meshId,lod) 로 중첩.
@@ -291,8 +302,8 @@ for (int lod = 0; lod < 3; ++lod)
   단색/스프라이트. 1차 구현은 그냥 "작은 큐브 그대로, 그림자 생략"으로 시작하고 빌보드는 나중.
 - **정렬**: 불투명이라 앞뒤 정렬 불필요. `(mesh,lod)` 로만 그룹. 반투명 인스턴스가 생기면 거리
   내림차순 정렬 배치 추가.
-- 튜닝 상수(`kCullDist`, `kLodNear`, `kLodMid`, `kAgentRadius`, `kMaxInstances`)는 `SnapshotBuilder`
-  익명 네임스페이스 `constexpr`.
+- 튜닝 상수: `kAgentCullDist`, `kAgentCullRadius`, `kAgentScale` 는 `BuildCliffScene` 안
+  `constexpr`(구현됨). LOD 경계 `kLodNear`/`kLodMid` 는 §8-3 에서 추가.
 
 ---
 
@@ -426,7 +437,7 @@ namespace engine::game
 | 4 (1슬롯 메일박스) | ~192KB/프레임(8k), 오래된 프레임 버려도 무해 |
 | 6 (ParallelFor 범위 독립) | `StepSimAgents` 워커는 `ActiveIndices()` 의 자기 `[begin,end)` → `Slots()[active[k]]` 만 쓰기(슬롯 인덱스 유일 → 충돌 없음). `ObjectPool::Acquire/Release`(churn) 는 `Wait()` 뒤 메인에서만 |
 | 7 (2D/3D 분리) | `MeshInstance`/`InstanceBatch` 는 `render/r3d`; `SimAgent`/`ObjectPool` 사용은 전부 `#if ENGINE_WITH_3D`. `MakeFrustum` 는 `SnapshotBuilder` 익명(값). `core::ObjectPool` 자체는 모듈 중립 |
-| 8 (충돌은 탐지만) | 브로드페이즈는 후보 목록만. 분리력·넉백은 `AgentStore` 안, physics 밖 |
+| 8 (충돌은 탐지만) | 브로드페이즈는 후보 목록만. 분리력·넉백은 크라우드 스텝(`StepSimAgents` / 장차 `AgentStore`) 안, physics 밖 |
 
 ---
 
@@ -461,16 +472,19 @@ namespace engine::game
 ### 9.1 군중/다수 오브젝트를 인스턴스로 방출
 
 ```cpp
-// SnapshotBuilder 안. 개체마다 push 하는 대신:
+// SnapshotBuilder 안 (BuildCliffScene 이 이 형태). 개체마다 push 하는 대신:
 auto& inst = scene.meshInstances;
-render::InstanceBatch b{ render::MeshId::Cube, (uint32_t)inst.size(), 0, 0 };
-for (const Agent& a : store.view())
+const std::uint32_t first = (std::uint32_t)inst.size();
+for (std::uint32_t i : pool.ActiveIndices())            // core::ObjectPool 순회
 {
-    if (!SphereInFrustum(fr, a.pos, kR)) continue;         // 컬
-    inst.push_back({ a.pos, a.yaw, a.scale, PackRgba(a.color) });
+    const Agent& a = pool.Slots()[i];
+    if (!SphereInFrustum(frustum, a.pos, kR)) continue;  // 프러스텀 컬
+    if (math::Dot(a.pos - eye, a.pos - eye) > kD * kD) continue;   // 거리 컬
+    inst.push_back({ a.pos, a.yaw, a.scale, PackRgba(...) });
 }
-b.count = (uint32_t)inst.size() - b.first;
-if (b.count) scene.instanceBatches.push_back(b);
+if (inst.size() > first)
+    scene.instanceBatches.push_back({ render::MeshId::Cube, first,
+                                      (std::uint32_t)inst.size() - first, /*lod=*/0 });
 ```
 
 `meshDraws` 는 지형·유니크 프롭 용으로 그대로. 인스턴스 경로는 "같은 메시 수백+" 일 때만.
@@ -487,11 +501,11 @@ if (b.count) scene.instanceBatches.push_back(b);
 
 | 무엇 | 어디 |
 |---|---|
-| 컬링 최대 거리, LOD 경계 | `SnapshotBuilder` 익명 `kCullDist`, `kLodNear`, `kLodMid` |
-| 인스턴스 상한(프레임당) | `SnapshotBuilder kMaxInstances` == `MeshPass3D kMaxInstances` (**항상 같게**) |
-| 개체 반지름(프러스텀 구 테스트) | `kAgentRadius` |
-| 원거리 빌보드 on/off | 배치 조립의 `b.mesh = lod<2 ? Cube : Plane` |
-| 셰도우 캐스트 LOD 컷 | `MeshPass3D::RenderShadow` 의 `b.lod < N` |
+| 컬링 최대 거리 | `BuildCliffScene` 의 `kAgentCullDist` (현재 90) |
+| 개체 반지름(프러스텀 구 테스트) | `BuildCliffScene` 의 `kAgentCullRadius` (현재 0.5) |
+| LOD 경계 | (§8-3 에서 추가) `kLodNear` / `kLodMid` |
+| 인스턴스 상한(프레임당) | `MeshPass3D::kMaxInstances` (16384). GPU 측에서 안전하게 자름. **SnapshotBuilder 쪽 캡은 아직 없음** — 규모 커지면 같은 값으로 추가 |
+| 셰도우 캐스트 LOD 컷 | `MeshPass3D::DrawInstanced` 의 `batch.lod >= 2` continue |
 
 ### 9.4 하지 말 것
 
@@ -507,7 +521,7 @@ m_jobs.ParallelFor(0, n, c, [&](size_t b, size_t e){ for(...) store.Despawn(i); 
 
 // ✗ 워커가 다른 개체 칸에 쓰기 (겹치는 범위 = 레이스). 힘은 자기 칸에만 누적
 
-// ✗ kMaxInstances 를 스냅샷과 패스에서 다르게 — 잘림/오버런
+// ✗ SnapshotBuilder 에 인스턴스 캡을 두게 되면 MeshPass3D::kMaxInstances 와 다른 값 금지
 // ✗ 인스턴스 VB 를 UpdateSubresource 로 — DYNAMIC + Map(WRITE_DISCARD) 로 프레임당 1회
 // ✗ mesh_instanced.hlsl 을 인라인 D3DCompile — assets/shaders/ + shaders.Get(...)
 ```

@@ -25,8 +25,8 @@ namespace engine::core
     // Thread: main/sim thread only. Never Acquire/Release inside a ParallelFor
     // worker (same rule as CollisionWorld / EntityRegistry).
     //
-    // Requirements on T: default-constructible and `void Reset()` (put the slot
-    // back to a spawn-ready state without freeing buffers).
+    // Requirements on T: default-constructible and `void Reset()` (put a
+    // recycled slot back to a spawn-ready state without freeing its buffers).
     template <class T>
     class ObjectPool final : private NonCopyable
     {
@@ -46,7 +46,8 @@ namespace engine::core
         // contents. Call once before first use; calling again is a full reset.
         void Init(std::size_t capacity)
         {
-            m_slots.assign(capacity, T{});
+            m_slots.clear();
+            m_slots.resize(capacity);   // default-constructed; no copy of T required
             m_generation.assign(capacity, 0u);
             m_slotActive.assign(capacity, 0u);
             m_activePos.assign(capacity, 0u);
