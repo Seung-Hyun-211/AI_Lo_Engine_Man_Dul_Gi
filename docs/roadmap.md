@@ -190,12 +190,13 @@ if (auto hit = world.RaycastClosest(down)) { actor.pos.y = hit->point.y; actor.g
 
 착수 순서 제안: **1·2·3 완료 → (4 결정) → 5**.
 
-**현재 위치 (2026-09 기준)**: D1 ✅ · D2 ✅ · D3 ✅(3D `Step()` 그리드 — D3b 레이캐스트 DDA만 남음) · D4 ✅(인스턴싱 + 거리 컬 + LOD 2단계). **핵심 인프라 4개 완료.** 남은 갈래:
+**현재 위치 (2026-09 기준)**: D1 ✅ · D2 ✅ · D3 ✅(3D `Step()` 그리드) · D4 ✅(인스턴싱 + 컬 + LOD 2단계 + FBX 정적 크라우드 메시, 설정은 `game/CrowdConfig.h`). **핵심 인프라 4개 완료.** 데모 씬 2 = 절벽 위 플레이어 + `kActiveCrowd`(현재 1500 좀비) 조망. 남은 갈래:
 - **D5 — 웨이브/스폰 + HP/데미지 + 목표 지점·패배 판정**: 게임 루프 본체. 여기부터 "게임 사이클".
-- **D3b — 레이캐스트 그리드 DDA**: `RaycastClosest/Any/All` 을 그리드 traversal 로. 지금은 선형(600개). 짧은 사거리 질의(타워)가 많아지면 실효.
-- **D4 잔여 — 빌보드/중간 LOD 티어**: 규모가 훨씬 커질 때.
+- **D4 잔여 — 크라우드 텍스처(`instanced-rendering.md` §9.6-A) / 애니 VAT(§9.6-B) / 빌보드·중간 LOD(§5.3)**.
+- **D3b — 레이캐스트 그리드 DDA**: `RaycastClosest/Any/All` 을 그리드 traversal 로 (지금은 선형). 짧은 사거리 질의(타워) 많아지면 실효.
+- **`game/AgentStore` SoA 승격**: 측정 게이트 (§6.2).
 
-게임 사이클 전이면 **D3b** 또는 **`game/AgentStore` SoA 승격**(측정 게이트) 정도. 그 외엔 D5 로 넘어갈 지점.
+게임 사이클 전이면 D4 잔여(텍스처/애니) 또는 D3b. 그 외엔 D5.
 
 ---
 

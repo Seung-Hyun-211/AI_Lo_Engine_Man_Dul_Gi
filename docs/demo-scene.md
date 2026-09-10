@@ -140,8 +140,8 @@ SnapshotBuilder (game/)
 - **필드·메사 치수**: `kCliffTop`(메사 높이), `kPlateauHalf`(플레이어 이동 반경), `kFieldHalf`
   (평지 반경), 크라우드 z 범위 `kFieldAgentZLo/Hi`(Simulation.cpp 익명). `SnapshotBuilder.cpp` 의
   `BuildCliffScene` 가 이 값으로 프롭을 배치하므로 숫자만 바꾸면 메사·평지가 따라온다.
-- **크라우드 컬·LOD**: `BuildCliffScene` 의 `kAgentCullDist`(90, 이 거리 밖 스킵),
-  `kAgentShadowDist`(34, 이 거리 밖은 그림자 안 캐스트), `kAgentCullRadius`(0.5).
+- **크라우드 컬·LOD**: `BuildCliffScene` 의 `kAgentCullDist`(100, 이 거리 밖 스킵),
+  `kAgentShadowDist`(34, 이 거리 밖은 그림자 안 캐스트). 프러스텀 스피어 반경 = `height*0.6`.
 - **군중 거동**: `Simulation::StepSimAgents` 의 heading 드리프트 계수·`speed` 범위·bob 진폭,
   초기 배치는 `SeedAgent`. 실제 게임 AI(추적·경로)로 바꿀 때 이 함수만 교체하면 렌더/스냅샷은
   안 건드린다.

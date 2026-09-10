@@ -70,8 +70,8 @@ private:
 `SnapshotBuilder` 는 `for (i : ActiveIndices()) use Slots()[i]`. 압축형이 필요해지면(원거리
 순회 캐시) 그때 확장.
 
-첫 사용처: 데모 씬 2 크라우드(`game::Simulation::m_agents`, `SimAgent` 600마리 / capacity 1024),
-`docs/demo-scene.md`·`docs/instanced-rendering.md` §6.
+첫 사용처: 데모 씬 2 크라우드(`game::Simulation::m_agents`, `SimAgent` — 수·capacity 는
+`game/CrowdConfig.h` `kActiveCrowd`), `docs/demo-scene.md`·`docs/instanced-rendering.md` §6·§9.5.
 
 이점 (요구사항: "메모리 관리 이점" + "재사용 이점"):
 
