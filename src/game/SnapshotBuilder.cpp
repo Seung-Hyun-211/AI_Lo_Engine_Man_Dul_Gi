@@ -236,19 +236,24 @@ namespace engine::game
                 inst.yaw = a.heading;
                 inst.scale = crowdHeight;
                 inst.animTime = a.animTime;   // ignored by MeshPass3D when no crowd VAT is baked
+                // `colorRgba` multiplies the diffuse texture in the shader, so
+                // the base must be ~white (not a dark tint) or the textured
+                // zombie goes muddy. Highlights are a saturated multiply -
+                // still clearly readable against a near-white crowd.
                 if (look.hit && look.agentSlot == slotIdx)
                 {
-                    inst.colorRgba = PackRgba(1.0f, 0.9f, 0.2f, 1.0f);   // look-ray target
+                    inst.colorRgba = PackRgba(1.0f, 0.82f, 0.15f, 1.0f);   // look-ray target (gold)
                 }
                 else if (slotIdx < touching.size() && touching[slotIdx] != 0)
                 {
-                    inst.colorRgba = PackRgba(0.95f, 0.35f, 0.30f, 1.0f);   // overlapping a neighbour
+                    inst.colorRgba = PackRgba(1.0f, 0.42f, 0.34f, 1.0f);   // overlapping a neighbour (red)
                 }
                 else
                 {
                     const float hot = math::Clamp((a.speed - 0.8f) / 1.4f, 0.0f, 1.0f);
-                    inst.colorRgba = PackRgba(0.34f + 0.22f * hot, 0.44f + 0.10f * hot,
-                                              0.30f - 0.06f * hot, 1.0f);   // mottled green
+                    inst.colorRgba = crowdIsModel
+                        ? PackRgba(0.94f + 0.06f * hot, 0.94f - 0.02f * hot, 0.90f - 0.10f * hot, 1.0f)  // let the texture show
+                        : PackRgba(0.34f + 0.22f * hot, 0.44f + 0.10f * hot, 0.30f - 0.06f * hot, 1.0f); // mottled-green cube
                 }
 
                 const int lod = d2 <= kAgentShadowDist * kAgentShadowDist ? 0 : 2;
