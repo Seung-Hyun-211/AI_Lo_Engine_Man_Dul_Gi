@@ -48,8 +48,17 @@ struct GeometryPSOut
     float4 normal : SV_TARGET1;
 };
 
-// 3x3 PCF directional shadow. Returns 1 (lit) .. 0 (fully shadowed). Points
+// 5x5 PCF directional shadow. Returns 1 (lit) .. 0 (fully shadowed). Points
 // outside the shadow map, or when shadows are disabled, are lit.
+//
+// Was 3x3. Scene 2 (demo-scene.md, the crowd/cliff overlook) spans a much
+// wider ortho frustum than scene 1 (SnapshotBuilder::BuildLighting, 64m vs
+// 12m) over the same kShadowMapSize texture, so its texels cover ~5x more
+// world space. A 3-tap-wide kernel there barely spans one texel's worth of
+// blur, which reads as a blocky, inconsistent edge instead of a smooth
+// gradient - docs/shadows.md. Widening the kernel (not shrinking scene 2's
+// frustum - it has to cover the whole crowd field) buys back a smooth
+// transition at the coarser texel density.
 float SampleShadow(float4 shadowClip)
 {
     if (shadowParams.z < 0.5f) return 1.0f;
@@ -60,10 +69,10 @@ float SampleShadow(float4 shadowClip)
 
     float depth = p.z - shadowParams.y;
     float sum = 0.0f;
-    [unroll] for (int y = -1; y <= 1; ++y)
-    [unroll] for (int x = -1; x <= 1; ++x)
+    [unroll] for (int y = -2; y <= 2; ++y)
+    [unroll] for (int x = -2; x <= 2; ++x)
         sum += shadowMap.SampleCmpLevelZero(shadowSampler, uv + float2(x, y) * shadowParams.x, depth);
-    return sum / 9.0f;
+    return sum / 25.0f;
 }
 
 // Smooth Lambert key + hemisphere ambient, key modulated by `shadow` [0..1].

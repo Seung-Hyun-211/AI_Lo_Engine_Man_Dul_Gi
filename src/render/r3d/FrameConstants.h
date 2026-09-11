@@ -10,7 +10,13 @@
 // must match `cbuffer Frame` in assets/shaders/common3d.hlsli.
 namespace engine::render
 {
-    inline constexpr unsigned kShadowMapSize = 2048;
+    // Was 2048. Scene 2's ortho frustum is 64m wide (vs scene 1's 12m) to
+    // cover the whole crowd field, so at 2048 its texels were ~3.1cm each -
+    // coarse enough that the shadow edge looked blocky/inconsistent rather
+    // than a clean, even gradient (docs/shadows.md). 4096 halves that to
+    // ~1.6cm without needing a second (cascaded) shadow map. Costs ~64MB for
+    // the depth texture (R32) instead of ~16MB.
+    inline constexpr unsigned kShadowMapSize = 4096;
 
     struct FrameConstantsGpu
     {
