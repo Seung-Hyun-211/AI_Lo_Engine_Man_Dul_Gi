@@ -43,8 +43,11 @@ namespace engine::render
         ID3D11ShaderResourceView* sceneColorSrv{};
         // View-space normal G-buffer (docs/post-process-gbuffer-research.md
         // §12.5) - the geometry stage's PS writes it as a second render target
-        // alongside colour; nothing reads this SRV yet (SSAO lands here later).
+        // alongside colour. Consumed by PostProcessPass's SSAO stage.
         ID3D11ShaderResourceView* sceneNormalSrv{};
+        // Scene depth, readable alongside the DSV (docs/post-process-gbuffer-
+        // research.md §4.1) - also consumed by SSAO.
+        ID3D11ShaderResourceView* sceneDepthSrv{};
         std::uint32_t sceneSampleCount{ 1 };
     };
 

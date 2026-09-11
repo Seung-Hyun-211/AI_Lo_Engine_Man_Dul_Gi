@@ -531,6 +531,7 @@ namespace engine::render
         context.backBufferRenderTarget = m_backBufferRtv;
         context.sceneColorSrv = m_sceneColorSrv;
         context.sceneNormalSrv = m_sceneNormalSrv;
+        context.sceneDepthSrv = m_sceneDepthSrv;
         context.sceneSampleCount = m_sampleCount;
         for (std::unique_ptr<IRenderPass>& pass : m_passes)
             pass->Execute(context);

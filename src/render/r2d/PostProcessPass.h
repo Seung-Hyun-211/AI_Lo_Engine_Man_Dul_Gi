@@ -3,7 +3,15 @@
 #include "core/NonCopyable.h"
 #include "render/RenderPass.h"
 
+#include <array>
+#include <cstdint>
+
+struct ID3D11Buffer;
 struct ID3D11RasterizerState;
+struct ID3D11SamplerState;
+struct ID3D11Texture2D;
+struct ID3D11RenderTargetView;
+struct ID3D11ShaderResourceView;
 
 namespace engine::render
 {
@@ -12,17 +20,14 @@ namespace engine::render
     // Runs between the geometry stage and the 2D overlay, owning the hand-off
     // from "draw into the (possibly multisampled) scene colour target" to "draw
     // straight into the back buffer" - see docs/post-process-gbuffer-research.md
-    // §3/§12.1. Baseline like QuadPass2D: never excluded by ENGINE_WITH_3D. In
-    // its current pass-through form it only reads the generic scene colour
-    // target, nothing 3D-specific, so it lives here rather than under r3d; a
-    // later step that adds a depth/normal G-buffer read may need to revisit
-    // that (docs/post-process-gbuffer-research.md §12.7/§12.10).
-    //
-    // Today this is a pass-through composite: it copies scene colour to the
-    // back buffer, replacing the old end-of-frame MSAA ResolveSubresource
-    // (§12.3/§12.11 step 3). AO and fog grow this same shader incrementally in
-    // later steps - composite.hlsl/composite_ms.hlsl are the seed, not
-    // throwaway placeholders.
+    // §3/§12.1. Baseline like QuadPass2D: never excluded by ENGINE_WITH_3D. Its
+    // composite stage (colour -> back buffer) has no 3D-specific concept and
+    // runs unconditionally; SSAO is inherently a 3D-only idea (view-space
+    // reconstruction from a projection matrix, meaningless for a 2D scene), so
+    // that half of this class is wrapped in `#if defined(ENGINE_WITH_3D)` and
+    // falls back to a 1x1 white AO texture (= no occlusion) when compiled out
+    // or when the depth/normal G-buffer isn't available yet - the composite
+    // shader always just multiplies by whatever AO texture it's handed.
     class PostProcessPass final : public IRenderPass, private core::NonCopyable
     {
     public:
@@ -32,8 +37,43 @@ namespace engine::render
         void Release() override;
 
     private:
+        void Composite(const PassContext& context, ID3D11ShaderResourceView* aoSrv);
+
         const ShaderProgram* m_compositeShader{};     // composite.hlsl    - single-sample scene colour
         const ShaderProgram* m_compositeMsShader{};   // composite_ms.hlsl - multisampled scene colour
         ID3D11RasterizerState* m_rasterizer{};         // cull none - winding of the utility triangle is irrelevant
+        ID3D11SamplerState* m_aoSampler{};             // linear/clamp - reads whichever AO texture Composite gets
+
+        // 1x1 white R8_UNORM = "no occlusion". The permanent fallback when SSAO
+        // isn't available (2D-only build, or before the G-buffer exists).
+        ID3D11Texture2D* m_whiteAoTexture{};
+        ID3D11ShaderResourceView* m_whiteAoSrv{};
+
+#if defined(ENGINE_WITH_3D)
+        [[nodiscard]] ID3D11ShaderResourceView* ComputeAo(const PassContext& context);
+        void EnsureAoTarget(ID3D11Device* device, std::uint32_t width, std::uint32_t height);
+
+        static constexpr std::size_t kKernelSize = 16;
+
+        const ShaderProgram* m_ssaoShader{};       // ssao.hlsl    - single-sample depth/normal
+        const ShaderProgram* m_ssaoMsShader{};     // ssao_ms.hlsl - multisampled depth/normal
+        ID3D11SamplerState* m_wrapSampler{};        // point/wrap - the tiling noise texture
+
+        ID3D11Texture2D* m_noiseTexture{};
+        ID3D11ShaderResourceView* m_noiseSrv{};
+        std::array<float, kKernelSize * 4> m_kernel{};   // xyz per sample, w unused - filled once at Initialize
+
+        ID3D11Buffer* m_ssaoParams{};   // b0 for ssao*.hlsl: kernel + projection scalars + radius/power/bias
+
+        // AO render target, full-resolution, lazily (re)created in
+        // EnsureAoTarget when the viewport size changes - IRenderPass has no
+        // resize hook, so this pass tracks its own last-seen size instead
+        // (docs/post-process-gbuffer-research.md §12.11 step 7).
+        ID3D11Texture2D* m_aoTexture{};
+        ID3D11RenderTargetView* m_aoRtv{};
+        ID3D11ShaderResourceView* m_aoSrv{};
+        std::uint32_t m_aoWidth{};
+        std::uint32_t m_aoHeight{};
+#endif
     };
 }

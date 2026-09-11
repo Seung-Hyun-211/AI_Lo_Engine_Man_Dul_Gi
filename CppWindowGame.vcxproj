@@ -158,6 +158,8 @@
     <None Include="assets\shaders\outline.hlsl" />
     <None Include="assets\shaders\quad2d.hlsl" />
     <None Include="assets\shaders\sprite2d.hlsl" />
+    <None Include="assets\shaders\ssao.hlsl" />
+    <None Include="assets\shaders\ssao_ms.hlsl" />
     <None Include="assets\shaders\debugline.hlsl" />
     <None Include="assets\shaders\shadow.hlsl" />
   </ItemGroup>

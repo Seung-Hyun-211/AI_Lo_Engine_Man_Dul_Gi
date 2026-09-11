@@ -1,0 +1,67 @@
+// PostProcessPass SSAO stage, single-sample path. Hemisphere-kernel AO from the
+// view-space normal + depth G-buffer - docs/post-process-gbuffer-research.md
+// §5/§12.11 step 7. Reads t0/t1 with Load (pixel-aligned, no filtering - depth
+// must not be interpolated), t2 (noise) with a wrap sampler since it tiles.
+#include "fullscreen.hlsli"
+
+Texture2D<float> depthTex  : register(t0);   // R24_UNORM_X8_TYPELESS scene depth
+Texture2D<float4> normalTex : register(t1);  // view-space normal, *0.5+0.5 encoded
+Texture2D noiseTex          : register(t2);  // 4x4 tiling random rotation vectors
+SamplerState wrapSamp       : register(s0);
+
+cbuffer SsaoParams : register(b0)
+{
+    float4 kernel[16];    // xyz = view-space hemisphere sample offset
+    float4 projParams;    // x=xScale, y=yScale, z=A, w=B (proj.m[0,5,10,14] - see ViewZFromDepth)
+    float4 params;        // x=radius, y=power, z=bias, w=kernel count
+    float4 screenSize;    // x=width, y=height (pixels)
+};
+
+// This engine's PerspectiveFovLH bakes A=far/(far-near), B=-near*far/(far-near)
+// into proj.m[10]/proj.m[14], and clip.w = view.z for this matrix shape, so NDC
+// depth d = A + B/view.z solves to view.z = B/(d-A) - no full inverse-projection
+// matrix needed, just these two scalars.
+float ViewZFromDepth(float depth) { return projParams.w / (depth - projParams.z); }
+
+float3 ViewPosFromDepth(float2 uv, float depth)
+{
+    const float viewZ = ViewZFromDepth(depth);
+    const float2 ndc = float2(uv.x * 2.0f - 1.0f, 1.0f - uv.y * 2.0f);
+    return float3(ndc.x * viewZ / projParams.x, ndc.y * viewZ / projParams.y, viewZ);
+}
+
+float4 PSMain(VSOut input) : SV_TARGET
+{
+    const int3 pixel = int3((int)input.pos.x, (int)input.pos.y, 0);
+    const float depth = depthTex.Load(pixel);
+    if (depth >= 1.0f) return float4(1.0f, 1.0f, 1.0f, 1.0f);   // background - no AO
+
+    const float3 viewPos = ViewPosFromDepth(input.uv, depth);
+    const float3 n = normalize(normalTex.Load(pixel).xyz * 2.0f - 1.0f);
+
+    const float3 randomVec = normalize(noiseTex.Sample(wrapSamp, input.uv * (screenSize.xy * 0.25f)).xyz);
+    const float3 tangent = normalize(randomVec - n * dot(randomVec, n));
+    const float3 bitangent = cross(n, tangent);
+    const float3x3 tbn = float3x3(tangent, bitangent, n);
+
+    const int kernelCount = (int)params.w;
+    float occlusion = 0.0f;
+    for (int i = 0; i < kernelCount; ++i)
+    {
+        const float3 samplePos = viewPos + mul(kernel[i].xyz, tbn) * params.x;
+        const float2 sampleNdc = float2(samplePos.x * projParams.x / samplePos.z,
+                                         samplePos.y * projParams.y / samplePos.z);
+        const float2 sampleUv = float2(sampleNdc.x * 0.5f + 0.5f, 0.5f - sampleNdc.y * 0.5f);
+        if (sampleUv.x < 0.0f || sampleUv.x > 1.0f || sampleUv.y < 0.0f || sampleUv.y > 1.0f) continue;
+
+        const int2 samplePixel = int2(sampleUv * screenSize.xy);
+        const float sampleDepthVz = ViewZFromDepth(depthTex.Load(int3(samplePixel, 0)));
+
+        const float rangeCheck = smoothstep(0.0f, 1.0f, params.x / max(abs(viewPos.z - sampleDepthVz), 1e-4f));
+        occlusion += (sampleDepthVz <= samplePos.z - params.z ? 1.0f : 0.0f) * rangeCheck;
+    }
+
+    float ao = 1.0f - occlusion / max((float)kernelCount, 1.0f);
+    ao = pow(saturate(ao), params.y);
+    return float4(ao, ao, ao, 1.0f);
+}
