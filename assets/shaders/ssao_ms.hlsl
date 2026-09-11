@@ -1,7 +1,7 @@
 // PostProcessPass SSAO stage, multisampled path - same algorithm as ssao.hlsl,
 // reading sample 0 of the multisampled depth/normal G-buffer (the same
 // approximation composite_ms.hlsl and depth reads elsewhere in this pipeline
-// use - docs/post-process-gbuffer-research.md §4.3(a)). Two files instead of
+// use - docs/post-process-gbuffer-research.md §3.2). Two files instead of
 // one because HLSL has no Texture2D/Texture2DMS polymorphism and this engine
 // has no shader-permutation system yet (docs/shader-pipeline.md "다음").
 #include "fullscreen.hlsli"

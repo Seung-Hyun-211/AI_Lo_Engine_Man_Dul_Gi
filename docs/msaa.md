@@ -23,7 +23,7 @@ Render():
 
 - **샘플 수 선택**: `CreateDeviceAndSwapChain` 에서 `CheckMultisampleQualityLevels` 로 8 → 4 → 2 순으로 지원되는 최고값. 아무것도 안 되면 `m_sampleCount = 1` (MSAA 없음 — 이때도 `m_sceneColor` 는 여전히 실제 텍스처이고, `PostProcessPass` 가 단일 샘플용 `composite.hlsl` 로 백버퍼에 합성한다). WARP·최신 GPU 는 8x 지원.
 - **씬 타깃**:
-  - 색: `m_sceneColor` (Texture2D, `SampleDesc.Count = m_sampleCount`, `BIND_RENDER_TARGET | BIND_SHADER_RESOURCE`) + `m_sceneColorRtv` + `m_sceneColorSrv`. **샘플수와 무관하게 항상 실제 텍스처** — 예전엔 1x 일 때 백버퍼 RTV 를 그대로 `AddRef` 해서 재사용했지만, 백버퍼는 셰이더 리소스로 바인드할 수 없어(스왑체인이 `DXGI_USAGE_RENDER_TARGET_OUTPUT` 로만 생성됨) `PostProcessPass` 가 읽으려면 항상 별도 텍스처가 있어야 한다(`docs/post-process-gbuffer-research.md` §12.3).
+  - 색: `m_sceneColor` (Texture2D, `SampleDesc.Count = m_sampleCount`, `BIND_RENDER_TARGET | BIND_SHADER_RESOURCE`) + `m_sceneColorRtv` + `m_sceneColorSrv`. **샘플수와 무관하게 항상 실제 텍스처** — 예전엔 1x 일 때 백버퍼 RTV 를 그대로 `AddRef` 해서 재사용했지만, 백버퍼는 셰이더 리소스로 바인드할 수 없어(스왑체인이 `DXGI_USAGE_RENDER_TARGET_OUTPUT` 로만 생성됨) `PostProcessPass` 가 읽으려면 항상 별도 텍스처가 있어야 한다(`docs/post-process-gbuffer-research.md` §3.1).
   - 깊이: `m_sceneDepth` (`R24G8_TYPELESS` + `BIND_DEPTH_STENCIL | BIND_SHADER_RESOURCE`, 같은 `SampleDesc`) + `m_sceneDepthDsv`(`D24_UNORM_S8_UINT` 뷰) + `m_sceneDepthSrv`(아직 아무도 안 읽음, G-버퍼용 선행 준비). 색·깊이의 Count/Quality 는 항상 같아야 `OMSetRenderTargets` 성공.
 - **백버퍼**: `m_backBufferRtv` 는 `PostProcessPass` 의 합성 목적지이고, 그 뒤로 프레임 끝까지(2D 오버레이) 실제 렌더 대상이다 — 더 이상 "resolve 전용, pass가 안 그리는 대상"이 아니다.
 - **리사이즈**: `ResizeBackBuffer` 가 씬 타깃 + 백버퍼 RTV 를 해제 → `ResizeBuffers` → 둘 다 재생성.
@@ -40,8 +40,8 @@ Render():
 
 - alpha-to-coverage (컷아웃 엣지)
 - ~~resolve 를 커스텀 셰이더 다운샘플로 바꿔 톤매핑·샤픈 결합~~ — **오프스크린 RT 인프라 +
-  커스텀 셰이더 리졸브는 됨**(`PostProcessPass`, 위). 톤매핑·샤픈·SSAO 등 실제 이펙트는
-  아직 — `docs/post-process-gbuffer-research.md` §12.11 순서 4 이후.
+  커스텀 셰이더 리졸브 + SSAO·안개는 됨**(`PostProcessPass`, 위). 톤매핑·샤픈은 아직 —
+  `docs/post-process-gbuffer-research.md` §9.
 - 셀 밴드 단차용 포스트 AA(FXAA/SMAA) — 인프라는 있으니 `PostProcessPass` 에 패스 하나 추가하면 됨
 - 샘플 수를 `FrameSettings` 로 노출 (런타임/옵션 메뉴)
 
@@ -49,7 +49,7 @@ Render():
 
 **샘플 수 바꾸기**: `Dx11Renderer::CreateDeviceAndSwapChain` 의 후보 리스트 `{ 8u, 4u, 2u }` 수정. 1x 강제하려면 리스트를 비우거나 `m_sampleCount = 1` 고정.
 
-**새 지오메트리 패스가 씬 타깃에 그리려면**: `PassContext::renderTarget` / `depthStencil` 이 이미 MSAA 뷰를 가리킨다(지오메트리 스테이지 동안). 자체 RT 를 쓰는 패스(그림자맵 등)는 같은 `m_sampleCount` 로 만들거나 1x 로 만들고 따로 관리. **새 포스트/오버레이 패스**(지오메트리 다음, `PostProcessPass`/`QuadPass2D` 근처)는 대신 `PassContext::backBufferRenderTarget`/`sceneColorSrv`/`sceneSampleCount` 를 쓴다 — `docs/post-process-gbuffer-research.md` §12.1/§12.8.
+**새 지오메트리 패스가 씬 타깃에 그리려면**: `PassContext::renderTarget` / `depthStencil` 이 이미 MSAA 뷰를 가리킨다(지오메트리 스테이지 동안). 자체 RT 를 쓰는 패스(그림자맵 등)는 같은 `m_sampleCount` 로 만들거나 1x 로 만들고 따로 관리. **새 포스트/오버레이 패스**(지오메트리 다음, `PostProcessPass`/`QuadPass2D` 근처)는 대신 `PassContext::backBufferRenderTarget`/`sceneColorSrv`/`sceneSampleCount` 를 쓴다 — `docs/post-process-gbuffer-research.md` §2.
 
 **셀 밴드까지 부드럽게**: MSAA 로는 안 됨. `common3d.hlsli` 에서 각 `if` 경계를 `lerp(a, b, smoothstep(edge - w, edge + w, angleDeg))` 로 바꾸고 `w`(전이폭 도) 파라미터 추가. 저장 즉시 핫리로드.
 

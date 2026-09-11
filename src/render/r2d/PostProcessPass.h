@@ -20,7 +20,7 @@ namespace engine::render
     // Runs between the geometry stage and the 2D overlay, owning the hand-off
     // from "draw into the (possibly multisampled) scene colour target" to "draw
     // straight into the back buffer" - see docs/post-process-gbuffer-research.md
-    // §3/§12.1. Baseline like QuadPass2D: never excluded by ENGINE_WITH_3D. Its
+    // §2. Baseline like QuadPass2D: never excluded by ENGINE_WITH_3D. Its
     // composite stage (colour -> back buffer) has no 3D-specific concept and
     // runs unconditionally; SSAO is inherently a 3D-only idea (view-space
     // reconstruction from a projection matrix, meaningless for a 2D scene), so
@@ -45,7 +45,7 @@ namespace engine::render
         ID3D11SamplerState* m_aoSampler{};             // linear/clamp - reads whichever AO texture Composite gets
         // b0 for composite*.hlsl: aoStrength + fog params, filled each frame
         // from Scene3D::postProcess (docs/post-process-gbuffer-research.md
-        // §12.9) when ENGINE_WITH_3D, else left at "no effect" defaults.
+        // §8.1) when ENGINE_WITH_3D, else left at "no effect" defaults.
         ID3D11Buffer* m_compositeParams{};
 
         // 1x1 white R8_UNORM = "no occlusion". The permanent fallback when SSAO
@@ -73,7 +73,7 @@ namespace engine::render
         // AO render targets, full-resolution, lazily (re)created in
         // EnsureAoTarget when the viewport size changes - IRenderPass has no
         // resize hook, so this pass tracks its own last-seen size instead
-        // (docs/post-process-gbuffer-research.md §12.11 step 7). m_aoTexture
+        // (docs/post-process-gbuffer-research.md §4). m_aoTexture
         // holds the raw (noisy) SSAO result; m_aoBlurTexture the blurred
         // result Composite actually reads - see ssao_blur.hlsl for why both
         // exist.

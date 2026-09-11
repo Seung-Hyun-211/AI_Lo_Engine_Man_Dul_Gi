@@ -136,7 +136,7 @@ namespace engine::game
         }
 
         // AO strength/radius match what was already visually confirmed
-        // (docs/post-process-gbuffer-research.md §12.11 step 7/8). Fog fades
+        // (docs/post-process-gbuffer-research.md §4). Fog fades
         // toward the camera's far clip plane (100, see BuildCamera) so it also
         // masks the crowd's distance cull (instanced-rendering.md) instead of
         // objects just popping out of existence.

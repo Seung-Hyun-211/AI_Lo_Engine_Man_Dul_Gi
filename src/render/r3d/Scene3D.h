@@ -115,14 +115,14 @@ namespace engine::render
     };
 
     // Tuning for PostProcessPass's SSAO + fog (docs/post-process-gbuffer-
-    // research.md §12.9). Read directly from Scene3D by PostProcessPass -
+    // research.md §8.1). Read directly from Scene3D by PostProcessPass -
     // these are values, not GPU resources, so they cross the thread boundary
     // in the snapshot like everything else (rule 3).
     struct PostProcessSettings
     {
         // Default 1.0 (full effect) matches what was already visually
-        // confirmed (docs/post-process-gbuffer-research.md §12.11 step 7/8) -
-        // lower this if AO reads too strong for the cel look (§5.2).
+        // confirmed (docs/post-process-gbuffer-research.md §4) -
+        // lower this if AO reads too strong for the cel look.
         float aoStrength{ 1.0f };    // 0 = no AO, 1 = full occlusion strength
         float aoRadius{ 0.5f };      // view-space units (metres)
         float aoPower{ 1.5f };       // >1 pushes AO toward the extremes - keeps the cel look from muddying

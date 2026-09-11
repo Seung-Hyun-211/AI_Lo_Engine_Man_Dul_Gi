@@ -1,10 +1,10 @@
 // PostProcessPass, multisampled path: same job as composite.hlsl but the scene
 // colour/depth targets are multisampled, so this also does the job the old
 // end-of-frame ResolveSubresource used to (a plain per-pixel average across
-// colour samples) - docs/post-process-gbuffer-research.md §4.3/§6/§7.1/§12.7/
-// §12.11 step 3+8. Two files instead of one because HLSL has no Texture2D/
-// Texture2DMS polymorphism and this engine has no shader-permutation system
-// yet (docs/shader-pipeline.md "다음").
+// colour samples) - docs/post-process-gbuffer-research.md §3.2/§5. Two files
+// instead of one because HLSL has no Texture2D/Texture2DMS polymorphism and
+// this engine has no shader-permutation system yet (docs/shader-pipeline.md
+// "다음").
 #include "fullscreen.hlsli"
 
 Texture2DMS<float4> sceneColor : register(t0);

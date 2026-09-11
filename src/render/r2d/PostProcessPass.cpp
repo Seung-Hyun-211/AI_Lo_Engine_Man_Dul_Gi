@@ -36,7 +36,7 @@ namespace
         float screenSize[4];   // x=width, y=height
     };
 
-    // Not exposed via Scene3D::postProcess (§12.9) - unlike radius/power,
+    // Not exposed via Scene3D::postProcess (§8.1) - unlike radius/power,
     // there's little reason a caller would want to retune the bias.
     constexpr float kAoBias = 0.025f;
 #endif
@@ -248,7 +248,7 @@ namespace engine::render
         // Detach the geometry stage's render targets so their SRVs (colour,
         // depth, normal - context.scene*Srv) can be safely bound as shader
         // inputs; all three alias resources that are currently bound as
-        // RTV/DSV. See docs/post-process-gbuffer-research.md §12.1/§12.3.
+        // RTV/DSV. See docs/post-process-gbuffer-research.md §2/§3.1.
         device->OMSetRenderTargets(0, nullptr, nullptr);
 
 #if defined(ENGINE_WITH_3D)

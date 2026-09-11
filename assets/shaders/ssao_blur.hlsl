@@ -3,7 +3,7 @@
 // periodic dithering that per-pixel kernel rotation introduces. Without this,
 // SSAO reads as a "dot density" stipple instead of a smooth gradient - the
 // noise+blur combo is standard for hemisphere-kernel SSAO, not optional.
-// docs/post-process-gbuffer-research.md §12.11 step 7 follow-up.
+// docs/post-process-gbuffer-research.md §4.
 //
 // The AO buffer is always single-sample regardless of scene MSAA (PostProcessPass
 // renders it full-resolution, one sample), so this shader has no _ms variant.

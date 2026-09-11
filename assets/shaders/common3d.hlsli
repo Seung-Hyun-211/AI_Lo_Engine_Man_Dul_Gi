@@ -30,7 +30,7 @@ float3 HemisphereAmbient(float3 worldNormal)
 }
 
 // World-space normal -> view-space normal, for a geometry pass's G-buffer output
-// (docs/post-process-gbuffer-research.md §12.4/§12.5). `view` has no scale, so a
+// (docs/post-process-gbuffer-research.md §3.3/§3.4). `view` has no scale, so a
 // plain 3x3 rotation is enough - no inverse-transpose needed.
 float3 WorldToViewNormal(float3 worldNormal)
 {
@@ -38,7 +38,7 @@ float3 WorldToViewNormal(float3 worldNormal)
 }
 
 // Two-target output for the geometry stage: colour plus the view-space normal
-// G-buffer (docs/post-process-gbuffer-research.md §12.5). A pass with no
+// G-buffer (docs/post-process-gbuffer-research.md §3.4). A pass with no
 // meaningful normal to contribute (outline, debug lines) just returns a plain
 // `float4 : SV_TARGET` instead of this struct - D3D11 leaves an unwritten
 // render target slot at its cleared value for that pixel, no error.

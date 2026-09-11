@@ -1,6 +1,6 @@
 // PostProcessPass SSAO stage, single-sample path. Hemisphere-kernel AO from the
 // view-space normal + depth G-buffer - docs/post-process-gbuffer-research.md
-// §5/§12.11 step 7. Reads t0/t1 with Load (pixel-aligned, no filtering - depth
+// §4. Reads t0/t1 with Load (pixel-aligned, no filtering - depth
 // must not be interpolated), t2 (noise) with a wrap sampler since it tiles.
 #include "fullscreen.hlsli"
 

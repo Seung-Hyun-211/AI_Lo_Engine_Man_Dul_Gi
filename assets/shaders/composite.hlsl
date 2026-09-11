@@ -1,10 +1,10 @@
 // PostProcessPass, single-sample path: copies the scene colour target to the
 // back buffer, multiplied by AO and blended toward fog colour with distance
-// (docs/post-process-gbuffer-research.md §6/§7.1/§12.7/§12.11 step 8). `aoTex`
-// is either the real (blurred) SSAO result or PostProcessPass's 1x1 white
-// fallback (no 3D module, or nothing to occlude yet) - this shader never needs
-// to know which. Fog is skipped entirely when `fogParams.z` is 0 (2D-only
-// build, or Scene3D::postProcess.fogEnabled == false).
+// (docs/post-process-gbuffer-research.md §5). `aoTex` is either the real
+// (blurred) SSAO result or PostProcessPass's 1x1 white fallback (no 3D
+// module, or nothing to occlude yet) - this shader never needs to know which.
+// Fog is skipped entirely when `fogParams.z` is 0 (2D-only build, or
+// Scene3D::postProcess.fogEnabled == false).
 #include "fullscreen.hlsli"
 
 Texture2D sceneColor      : register(t0);

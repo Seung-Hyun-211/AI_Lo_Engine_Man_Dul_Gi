@@ -33,7 +33,7 @@ namespace engine::render
         const RenderSnapshot* snapshot{};
 
         // Populated for the post-process stage only (PostProcessPass) - see
-        // docs/post-process-gbuffer-research.md §12.1/§12.8. `backBufferRenderTarget`
+        // docs/post-process-gbuffer-research.md §2. `backBufferRenderTarget`
         // is where that pass composites to and, from then on, what every pass
         // after it (the 2D overlay) actually draws into via the D3D11 pipeline
         // state PostProcessPass leaves bound - `renderTarget` above stays the
@@ -42,7 +42,7 @@ namespace engine::render
         ID3D11RenderTargetView* backBufferRenderTarget{};
         ID3D11ShaderResourceView* sceneColorSrv{};
         // View-space normal G-buffer (docs/post-process-gbuffer-research.md
-        // §12.5) - the geometry stage's PS writes it as a second render target
+        // §3.4) - the geometry stage's PS writes it as a second render target
         // alongside colour. Consumed by PostProcessPass's SSAO stage.
         ID3D11ShaderResourceView* sceneNormalSrv{};
         // Scene depth, readable alongside the DSV (docs/post-process-gbuffer-

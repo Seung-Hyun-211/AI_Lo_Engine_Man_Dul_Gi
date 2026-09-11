@@ -110,16 +110,12 @@ VFX 파티클(머즐 플래시·연기·폭발·불티)은 물리 시뮬레이�
 | 씬 타깃(멀티샘플)에 그리기 | 다른 3D 패스와 동일하게 `PassContext::renderTarget`/`depthStencil` 그대로 사용(`msaa.md`) |
 
 **없어서 새로 필요한 것 한 가지**: 카메라의 월드 공간 right/up 벡터. 빌보드는 화면을 향해야
-하므로 VS가 카메라 축을 알아야 한다. 지금 `Frame` cbuffer(b0, `common3d.hlsli`)는 `viewProj` +
-조명만 있고 `view` 자체나 카메라 축은 없다. **이 확장은
-[post-process-gbuffer-research.md](post-process-gbuffer-research.md) §12.4가 뷰공간 노멀 때문에
-이미 같은 지점을 요구한다** — 별도로 `camRight`/`camUp` 필드를 새로 추가하지 않고 그 문서가
-추가하는 `view`(4x4, `camera.view` 그대로, row-major) 필드 하나를 공유한다. 셰이더에서는
-`view`의 0행/1행이 곧 월드 공간 카메라 right/up(뷰 행렬이 정규직교라 행이 곧 카메라 축)이므로
-그 자리에서 뽑아 쓴다 — 두 문서가 같은 `Frame` cbuffer 확장을 각자 다른 필드로 중복 요구하던
-문제의 해법. **CLAUDE.md 불변 규칙**: `FrameConstantsGpu`(C++)와 `common3d.hlsli`의 `cbuffer Frame`
-레이아웃은 항상 같이 고친다 — 이 필드 추가도 예외 없음(어느 기능이 먼저 구현되든 `view` 필드를
-한 번만 추가하고 나머지는 재사용).
+하므로 VS가 카메라 축을 알아야 한다. **이미 있다** —
+[post-process-gbuffer-research.md](post-process-gbuffer-research.md) §3.3이 뷰공간 노멀 때문에
+`Frame` cbuffer(b0, `common3d.hlsli`)에 `view`(4x4, `camera.view` 그대로, row-major) 필드를 이미
+추가·구현해뒀다. 파티클 시스템은 별도로 `camRight`/`camUp` 필드를 새로 추가할 필요 없이 그
+필드를 그대로 재사용한다. 셰이더에서는 `view`의 0행/1행이 곧 월드 공간 카메라 right/up(뷰
+행렬이 정규직교라 행이 곧 카메라 축)이므로 그 자리에서 뽑아 쓴다.
 
 ---
 
@@ -295,7 +291,7 @@ for each ParticleBatch b (particleBatches 순서 = SnapshotBuilder 가 이미 �
 ### 5.4 셰이더 (`assets/shaders/particle.hlsl`)
 
 ```hlsl
-#include "common3d.hlsli"   // Frame cbuffer(b0) — 공유 `view` 필드 필요 (§3, post-process-gbuffer-research.md §12.4)
+#include "common3d.hlsli"   // Frame cbuffer(b0) — 공유 `view` 필드 이미 있음 (post-process-gbuffer-research.md §3.3)
 
 Texture2D atlasTex : register(t0);
 SamplerState samp : register(s0);

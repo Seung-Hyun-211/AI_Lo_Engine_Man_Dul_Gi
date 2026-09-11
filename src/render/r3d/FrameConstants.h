@@ -17,7 +17,7 @@ namespace engine::render
         float viewProj[16];
         // Camera view alone (world -> view space), row-major, no transpose needed
         // (same convention as viewProj). Lets a pixel shader rotate a world-space
-        // normal into view space (docs/post-process-gbuffer-research.md §12.4) or
+        // normal into view space (docs/post-process-gbuffer-research.md §3.3) or
         // pull the camera's world-space right/up axes from rows 0/1 for billboard
         // construction (docs/particle-system-research.md §3) without either
         // feature needing its own cbuffer field.

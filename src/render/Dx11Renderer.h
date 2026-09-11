@@ -91,18 +91,18 @@ namespace engine::render
         // multisampled when m_sampleCount>1.
         ID3D11Texture2D* m_sceneColor{};
         ID3D11RenderTargetView* m_sceneColorRtv{};
-        // Readable alongside the RTV (docs/post-process-gbuffer-research.md §12.3) -
+        // Readable alongside the RTV (docs/post-process-gbuffer-research.md §3.1) -
         // PostProcessPass reads this to hand the frame off to the back buffer.
         ID3D11ShaderResourceView* m_sceneColorSrv{};
         // View-space normal G-buffer (docs/post-process-gbuffer-research.md
-        // §12.3/§12.5) - bound as a second render target alongside colour
+        // §3.1/§3.4) - bound as a second render target alongside colour
         // during the geometry stage. Nothing reads m_sceneNormalSrv yet.
         ID3D11Texture2D* m_sceneNormal{};
         ID3D11RenderTargetView* m_sceneNormalRtv{};
         ID3D11ShaderResourceView* m_sceneNormalSrv{};
         ID3D11Texture2D* m_sceneDepth{};
         ID3D11DepthStencilView* m_sceneDepthDsv{};
-        // Readable alongside the DSV (docs/post-process-gbuffer-research.md §4.1) -
+        // Readable alongside the DSV (docs/post-process-gbuffer-research.md §3.1) -
         // nothing binds this yet; it exists so a later post-process pass can.
         ID3D11ShaderResourceView* m_sceneDepthSrv{};
         std::uint32_t m_sampleCount{ 1 };

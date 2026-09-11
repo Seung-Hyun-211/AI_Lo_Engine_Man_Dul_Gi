@@ -38,7 +38,7 @@ namespace engine::render
     {
         // Default pipeline: 3D geometry first (writes depth), then
         // PostProcessPass hands the frame off from the scene colour target to
-        // the back buffer (docs/post-process-gbuffer-research.md §3/§12.1),
+        // the back buffer (docs/post-process-gbuffer-research.md §2),
         // then the 2D overlay on top. The 3D pass is only registered when the
         // 3D module is built in; AddRenderPass inserts further geometry stages
         // before PostProcessPass (see main.cpp).
@@ -59,7 +59,7 @@ namespace engine::render
         // Default: slot in before the trailing {PostProcessPass, QuadPass2D}
         // pair so a new geometry pass still runs while the scene colour target
         // is bound, and the quad UI still ends up on top
-        // (docs/post-process-gbuffer-research.md §12.1/§12.2). `atEnd` appends
+        // (docs/post-process-gbuffer-research.md §2). `atEnd` appends
         // after everything - for a pass that must run last (e.g. SpritePass2D,
         // whose scissor rasterizer state would otherwise leak into QuadPass2D).
         constexpr std::size_t kTrailingPassCount = 2;   // PostProcessPass, QuadPass2D
@@ -386,7 +386,7 @@ namespace engine::render
         // buffer can't be bound as a shader resource (the swap chain only
         // requests DXGI_USAGE_RENDER_TARGET_OUTPUT), and PostProcessPass needs
         // to read scene colour regardless of sample count. See
-        // docs/post-process-gbuffer-research.md §12.3.
+        // docs/post-process-gbuffer-research.md §3.1.
         D3D11_TEXTURE2D_DESC colorDesc{};
         colorDesc.Width = width;
         colorDesc.Height = height;
@@ -414,7 +414,7 @@ namespace engine::render
 
         // View-space normal G-buffer, same size/sample count as colour - bound
         // as a second render target during the geometry stage. See
-        // docs/post-process-gbuffer-research.md §4.2/§12.3.
+        // docs/post-process-gbuffer-research.md §3.1.
         D3D11_TEXTURE2D_DESC normalDesc = colorDesc;
         ThrowIfFailed(m_device->CreateTexture2D(&normalDesc, nullptr, &m_sceneNormal), "CreateTexture2D (scene normal) failed");
         ThrowIfFailed(m_device->CreateRenderTargetView(m_sceneNormal, nullptr, &m_sceneNormalRtv), "CreateRenderTargetView (scene normal) failed");
@@ -425,7 +425,7 @@ namespace engine::render
         // Typeless + BIND_SHADER_RESOURCE (same combination as m_shadowDepth) so a
         // later pass can read depth as t-something while it's still bound as the
         // DSV elsewhere in the frame - see docs/post-process-gbuffer-research.md
-        // §4.1/§12.3. The DSV keeps depth-stencil semantics unchanged
+        // §3.1. The DSV keeps depth-stencil semantics unchanged
         // (D24_UNORM_S8_UINT); only the SRV view is new and, until something
         // actually samples it, this is a no-op resource-shape change.
         D3D11_TEXTURE2D_DESC depthDesc{};
@@ -494,7 +494,7 @@ namespace engine::render
 #endif
 
         // Geometry stage: colour + view-space normal MRT (docs/post-process-
-        // gbuffer-research.md §12.3/§12.5). A pass whose PS doesn't declare
+        // gbuffer-research.md §3.1/§3.4). A pass whose PS doesn't declare
         // SV_TARGET1 (outline, debug lines, shadow) just leaves the normal
         // target at this clear value for its pixels - see common3d.hlsli's
         // GeometryPSOut comment.
@@ -525,7 +525,7 @@ namespace engine::render
         context.snapshot = &snapshot;
         // PostProcessPass (always in m_passes, see the constructor) reads these
         // to hand the frame off from the scene colour target to the back
-        // buffer - see docs/post-process-gbuffer-research.md §12.1/§12.3/§12.8.
+        // buffer - see docs/post-process-gbuffer-research.md §2/§3.1.
         // It also now does the job the old end-of-frame ResolveSubresource used
         // to when multisampled, so there is no separate resolve call here.
         context.backBufferRenderTarget = m_backBufferRtv;

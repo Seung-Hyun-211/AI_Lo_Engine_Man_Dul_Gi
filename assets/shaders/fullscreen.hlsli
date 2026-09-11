@@ -5,7 +5,7 @@
 // this from a .hlsl file gives it a working VSMain with no vertex or index
 // buffer bound - the pass just calls DrawInstanced(3, 1, 0, 0). One triangle
 // (not two) covers the whole clip-space square, so there is no diagonal seam.
-// See docs/post-process-gbuffer-research.md §12.7.
+// See docs/post-process-gbuffer-research.md §2.
 struct VSOut
 {
     float4 pos : SV_POSITION;
