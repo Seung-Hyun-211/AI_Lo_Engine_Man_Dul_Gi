@@ -77,6 +77,7 @@ namespace engine::render
 #if defined(ENGINE_WITH_3D)
         m_ssaoShader = shaders.Get(device, "ssao", nullptr, 0);
         m_ssaoMsShader = shaders.Get(device, "ssao_ms", nullptr, 0);
+        m_blurShader = shaders.Get(device, "ssao_blur", nullptr, 0);
 
         D3D11_SAMPLER_DESC wrapDesc{};
         wrapDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
@@ -135,6 +136,9 @@ namespace engine::render
         SafeRelease(m_aoSrv);
         SafeRelease(m_aoRtv);
         SafeRelease(m_aoTexture);
+        SafeRelease(m_aoBlurSrv);
+        SafeRelease(m_aoBlurRtv);
+        SafeRelease(m_aoBlurTexture);
         m_aoWidth = 0;
         m_aoHeight = 0;
         if (width == 0 || height == 0) return;
@@ -148,6 +152,12 @@ namespace engine::render
         ThrowIfFailed(device->CreateTexture2D(&desc, nullptr, &m_aoTexture), "CreateTexture2D (ao) failed");
         ThrowIfFailed(device->CreateRenderTargetView(m_aoTexture, nullptr, &m_aoRtv), "CreateRenderTargetView (ao) failed");
         ThrowIfFailed(device->CreateShaderResourceView(m_aoTexture, nullptr, &m_aoSrv), "CreateShaderResourceView (ao) failed");
+
+        // Blurred copy Composite actually reads - see ssao_blur.hlsl.
+        ThrowIfFailed(device->CreateTexture2D(&desc, nullptr, &m_aoBlurTexture), "CreateTexture2D (ao blur) failed");
+        ThrowIfFailed(device->CreateRenderTargetView(m_aoBlurTexture, nullptr, &m_aoBlurRtv), "CreateRenderTargetView (ao blur) failed");
+        ThrowIfFailed(device->CreateShaderResourceView(m_aoBlurTexture, nullptr, &m_aoBlurSrv), "CreateShaderResourceView (ao blur) failed");
+
         m_aoWidth = width;
         m_aoHeight = height;
     }
@@ -157,11 +167,11 @@ namespace engine::render
         if (context.sceneDepthSrv == nullptr || context.sceneNormalSrv == nullptr) return m_whiteAoSrv;
 
         EnsureAoTarget(context.device, context.viewportWidth, context.viewportHeight);
-        if (m_aoRtv == nullptr) return m_whiteAoSrv;
+        if (m_aoRtv == nullptr || m_aoBlurRtv == nullptr) return m_whiteAoSrv;
 
         const bool multisampled = context.sceneSampleCount > 1;
         const ShaderProgram* shader = multisampled ? m_ssaoMsShader : m_ssaoShader;
-        if (shader == nullptr) return m_whiteAoSrv;
+        if (shader == nullptr || m_blurShader == nullptr) return m_whiteAoSrv;
 
         SsaoParamsGpu params{};
         std::memcpy(params.kernel, m_kernel.data(), sizeof(params.kernel));
@@ -196,7 +206,21 @@ namespace engine::render
         ID3D11ShaderResourceView* nullSrvs[3]{ nullptr, nullptr, nullptr };
         device->PSSetShaderResources(0, 3, nullSrvs);   // detach - depth/normal are render targets again next frame
 
-        return m_aoSrv;
+        // Blur pass: 4x4 box blur matching the noise tile, so the per-pixel
+        // kernel rotation reads as smooth AO instead of a dithered stipple
+        // (ssao_blur.hlsl). Binding m_aoBlurRtv here implicitly detaches
+        // m_aoRtv, so m_aoSrv (the same resource) is safe to read right after.
+        device->OMSetRenderTargets(1, &m_aoBlurRtv, nullptr);
+        ID3D11ShaderResourceView* aoSrv = m_aoSrv;
+        device->PSSetShaderResources(0, 1, &aoSrv);
+        device->VSSetShader(m_blurShader->vs, nullptr, 0);
+        device->PSSetShader(m_blurShader->ps, nullptr, 0);
+        device->Draw(3, 0);
+
+        ID3D11ShaderResourceView* nullSrv1{ nullptr };
+        device->PSSetShaderResources(0, 1, &nullSrv1);   // detach - ao is a render target again next frame
+
+        return m_aoBlurSrv;
     }
 #endif
 
@@ -262,6 +286,7 @@ namespace engine::render
 #if defined(ENGINE_WITH_3D)
         m_ssaoShader = nullptr;      // owned by ShaderLibrary
         m_ssaoMsShader = nullptr;    // owned by ShaderLibrary
+        m_blurShader = nullptr;      // owned by ShaderLibrary
         SafeRelease(m_wrapSampler);
         SafeRelease(m_noiseSrv);
         SafeRelease(m_noiseTexture);
@@ -269,6 +294,9 @@ namespace engine::render
         SafeRelease(m_aoSrv);
         SafeRelease(m_aoRtv);
         SafeRelease(m_aoTexture);
+        SafeRelease(m_aoBlurSrv);
+        SafeRelease(m_aoBlurRtv);
+        SafeRelease(m_aoBlurTexture);
         m_aoWidth = 0;
         m_aoHeight = 0;
 #endif

@@ -57,6 +57,7 @@ namespace engine::render
 
         const ShaderProgram* m_ssaoShader{};       // ssao.hlsl    - single-sample depth/normal
         const ShaderProgram* m_ssaoMsShader{};     // ssao_ms.hlsl - multisampled depth/normal
+        const ShaderProgram* m_blurShader{};       // ssao_blur.hlsl - 4x4 box blur, matches the noise tile size
         ID3D11SamplerState* m_wrapSampler{};        // point/wrap - the tiling noise texture
 
         ID3D11Texture2D* m_noiseTexture{};
@@ -65,13 +66,19 @@ namespace engine::render
 
         ID3D11Buffer* m_ssaoParams{};   // b0 for ssao*.hlsl: kernel + projection scalars + radius/power/bias
 
-        // AO render target, full-resolution, lazily (re)created in
+        // AO render targets, full-resolution, lazily (re)created in
         // EnsureAoTarget when the viewport size changes - IRenderPass has no
         // resize hook, so this pass tracks its own last-seen size instead
-        // (docs/post-process-gbuffer-research.md §12.11 step 7).
+        // (docs/post-process-gbuffer-research.md §12.11 step 7). m_aoTexture
+        // holds the raw (noisy) SSAO result; m_aoBlurTexture the blurred
+        // result Composite actually reads - see ssao_blur.hlsl for why both
+        // exist.
         ID3D11Texture2D* m_aoTexture{};
         ID3D11RenderTargetView* m_aoRtv{};
         ID3D11ShaderResourceView* m_aoSrv{};
+        ID3D11Texture2D* m_aoBlurTexture{};
+        ID3D11RenderTargetView* m_aoBlurRtv{};
+        ID3D11ShaderResourceView* m_aoBlurSrv{};
         std::uint32_t m_aoWidth{};
         std::uint32_t m_aoHeight{};
 #endif

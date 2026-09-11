@@ -546,6 +546,7 @@ GeometryPSOut PSMain(VSOut input)
 | `assets/shaders/fullscreen.hlsli` | **구현됨.** 공용 VS — `SV_VertexID`(0,1,2)로 클립공간 커버 삼각형 정점 3개 생성, `composite*.hlsl`/`ssao*.hlsl`이 include |
 | `assets/shaders/depth_resolve.hlsl` | **불필요해져 안 만듦** — §12.3 표 참고(SSAO 셰이더가 멀티샘플 SRV를 직접 읽음) |
 | `assets/shaders/ssao.hlsl` / `ssao_ms.hlsl` | **구현됨.** §5 반구 커널(16샘플, 4x4 노이즈 텍스처로 회전) — 뷰공간 위치 재구성은 일반 `invProj` 대신 이 엔진의 `PerspectiveFovLH`가 굽는 두 스칼라(`proj.m[10]`=A, `proj.m[14]`=B, `viewZ = B/(depth-A)`)만 사용(전체 역행렬 불필요, §5 실제 구현 참고). half-res 는 미구현(전체 해상도로 시작 — §11 half-res 판단 아직 안 함) |
+| `assets/shaders/ssao_blur.hlsl` | **구현됨(원래 체크리스트에 없던 항목, 실측 후 추가).** 노이즈 타일(4x4)과 같은 반경의 박스 블러 — 커널을 픽셀마다 회전시키는 SSAO는 블러 없이 쓰면 "점 밀도" 스티플로 보인다(사용자 실측으로 확인). `Composite`는 이제 이 블러 결과(`m_aoBlurSrv`)를 읽는다, `m_aoSrv`(원본)가 아니라. AO 타깃은 씬 MSAA와 무관하게 항상 단일 샘플이라 `_ms` 변형 불필요 |
 | `assets/shaders/composite.hlsl` / `composite_ms.hlsl` | **구현됨(AO 곱까지).** `aoTex`(t1) 를 추가로 샘플해 컬러에 곱함 — `PostProcessPass`가 실제 SSAO 결과 또는 흰색 폴백 중 뭘 넘기든 셰이더는 동일. §7.1 안개는 아직 |
 
 ### 12.8 `PassContext`/`RenderPass.h` — 포스트 패스가 G-버퍼를 읽는 방법
@@ -589,7 +590,7 @@ struct Scene3D { /* ...기존... */ PostProcessSettings postProcess{}; };
 
 | 파일 | 종류 |
 |---|---|
-| `src/render/Dx11Renderer.h`/`.cpp` | **수정됨** — 씬 타깃 리소스 확장(§12.3, 색+깊이+노멀 3종 + SRV), 지오메트리 스테이지 MRT 바인드(색+노멀), 파이프라인에 `PostProcessPass` 상시 등록 + `AddRenderPass` 기본 삽입 지점을 트레일링 2개 기준으로(§12.1). SSAO·리졸브는 아직 |
+| `src/render/Dx11Renderer.h`/`.cpp` | **수정됨.** 씬 타깃 리소스 확장(§12.3, 색+깊이+노멀 3종 + SRV), 지오메트리 스테이지 MRT 바인드(색+노멀), 파이프라인에 `PostProcessPass` 상시 등록 + `AddRenderPass` 기본 삽입 지점을 트레일링 2개 기준으로(§12.1). 별도 리졸브 텍스처는 불필요해져 추가 안 함(§12.3) |
 | `src/render/RenderPass.h` | **수정됨.** `PassContext`에 `backBufferRenderTarget`/`sceneColorSrv`/`sceneNormalSrv`/`sceneDepthSrv`/`sceneSampleCount` 전부 추가(§12.8, 옵션 A). **AO 자체는 `PassContext` 필드로 안 나감** — 계산(`ComputeAo`)과 소비(`Composite`)가 같은 `PostProcessPass::Execute` 안에서 끝나 렌더러를 거칠 필요가 없었다(예측과 다른 점) |
 | `src/render/r3d/FrameConstants.h` | **수정됨** — `view` 필드 추가(§12.4) |
 | `assets/shaders/common3d.hlsli` | **수정됨** — `cbuffer Frame`에 `view` 추가 + `WorldToViewNormal` 헬퍼 + `GeometryPSOut` 공용 구조체(§12.4/§12.5) |
@@ -597,15 +598,15 @@ struct Scene3D { /* ...기존... */ PostProcessSettings postProcess{}; };
 | `assets/shaders/{outline,shadow,shadow_instanced,debugline}.hlsl` | **안 바꿈(계획대로)**(§12.5) |
 | `assets/shaders/crease.hlsl` | 판단 필요, 아직 보류(§12.5) |
 | `src/render/r3d/MeshPass3D.cpp`/`ModelMeshPass3D.cpp` | **변경 없음, 계획대로**(§12.6) — MRT 바인딩은 `Dx11Renderer`가, 셰이더 파일만 갱신하면 충분했다 |
-| `src/render/r2d/PostProcessPass.h`/`.cpp` | **구현됨(패스스루만)** — 계획한 위치(`r3d/`)에서 `r2d/`로 변경, 이유는 위 §12.7 표 |
+| `src/render/r2d/PostProcessPass.h`/`.cpp` | **구현됨(SSAO+블러 포함).** 계획한 위치(`r3d/`)에서 `r2d/`로 변경(§12.7 표에 이유), SSAO 관련 멤버·로직만 `ENGINE_WITH_3D`로 감쌈 |
 | `assets/shaders/fullscreen.hlsli` | **구현됨**(§12.7) |
-| `assets/shaders/depth_resolve.hlsl` | **미구현(다음 단계)**(§12.7) |
-| `assets/shaders/ssao.hlsl` | **미구현(다음 단계)**(§12.7) |
-| `assets/shaders/composite.hlsl` + `composite_ms.hlsl` | **구현됨(패스스루만)** — 계획은 파일 1개였으나 2개로 분리(§12.7 표에 이유) |
-| `src/render/r3d/Scene3D.h` | 미구현(다음 단계) — `PostProcessSettings` 추가(§12.9) |
+| ~~`assets/shaders/depth_resolve.hlsl`~~ | **불필요해져 안 만듦**(§12.3/§12.7 — SSAO 셰이더가 멀티샘플 SRV를 직접 읽음) |
+| `assets/shaders/ssao.hlsl` / `ssao_ms.hlsl` / `ssao_blur.hlsl` | **구현됨**(§12.7 — `ssao_blur.hlsl`은 체크리스트에 없던 항목, 실측 후 추가) |
+| `assets/shaders/composite.hlsl` + `composite_ms.hlsl` | **구현됨(AO 곱까지).** 계획은 파일 1개였으나 2개로 분리(§12.7 표에 이유). §7.1 안개는 아직 |
+| `src/render/r3d/Scene3D.h` | 미구현(다음 단계) — `PostProcessSettings` 추가(§12.9), 지금은 `PostProcessPass.cpp` 상수 |
 | `src/game/SnapshotBuilder.cpp` | 미구현(다음 단계) — `PostProcessSettings` 채우기 |
 | `src/main.cpp` | **안 바뀜, 확인됨**(§12.1 최소 변경안대로, §12.2) |
-| `CppWindowGame.vcxproj` | **수정됨(매 단계 계속 갱신).** 체크리스트에 없던 항목이지만 실제로는 필수: 새 `.cpp`/`.h`/`.hlsl`/`.hlsli`(`ssao.hlsl`/`ssao_ms.hlsl` 포함) 전부 `<ClCompile>`/`<ClInclude>`/`<None>` 로 등록해야 MSBuild가 인식한다(글롭 빌드 아님) |
+| `CppWindowGame.vcxproj` | **수정됨(매 단계 계속 갱신).** 체크리스트에 없던 항목이지만 실제로는 필수: 새 `.cpp`/`.h`/`.hlsl`/`.hlsli`(`ssao*.hlsl` 3종 포함) 전부 `<ClCompile>`/`<ClInclude>`/`<None>` 로 등록해야 MSBuild가 인식한다(글롭 빌드 아님) |
 
 ### 12.11 구현 순서 — 위험도/의존성 순 (§9를 이 체크리스트 기준으로 구체화)
 
@@ -624,10 +625,14 @@ struct Scene3D { /* ...기존... */ PostProcessSettings postProcess{}; };
    SSAO/합성이 그 값을 소비하기 시작하는 8단계에서 화면으로 간접 확인된다.
 6. ~~깊이 다운샘플 + 노멀 리졸브~~ **불필요해져 스킵** — SSAO 셰이더가 멀티샘플 SRV를 직접
    읽는 쪽(§4.3(a))으로 구현해 별도 리졸브 텍스처/패스가 필요 없어졌다(§12.3/§12.7).
-7. ~~SSAO(§12.7 `ssao.hlsl`)~~ **완료.** `ssao.hlsl`/`ssao_ms.hlsl`, 16-샘플 반구 커널 +
-   4x4 노이즈 텍스처, 뷰공간 재구성은 `PerspectiveFovLH`가 굽는 두 스칼라만 사용(§5 실제 구현
-   참고). **디버그 뷰(§7.4)는 여전히 없음** — AO 단독 시각화는 못 하고, 8단계(합성에서 곱)로
-   화면에 간접 확인된다. half-res 는 미구현(전체 해상도).
+7. ~~SSAO(§12.7 `ssao.hlsl`)~~ **완료 + 블러 추가(체크리스트에 없던 항목, 실측 후 발견).**
+   `ssao.hlsl`/`ssao_ms.hlsl`, 16-샘플 반구 커널 + 4x4 노이즈 텍스처, 뷰공간 재구성은
+   `PerspectiveFovLH`가 굽는 두 스칼라만 사용(§5 실제 구현 참고). **VS 빌드·실행 확인 결과
+   블러 없이는 픽셀마다 회전하는 커널 때문에 AO가 "점 밀도" 스티플로 보였다** — 노이즈 타일과
+   같은 반경의 4x4 박스 블러(`ssao_blur.hlsl`)를 SSAO 바로 뒤에 추가해 해결(반구 커널 SSAO의
+   표준 구성, 옵션 아님). `Composite`는 이제 `m_aoBlurSrv`를 읽는다. **디버그 뷰(§7.4)는
+   여전히 없음** — AO 단독 시각화는 못 하고, 8단계(합성에서 곱)로 화면에 간접 확인된다.
+   half-res 는 미구현(전체 해상도).
 8. ~~합성(AO 곱)~~ **완료.** `composite.hlsl`/`composite_ms.hlsl`가 `aoTex`를 추가로 곱함.
    **세기 파라미터(radius/power/bias)는 아직 `PostProcessPass.cpp`에 상수로 하드코딩**
    (§12.9 `Scene3D.postProcess` 승격은 안 함) — 셀 룩에 맞게 조정하려면 지금은 재빌드 필요.
