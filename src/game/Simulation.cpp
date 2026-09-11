@@ -69,6 +69,14 @@ namespace engine::game
             m_cameraPitch = -0.5f;   // steeper default tilt for the overlook
             SpawnSimAgents();
         }
+        else if constexpr (kDemoScene == 3)
+        {
+            // Just the player, centred - no wandering extras to clutter the
+            // shadow/lighting showcase (SnapshotBuilder::BuildShadowShowcaseScene).
+            player.pos = { 0.0f, 0.0f, 0.0f };
+            player.facingYaw = 0.0f;
+            m_actors.push_back(std::move(player));
+        }
         else
         {
             m_actors.reserve(3);

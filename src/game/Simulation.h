@@ -120,8 +120,10 @@ namespace engine::game
 
         // Demo scene selector (docs/demo-scene.md). 1 = local-time-scale actors
         // on a small slab. 2 = player on a clifftop overlooking a large field
-        // with a wandering simulation crowd below.
-        static constexpr int   kDemoScene = 2;
+        // with a wandering simulation crowd below. 3 = shadow/lighting showcase
+        // (docs/shadows.md "씬 3") - staircase + back wall + pillars spanning
+        // both shadow cascades, no crowd. Active for graphics work on main.
+        static constexpr int   kDemoScene = 3;
         static constexpr float kCliffTop = 6.0f;         // scene 2: plateau (player) height
         static constexpr float kPlateauHalf = 5.0f;      // scene 2: player's walkable plateau half-size (to the cliff edge)
         static constexpr float kFieldHalf = 30.0f;       // scene 2: lower field half-size

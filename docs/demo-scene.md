@@ -32,7 +32,8 @@ CharacterAnimationState (game/)
   · Update(dt, Locomotion) : 상태가 바뀌면 해당 클립으로 스냅 + clipTime=0, 아니면 clipTime += dt
                              Locomotion→클립 매핑은 render/r3d/CharacterAnimationClips.h 의 kUnityChan{Wait,Walk,Run,Jump}Clip
 SnapshotBuilder (game/)
-  · BuildCamera  : focus = CharacterPosition + (0,1.3,0);  forward = f(camYaw,camPitch);  eye = focus - forward*3.6
+  · BuildCamera  : focus = CharacterPosition + (0,1.3,0);  forward = f(camYaw,camPitch);  eye = focus - forward*orbitDistance
+                   (orbitDistance: 씬 1=3.6, 씬 2=6.0, 씬 3=5.5 — `Simulation::kDemoScene` 분기, `docs/shadows.md` "씬 3")
   · BuildScene3D : model.world = RotationY(CharacterFacingYaw + kModelYawOffset) * Translation(CharacterPosition)
                    model.animClipIndex/Time = Simulation 의 값 (렌더 스레드가 §5.2a 로 CPU 스킨)
 ```

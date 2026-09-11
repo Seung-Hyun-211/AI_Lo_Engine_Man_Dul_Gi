@@ -32,7 +32,7 @@ cbuffer CelParams : register(b3)
 }
 
 struct VSIn  { float3 pos : POSITION; float3 nrm : NORMAL; float2 uv : TEXCOORD; };
-struct VSOut { float4 pos : SV_POSITION; float3 nrm : NORMAL; float2 uv : TEXCOORD; float4 shadowClip : TEXCOORD1; float3 worldPos : TEXCOORD2; };
+struct VSOut { float4 pos : SV_POSITION; float3 nrm : NORMAL; float2 uv : TEXCOORD; float3 worldPos : TEXCOORD1; };
 
 VSOut VSMain(VSIn input)
 {
@@ -41,7 +41,6 @@ VSOut VSMain(VSIn input)
     output.pos = mul(worldPos, viewProj);
     output.nrm = mul(float4(input.nrm, 0.0f), world).xyz;
     output.uv = float2(input.uv.x, 1.0f - input.uv.y);   // FBX bottom-left -> D3D top-left
-    output.shadowClip = mul(worldPos, lightViewProj);
     output.worldPos = worldPos.xyz;
     return output;
 }
@@ -51,7 +50,7 @@ GeometryPSOut PSMain(VSOut input)
     float4 tex = albedo.Sample(samp, input.uv);
     clip(tex.a - 0.35f);                                  // cutout for hair / eyelashes
     float3 base = tex.rgb * objColor.rgb;
-    float shadow = SampleShadow(input.shadowClip);
+    float shadow = SampleShadow(input.worldPos);
     float3 lit = ApplyCelLighting(base, input.nrm, uShadowBias, CEL_BAND_SOFTNESS, CEL_WRAP, shadow);
     float rim = RimLight(input.nrm, input.worldPos, CEL_RIM_THRESHOLD, CEL_RIM_SOFTNESS);
     lit += keyColor.rgb * rim * uRimStrength;

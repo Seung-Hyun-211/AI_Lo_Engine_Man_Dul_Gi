@@ -1,86 +1,95 @@
-# 그림자 (Directional Shadow Map)
+# 그림자 (Cascaded Directional Shadow Map)
 
-`src/render/Dx11Renderer.cpp` + `assets/shaders/shadow.hlsl` + `common3d.hlsli`. key 라이트 하나의 캐스트 그림자.
+`src/render/Dx11Renderer.cpp` + `assets/shaders/shadow.hlsl`/`shadow_instanced.hlsl` + `common3d.hlsli`. key 라이트 하나의 캐스트 그림자, 2캐스케이드.
 
 ## 방식
 
-프레임마다 **씬 이전에** 라이트 시점 depth-only 렌더 → 4096² 셰도우맵. 씬 패스는 그 맵을 `t1` 에 받아 PCF 로 샘플, key 항을 그림자 계수로 곱한다.
+프레임마다 **씬 이전에** 라이트 시점 depth-only 렌더를 **캐스케이드당 1회**(지금 2회) → `Texture2DArray` 셰도우맵(슬라이스당 4096²). 씬 패스는 그 배열을 `t1` 에 받아 캐스케이드 0(근접, 좁음)부터 시도하고 밖이면 캐스케이드 1(원거리, 넓음)로 폴백해 PCF 샘플, key 항을 그림자 계수로 곱한다.
 
 ```text
 Dx11Renderer::Render():
   PollHotReload
   if lighting.shadowsEnabled:
     RenderShadowMap(snapshot):
-      t1 detach → OMSetRenderTargets(none, m_shadowDsv) → Clear depth
-      viewport 4096² · m_shadowRaster(depth bias) · m_shadowDepthState
-      b0 = lightViewProj (m_shadowFrameCb)
-      각 IRenderPass::RenderShadow(ctx)   ← 자기 지오메트리를 world·b1 로 depth-only 드로우
+      t1 detach → viewport 4096² · m_shadowRaster(depth bias) · m_shadowDepthState
+      for cascade in [0, 1]:
+        OMSetRenderTargets(none, m_shadowDsv[cascade]) → Clear depth
+        b0 = cascadeViewProj[cascade] (m_shadowFrameCb)
+        각 IRenderPass::RenderShadow(ctx)   ← 자기 지오메트리를 world·b1 로 depth-only 드로우 (캐스케이드마다 다시 그림)
   씬 타깃 bind + clear
-  if shadows: PSSetShaderResources(1, m_shadowSrv) · PSSetSamplers(1, m_shadowSampler)
+  if shadows: PSSetShaderResources(1, m_shadowSrv) · PSSetSamplers(1, m_shadowSampler)   ← 배열 SRV, 슬라이스 2개 모두
   각 IRenderPass::Execute
   MSAA resolve → Present
 ```
+
+캐스케이드당 지오메트리를 통째로 다시 그리므로 섀도우 드로우콜이 캐스케이드 수(2) 배가 된다 — 씬 규모가 커지면 감수할 비용, §"한계".
 
 ## 구성
 
 | 리소스 (Dx11Renderer) | 내용 |
 |---|---|
-| `m_shadowDepth` | `R32_TYPELESS` 4096² Texture2D, `BIND_DEPTH_STENCIL | BIND_SHADER_RESOURCE` |
-| `m_shadowDsv` | `D32_FLOAT` 뷰 |
-| `m_shadowSrv` | `R32_FLOAT` 뷰 (씬 패스가 `t1` 로 읽음) |
+| `m_shadowDepth` | `R32_TYPELESS` 4096² `Texture2DArray`(`ArraySize=kShadowCascadeCount`), `BIND_DEPTH_STENCIL \| BIND_SHADER_RESOURCE` |
+| `m_shadowDsv[cascade]` | 캐스케이드당 `D32_FLOAT` `TEXTURE2DARRAY` DSV(그 슬라이스 1장만) |
+| `m_shadowSrv` | `R32_FLOAT` `TEXTURE2DARRAY` SRV(슬라이스 전체) — 씬 패스가 `t1` 로 읽음 |
 | `m_shadowSampler` | `COMPARISON_MIN_MAG_MIP_LINEAR`, `LESS_EQUAL`, CLAMP (`s1`) |
-| `m_shadowRaster` | solid, cull none, `DepthBias 400` + `SlopeScaledDepthBias 1.5` (acne 방지, §"뿌옇다" 참고 — 예전 1200/2.5는 과했음) |
-| `m_shadowFrameCb` | `b0` = `lightViewProj` (depth 패스 전용) |
-| `kShadowMapSize` | `render/r3d/FrameConstants.h`, 4096 (씬 2 대응, §"경계가 불명확" 참고 — 예전 2048) |
+| `m_shadowRaster` | solid, cull none, `DepthBias 400` + `SlopeScaledDepthBias 1.5` (모든 캐스케이드 공유) |
+| `m_shadowFrameCb` | `b0` = 현재 그리는 캐스케이드의 view-proj (depth 패스 전용, 캐스케이드마다 `UpdateSubresource`) |
+| `kShadowCascadeCount` | `render/r3d/Lighting.h`, 2 |
+| `kShadowMapSize` | `render/r3d/FrameConstants.h`, 4096 (캐스케이드당 해상도) |
 
-- **라이트 행렬**: `SnapshotBuilder::BuildLighting` 이 `lighting.lightViewProj` 를 만든다 — key 방향으로 `LookAtLH` + 씬을 감싸는 `OrthographicLH`. 씬 1(단일 캐릭터)은 `(12, 12, 0.1, 28)`, 씬 2(군중)는 `(64, 64, 0.1, 90)` — 씬마다 다른 이유는 아래 "뿌옇다" 참고. `Scene3D::lighting` 로 스냅샷에 값으로 전달.
-- **Frame cbuffer(b0)** 확장: `lightViewProj` + `shadowParams`(x=texel, y=bias, z=enabled). `FrameConstantsGpu` + `common3d.hlsli` 함께.
-- **`IRenderPass::RenderShadow`**: 기본 빈 구현. `MeshPass3D`·`ModelMeshPass3D` 가 override 해서 POSITION-only 레이아웃 + `"shadow"` VS + null PS 로 자기 VB/IB 를 다시 그린다. b1(world)은 기존 `m_objectConstants` 재사용.
-- **수신 (`common3d.hlsli::SampleShadow`)**: `shadowClip` 을 VS 에서 계산해 PS 로 전달 → NDC → uv → 5×5 PCF `SampleCmpLevelZero`(§"경계가 불명확" — 예전 3×3). 맵 밖·비활성이면 1.0(밝음). `ApplyLighting` / `ApplyCelLighting` 이 `shadow` 인자로 key 항을 곱. 그림자면은 헤미스피어 앰비언트만 남음.
+- **라이트 행렬**: `SnapshotBuilder::BuildLighting` 이 `lighting.cascadeViewProj[2]` 를 만든다 — 캐스케이드 0(근접)은 **모든 씬에서 플레이어 중심 12×12×28m 박스로 고정**, 캐스케이드 1(원거리)은 씬마다 다름(`FitShadowOrtho` 호출부 참고: 씬 1 30/60/22, 씬 2 64/90/32, 씬 3 50/80/28). `Scene3D::lighting` 로 스냅샷에 값으로 전달.
+- **Frame cbuffer(b0)** 확장: `cascadeViewProj[2]` + `shadowParams`(x=텍셀, y=바이어스, z=활성화). `FrameConstantsGpu` + `common3d.hlsli` 함께 — 항상 같이 고친다(CLAUDE.md 불변 규칙).
+- **`IRenderPass::RenderShadow`**: 기본 빈 구현. `MeshPass3D`·`ModelMeshPass3D` 가 override 해서 POSITION-only 레이아웃 + `"shadow"` VS + null PS 로 자기 VB/IB 를 다시 그린다. b1(world)은 기존 `m_objectConstants` 재사용. 캐스케이드마다 다시 호출되므로 이 함수 안에서 캐스케이드를 몰라도 된다 — 렌더러가 b0만 바꿔 낀다.
+- **수신 (`common3d.hlsli::SampleShadow`)**: VS는 `worldPos` 만 PS로 넘기고(캐스케이드별 클립 변환을 미리 계산하지 않음), PS의 `SampleShadow(worldPos)` 가 캐스케이드 0부터 `SampleShadowCascade`로 클립 변환 + 5×5 PCF `SampleCmpLevelZero` 시도 → 박스 밖(`uv`/`depth` 범위 밖)이면 캐스케이드 1로 폴백. 둘 다 밖이면 1.0(밝음). `ApplyLighting`/`ApplyCelLighting` 이 `shadow` 인자로 key 항을 곱. 그림자면은 헤미스피어 앰비언트만 남음.
 
 ## 켜고 끄기
 
 `Scene3D::lighting.shadowsEnabled` (지금 `BuildLighting` 이 `true`). `false` 면 `RenderShadowMap` 스킵 + `shadowParams.z=0` 이라 셰이더가 그림자 계산 안 함 (분기).
 
-## "뿌옇다/이상하다" 였던 이유 → 지금
+## 왜 캐스케이드인가 — 씬 1/2에서 겪은 문제
 
-캐릭터 그림자가 흐릿하고 붕 떠 보인다는 피드백. 원인 두 가지가 겹쳐 있었다:
+단일 정사영 프레임 하나로는 "좁혀야 선명한 근접 그림자"와 "넓혀야 다 담기는 원거리 그림자"를 동시에 만족 못 한다는 게 실제로 드러난 사례:
 
-1. **씬 1(단일 캐릭터)의 정사영 프레임이 너무 넓었다.** span 22m가 2048² 맵 전체에 깔려 있었는데, 실제로 그림자를 드리우는 건 캐릭터 하나(키 ~1.8m)뿐 — 텍셀 밀도가 22m/2048px ≈ 1.07cm/텍셀이라 캐릭터 실루엣이 맵의 극히 일부만 차지해 픽셀당 텍셀이 성기게 샘플되고, `SampleShadow`의 선형 비교 필터(`COMPARISON_MIN_MAG_MIP_LINEAR`) + 3×3 PCF가 그 성긴 텍셀을 더 넓게 블러해 "뿌옇게" 보였다. → span 12m·depth 28m로 좁혀 텍셀 밀도 약 1.8배(≈0.586cm/텍셀).
-2. **바이어스가 이중으로 과했다.** 래스터라이저 `DepthBias`(맵을 쓸 때 미는 값)와 셰이더 쪽 `shadowParams.y`(샘플링 시 비교 깊이에서 빼는 값) 둘 다 크게 잡혀 있어(1200/2.5 + 0.0018) 그림자가 캐릭터 발밑에서 살짝 떨어져 보이는 peter-panning이 있었다 — "이상하다"의 정체. → `DepthBias 400`/`SlopeScaledDepthBias 1.5` + `shadowParams.y 0.0012`로 낮춰 접지감을 개선.
+- **씬 1(단일 캐릭터), 뿌옇다/이상하다**: 정사영 span이 22m로 2048² 맵 전체에 깔려 있었는데, 실제 캐스터는 키 ~1.8m 캐릭터 하나뿐 — 텍셀 밀도 ≈1.07cm/텍셀로 성기게 샘플되고 선형 비교 필터 + 3×3 PCF가 그걸 더 넓게 블러해 뿌옇게 보였다. 거기에 이중 바이어스(래스터라이저 `DepthBias`/`SlopeScaledDepthBias` + 셰이더 `shadowParams.y`)가 과해 발밑에서 그림자가 살짝 떨어지는 peter-panning도 있었다.
+- **씬 2(군중), 경계 불명확·그라데이션 불균일**: 정사영 span이 64m(군중 전체를 담아야 해서 좁힐 수 없음)라 텍셀 밀도가 ≈3.1cm/텍셀까지 성겨졌고, 3×3 PCF가 그 성긴 텍셀을 계단처럼 그대로 보여줘 부드러운 그라데이션이 아니라 듬성듬성한 값이 이어 붙은 것처럼 보였다.
 
-씬 2(군중, 넓은 필드)는 카메라·크라우드가 훨씬 넓게 퍼져 있어 프레임을 좁힐 수 없다 — 지금도 span 64m 그대로. 좁은 씬일수록 그림자 프레임을 씬에 맞추는 게 해상도보다 먼저 챙길 레버.
+한쪽을 좁히면 다른 쪽이 못 담기고, 한쪽에 맞춰 해상도/PCF를 조정하면 다른 쪽이 어긋나는 게 근본 원인 — **정사영 프레임을 하나 더 둬서 "근접은 항상 좁게, 원거리는 씬에 맞게 넓게"를 동시에 만족**시킨 게 지금의 캐스케이드 구조. 캐스케이드 0(플레이어 중심 12m, 모든 씬 공통)이 텍셀 밀도 ≈0.29cm/텍셀(4096 기준)로 항상 선명하고, 캐스케이드 1은 씬마다 필요한 만큼만 넓혀 원거리도 놓치지 않는다.
 
-## 씬 2: "경계가 불명확하고 그라데이션이 일정하지 않다"
+**미검증(시각)**: 이 컨테이너는 GPU 없음(WARP도 실행 불가) — 값·수식·바인딩 정합성만 확인. 실제 캐스케이드 전환 이음새·접지감·선명도는 F5(Windows/VS)에서 확인 필요(§"씬 3"이 바로 그 확인용).
 
-씬 1과는 원인이 다르다 — 씬 1은 "과도하게 블러됨"(위 §1)이었지만, 씬 2는 **텍셀 자체가 너무 성겨서** 부드러운 그라데이션을 만들 재료가 없는 쪽이다.
+## 씬 3: 그림자/조명 쇼케이스
 
-- 씬 2 정사영 span은 64m(군중 전체를 담아야 해서 좁힐 수 없음, 바로 위 문단). 예전 `kShadowMapSize=2048`에서 텍셀 밀도는 64/2048 ≈ **3.1cm/텍셀** — 씬 1(12m span, ≈0.6cm/텍셀)의 5배 이상 성기다.
-- 3×3 PCF는 텍셀 3개(≈9.4cm) 폭만 훑는데, 이건 인스턴스드 크라우드 캐릭터의 팔다리 굵기 정도라 그 경계가 텍셀 하나하나의 계단으로 드러난다 — "부드러운 그라데이션"이 아니라 "듬성듬성한 값이 이어 붙은 것"처럼 보임(경계 불명확 + 그라데이션 불균일의 정체). 게다가 600~1,500개 별도 인스턴스가 촘촘히 서 있어 서로 다른 깊이값이 근접 텍셀에 섞이는 것도 얼룩(blotchy)을 거든다.
-- 대응: **`kShadowMapSize` 2048 → 4096**(텍셀 밀도 2배, 씬2 ≈1.6cm/텍셀) + **PCF 3×3 → 5×5**(블러 폭을 유지/확대해 남은 성김을 가려 그라데이션을 다시 매끈하게). 씬 1도 같은 맵을 공유하므로 덩달아 더 선명해짐(≈0.29cm/텍셀) — §1의 "블러 과함" 진단과 상충하지 않는지 유의(더 뿌옇게 느껴지면 씬 1 쪽 PCF만 별도로 3×3으로 되돌리는 것도 고려, 지금은 공유 함수라 두 씬이 같은 커널을 쓴다).
-- 근본 해결은 **캐스케이드 섀도우맵(CSM)**: 씬 1처럼 좁은 근접 캐스케이드 + 씬 2처럼 넓은 원거리 캐스케이드를 따로 둬서 "좁힐 수 없는 넓은 씬"과 "고밀도가 필요한 근접 씬"을 동시에 만족 — 지금은 미구현, 아래 "한계/다음" 참고.
+`Simulation::kDemoScene = 3`(지금 활성값), `SnapshotBuilder::BuildShadowShowcaseScene` — 크라우드·와글거리는 데모 액터 없이, 그래픽 확인만을 위해 배치한 정적 씬:
 
-**미검증(시각)**: 이 컨테이너는 GPU 없음(WARP도 실행 불가) — 값·수식 정합성만 확인. 실제 접지감·선명도는 F5(Windows/VS)에서 확인 필요. 그래도 뿌옇거나 들떠 보이면(씬 1): `shadowParams.y`를 0.0008 부근까지 더 낮춰본다(acne 재발 시 다시 올림). 씬 2가 여전히 계단져 보이면: PCF를 7×7로 더 넓히거나(비용↑) `kShadowMapSize`를 8192로(메모리 4배, ≈256MB) — 둘 다 근본 해결(CSM)의 임시방편임을 감안.
+- 밝은 중립색 바닥(그림자 대비가 잘 보이도록) + 낮은 각도 그림자를 받는 뒷벽(acne/peter-panning이 큰 평면에서 한눈에 보임).
+- 높이가 0.5m씩 올라가는 계단형 플린스 5개 — 경사면을 따라 그림자 길이/그라데이션이 어떻게 변하는지.
+- 플레이어에서 3/7/11/17/24m 거리에 선 필러 5개 — **캐스케이드 0(12m 박스)의 경계가 정확히 이 사이 어딘가를 지난다**, 근접(선명)→원거리(성김) 전환 이음새가 보이는지 확인하는 용도.
+- 캐릭터 바로 옆의 작은 소품 2개 — 클로즈업에서 셀 셰이딩/림 라이트(`docs/toon-fresnel-research.md`) 확인용.
+
+캐스케이드 1은 이 씬 전용으로 50/80/28(§구성 표) — 24m 필러까지 여유 있게 담는다.
 
 ## 한계 / 다음 (미구현)
 
-- 싱글 캐스케이드 고정 프러스텀. 카메라가 씬 밖으로 나가면 그림자 잘림 → **CSM**(씬 1/2의 텍셀 밀도 딜레마를 근본적으로 푸는 방법, 위 "씬 2" 절 참고) 또는 카메라 추종 프러스텀.
-- key 라이트 1개만. 포인트/스팟 그림자는 큐브맵/추가 아틀라스.
-- PCF 5×5 고정(예전 3×3). 소프트 섀도우(PCSS), 블러 프리패스는 없음.
-- 셰도우맵 리사이즈 없음(고정 4096, 예전 2048). 품질/성능은 `kShadowMapSize` 로.
+- 캐스케이드 2개, 고정 프러스텀(카메라 뷰 프러스텀을 슬라이스하는 진짜 CSM이 아니라 플레이어 중심의 동심 박스 두 개 — 구현이 훨씬 단순하지만 카메라가 아주 멀리/비스듬히 볼 때는 여전히 최적은 아님). 카메라가 두 박스 다 벗어나면 그림자 잘림 → 필요해지면 카메라 뷰 프러스텀 기반 진짜 CSM 또는 3번째 캐스케이드.
+- key 라이트 1개만. 포인트/스팟 그림자는 큐브맵/추가 아틀라스 — [light-types-design.md](light-types-design.md) §6.
+- PCF 5×5 고정. 소프트 섀도우(PCSS), 블러 프리패스는 없음.
+- 캐스케이드마다 바이어스(`shadowParams.y`)가 같은 값 — 서로 다른 깊이 범위를 커버하는데 하나의 정규화 바이어스를 공유하는 근사. 어느 한쪽에서 acne/peter-panning이 남으면 캐스케이드별 바이어스 분리 고려.
+- 셰도우맵 리사이즈 없음(고정 4096, 캐스케이드당). 품질/성능은 `kShadowMapSize` 로.
 - 알파 컷아웃(머리카락)은 depth 패스에서 clip 안 함 → 컷아웃 구멍이 그림자에 안 반영. 필요하면 `shadow.hlsl` 에 PS + 텍스처.
 - `DepthBias` 값은 WARP 기준. peter-panning/acne 는 실기에서 재조정.
 
 ## 사용 방법 (How to use)
 
-**그림자 범위/방향 조정**: `SnapshotBuilder::BuildLighting` 의 `span`/`depth`(`OrthographicLH` 크기), `center`, `eye = center - dir * 거리` — 씬별로 분기됨(씬 1: 12/28/11, 씬 2: 64/90/32). 씬이 커지면 ortho 크기를 키우되, 텍셀 밀도(= span / `kShadowMapSize`)가 너무 떨어지면 "씬 2" 절처럼 그라데이션이 계단져 보인다 — 넓히기 전에 정말 그 범위가 다 필요한지부터 확인.
+**그림자 범위/방향 조정**: `SnapshotBuilder::BuildLighting` 의 `FitShadowOrtho(dir, center, span, depth, eyeDist)` 호출부 — 캐스케이드 0은 항상 플레이어 중심(모든 씬 공통, 건드릴 일 거의 없음), 캐스케이드 1은 `if constexpr (kDemoScene == ...)` 분기로 씬별 값. 새 씬을 추가하면 여기에 그 씬의 캐스케이드 1 분기를 추가한다. 텍셀 밀도(= span / `kShadowMapSize`)가 너무 떨어지면 "왜 캐스케이드인가" 절처럼 그라데이션이 계단져 보인다 — 넓히기 전에 정말 그 범위가 다 필요한지부터 확인, 그래도 필요하면 3번째 캐스케이드를 고려한다.
 
-**바이어스 튜닝**: 표면에 줄무늬(acne) → `m_shadowRaster` 의 `DepthBias`/`SlopeScaledDepthBias` ↑ 또는 `common3d.hlsli` `SampleShadow` 의 `shadowParams.y`(`FrameConstants.h` 에서 세팅) ↑. 그림자가 물체에서 떠 보이면(peter-panning) ↓.
+**바이어스 튜닝**: 표면에 줄무늬(acne) → `m_shadowRaster` 의 `DepthBias`/`SlopeScaledDepthBias` ↑ 또는 `common3d.hlsli` `SampleShadowCascade` 의 `shadowParams.y`(`FrameConstants.h` 에서 세팅) ↑. 그림자가 물체에서 떠 보이면(peter-panning) ↓. 지금은 두 캐스케이드가 값을 공유 — 한쪽만 문제면 `shadowParams`에 캐스케이드별 필드를 추가해야 한다.
 
-**새 3D 패스가 그림자를 드리우게**: `RenderShadow(const ShadowContext&)` override — b0 는 렌더러가 이미 `lightViewProj` 로 바인드했으니, POSITION-only 레이아웃 + `shaders.Get(device, "shadow", posLayout, 1)` 의 VS + `PSSetShader(nullptr)` 로 자기 지오메트리를 그린다. world 는 b1.
+**새 3D 패스가 그림자를 드리우게**: `RenderShadow(const ShadowContext&)` override — b0 는 렌더러가 캐스케이드마다 다시 바인드하니, POSITION-only 레이아웃 + `shaders.Get(device, "shadow", posLayout, 1)` 의 VS + `PSSetShader(nullptr)` 로 자기 지오메트리를 그린다(캐스케이드 수만큼 자동으로 다시 호출됨 - 패스 쪽은 신경 쓸 것 없음). world 는 b1.
 
-**그림자를 받기만**: `common3d.hlsli` 를 쓰는 패스면 자동. VS 에서 `output.shadowClip = mul(worldPos, lightViewProj)`, PS 에서 `SampleShadow(input.shadowClip)` 를 `ApplyLighting`/`ApplyCelLighting` 에 전달.
+**그림자를 받기만**: `common3d.hlsli` 를 쓰는 패스면 자동. VS 에서 `output.worldPos = worldPos.xyz`(TEXCOORD1), PS 에서 `SampleShadow(input.worldPos)` 를 `ApplyLighting`/`ApplyCelLighting` 에 전달 — 캐스케이드 선택은 함수 내부에서 처리되므로 호출부는 캐스케이드를 몰라도 된다.
+
+**새 씬 추가**: `Simulation.h`의 `kDemoScene`에 값 추가 + `Simulation::SpawnActors`/`SnapshotBuilder::BuildCamera`/`BuildLighting`/`BuildScene3D`에 `if constexpr (kDemoScene == N)` 분기(씬 3처럼) — 캐스케이드 0은 그대로 두고 캐스케이드 1만 그 씬에 맞게.
 
 **끄기**: `BuildLighting` 에서 `lighting.shadowsEnabled = false`.
 
-**하지 말 것**: `t1` 을 detach 안 하고 셰도우맵에 쓰기(입력·출력 동시 바인드), `Frame` cbuffer 레이아웃을 `FrameConstants.h` 와 어긋나게, 씬 프러스텀보다 훨씬 큰 ortho(해상도 낭비).
+**하지 말 것**: `t1` 을 detach 안 하고 셰도우맵에 쓰기(입력·출력 동시 바인드), `Frame` cbuffer 레이아웃을 `FrameConstants.h` 와 어긋나게, 씬 프러스텀보다 훨씬 큰 ortho(해상도 낭비), 캐스케이드 인덱스를 하드코딩(`kShadowCascadeCount` 대신 리터럴 `2`를 여기저기 흩뿌리기 — `Dx11Renderer.h`의 `m_shadowDsv[2]`만 예외, 그 이유는 그 파일의 주석 참고).

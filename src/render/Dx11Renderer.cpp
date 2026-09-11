@@ -273,28 +273,38 @@ namespace engine::render
     void Dx11Renderer::CreateShadowResources()
     {
 #if defined(ENGINE_WITH_3D)
+        static_assert(kShadowCascadeCount == 2, "Dx11Renderer::m_shadowDsv is sized for 2 cascades");
         const UINT size = kShadowMapSize;
+        const UINT cascadeCount = static_cast<UINT>(kShadowCascadeCount);
 
         D3D11_TEXTURE2D_DESC depthDesc{};
         depthDesc.Width = size;
         depthDesc.Height = size;
         depthDesc.MipLevels = 1;
-        depthDesc.ArraySize = 1;
+        depthDesc.ArraySize = cascadeCount;
         depthDesc.Format = DXGI_FORMAT_R32_TYPELESS;
         depthDesc.SampleDesc.Count = 1;
         depthDesc.Usage = D3D11_USAGE_DEFAULT;
         depthDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
         ThrowIfFailed(m_device->CreateTexture2D(&depthDesc, nullptr, &m_shadowDepth), "CreateTexture2D (shadow) failed");
 
-        D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
-        dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
-        dsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
-        ThrowIfFailed(m_device->CreateDepthStencilView(m_shadowDepth, &dsvDesc, &m_shadowDsv), "CreateDepthStencilView (shadow) failed");
+        for (UINT cascade = 0; cascade < cascadeCount; ++cascade)
+        {
+            D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
+            dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
+            dsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2DARRAY;
+            dsvDesc.Texture2DArray.MipSlice = 0;
+            dsvDesc.Texture2DArray.FirstArraySlice = cascade;
+            dsvDesc.Texture2DArray.ArraySize = 1;
+            ThrowIfFailed(m_device->CreateDepthStencilView(m_shadowDepth, &dsvDesc, &m_shadowDsv[cascade]),
+                          "CreateDepthStencilView (shadow cascade) failed");
+        }
 
         D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
         srvDesc.Format = DXGI_FORMAT_R32_FLOAT;
-        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-        srvDesc.Texture2D.MipLevels = 1;
+        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+        srvDesc.Texture2DArray.MipLevels = 1;
+        srvDesc.Texture2DArray.ArraySize = cascadeCount;
         ThrowIfFailed(m_device->CreateShaderResourceView(m_shadowDepth, &srvDesc, &m_shadowSrv), "CreateShaderResourceView (shadow) failed");
 
         D3D11_BUFFER_DESC cbDesc{};
@@ -340,7 +350,8 @@ namespace engine::render
         Release(m_shadowSampler);
         Release(m_shadowFrameCb);
         Release(m_shadowSrv);
-        Release(m_shadowDsv);
+        for (ID3D11DepthStencilView*& dsv : m_shadowDsv)
+            Release(dsv);
         Release(m_shadowDepth);
     }
 
@@ -350,24 +361,32 @@ namespace engine::render
         ID3D11ShaderResourceView* nullSrv = nullptr;
         m_context->PSSetShaderResources(1, 1, &nullSrv);   // detach before writing it
 
-        m_context->OMSetRenderTargets(0, nullptr, m_shadowDsv);
-        m_context->ClearDepthStencilView(m_shadowDsv, D3D11_CLEAR_DEPTH, 1.0f, 0);
         const D3D11_VIEWPORT viewport{ 0, 0, static_cast<float>(kShadowMapSize), static_cast<float>(kShadowMapSize), 0, 1 };
         m_context->RSSetViewports(1, &viewport);
         m_context->RSSetState(m_shadowRaster);
         m_context->OMSetDepthStencilState(m_shadowDepthState, 0);
         m_context->OMSetBlendState(nullptr, nullptr, 0xffffffff);
 
-        float lightViewProj[16];
-        std::memcpy(lightViewProj, snapshot.scene3d.lighting.lightViewProj.m, sizeof(lightViewProj));
-        m_context->UpdateSubresource(m_shadowFrameCb, 0, nullptr, lightViewProj, 0, 0);
-        m_context->VSSetConstantBuffers(0, 1, &m_shadowFrameCb);
-
         ShadowContext context{};
         context.context = m_context;
         context.snapshot = &snapshot;
-        for (std::unique_ptr<IRenderPass>& pass : m_passes)
-            pass->RenderShadow(context);
+
+        // One full depth-only pass per cascade (docs/shadows.md "캐스케이드") -
+        // each render pass's RenderShadow() re-submits its geometry once per
+        // call, so this is `kShadowCascadeCount` times the shadow draw calls.
+        for (int cascade = 0; cascade < kShadowCascadeCount; ++cascade)
+        {
+            m_context->OMSetRenderTargets(0, nullptr, m_shadowDsv[cascade]);
+            m_context->ClearDepthStencilView(m_shadowDsv[cascade], D3D11_CLEAR_DEPTH, 1.0f, 0);
+
+            float cascadeViewProj[16];
+            std::memcpy(cascadeViewProj, snapshot.scene3d.lighting.cascadeViewProj[cascade].m, sizeof(cascadeViewProj));
+            m_context->UpdateSubresource(m_shadowFrameCb, 0, nullptr, cascadeViewProj, 0, 0);
+            m_context->VSSetConstantBuffers(0, 1, &m_shadowFrameCb);
+
+            for (std::unique_ptr<IRenderPass>& pass : m_passes)
+                pass->RenderShadow(context);
+        }
 #else
         (void)snapshot;
 #endif
@@ -494,7 +513,7 @@ namespace engine::render
 
         // Shadow map first (own target + viewport), then the scene.
 #if defined(ENGINE_WITH_3D)
-        const bool shadows = snapshot.scene3d.lighting.shadowsEnabled && m_shadowDsv != nullptr;
+        const bool shadows = snapshot.scene3d.lighting.shadowsEnabled && m_shadowDsv[0] != nullptr;
         if (shadows) RenderShadowMap(snapshot);
 #endif
 

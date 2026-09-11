@@ -96,8 +96,12 @@ namespace engine::game
             const math::Vec3 forward{ cp * std::sin(yaw), sp, cp * std::cos(yaw) };
 
             // Scene 2 (clifftop overlook) pulls the camera back so the field and
-            // the crowd below are in frame, not just the player's back.
-            const float orbitDistance = Simulation::kDemoScene == 2 ? 6.0f : 3.6f;
+            // the crowd below are in frame, not just the player's back. Scene 3
+            // (shadow showcase) sits between the two - far enough to see the
+            // staircase/pillars around the player.
+            const float orbitDistance = Simulation::kDemoScene == 2 ? 6.0f
+                                       : Simulation::kDemoScene == 3 ? 5.5f
+                                                                     : 3.6f;
             const math::Vec3 focus = simulation.CharacterPosition() + math::Vec3{ 0.0f, 1.3f, 0.0f };
             const math::Vec3 eye = focus - forward * orbitDistance;
 
@@ -107,7 +111,17 @@ namespace engine::game
             return camera;
         }
 
-        render::Lighting BuildLighting(float elapsed)
+        // One [span, depth, eyeDist] ortho box, aimed back along `dir` at `center`.
+        math::Mat4 FitShadowOrtho(const math::Vec3& dir, const math::Vec3& center,
+                                  float span, float depth, float eyeDist)
+        {
+            const math::Vec3 eye = center - dir * eyeDist;
+            const math::Mat4 view = math::LookAtLH(eye, center, { 0.0f, 1.0f, 0.0f });
+            const math::Mat4 proj = math::OrthographicLH(span, span, 0.1f, depth);
+            return view * proj;
+        }
+
+        render::Lighting BuildLighting(const Simulation& simulation, float elapsed)
         {
             render::Lighting lighting{};
             // Front-top 45 deg key that sweeps left<->right across the front so
@@ -119,22 +133,37 @@ namespace engine::game
             lighting.ambient.sky = { 0.36f, 0.40f, 0.48f, 1.0f };
             lighting.ambient.ground = { 0.22f, 0.20f, 0.18f, 1.0f };
 
-            // Directional shadow map: an ortho frustum fitted around the scene.
-            // Scene 2 spreads the crowd across a wide field, so widen the frustum
-            // and push its centre out toward it. Scene 1 is a single character
-            // near the origin - the old 22m span spent most of the 2048x2048
-            // map on empty ground, so the character's shadow only got ~90
-            // texels across and read as blurry/hazy. Tightened to fit just the
-            // character + its immediate shadow throw (docs/shadows.md).
-            const bool scene2 = Simulation::kDemoScene == 2;
+            // Cascaded directional shadow (docs/shadows.md "캐스케이드"):
+            // cascade 0 is a tight box around the player in every scene - this
+            // is what actually gives the character a crisp shadow. Cascade 1 is
+            // a wider, per-scene box for whatever else needs a shadow at a
+            // distance (the crowd field in scene 2, pillars in scene 3, or just
+            // a safety margin in scene 1). SampleShadow (common3d.hlsli) tries
+            // cascade 0 first and falls back to cascade 1.
             const math::Vec3 dir = math::Normalized(lighting.key.direction);
-            const math::Vec3 center = scene2 ? math::Vec3{ 0.0f, 1.0f, 18.0f } : math::Vec3{ 0.0f, 1.0f, 0.0f };
-            const float span = scene2 ? 64.0f : 12.0f;
-            const float depth = scene2 ? 90.0f : 28.0f;
-            const math::Vec3 eye = center - dir * (scene2 ? 32.0f : 11.0f);
-            const math::Mat4 view = math::LookAtLH(eye, center, { 0.0f, 1.0f, 0.0f });
-            const math::Mat4 proj = math::OrthographicLH(span, span, 0.1f, depth);
-            lighting.lightViewProj = view * proj;
+            const math::Vec3 focus = simulation.CharacterPosition() + math::Vec3{ 0.0f, 1.0f, 0.0f };
+            lighting.cascadeViewProj[0] = FitShadowOrtho(dir, focus, 12.0f, 28.0f, 11.0f);
+
+            if constexpr (Simulation::kDemoScene == 2)
+            {
+                // The crowd spreads across a wide field ahead of the mesa - widen
+                // the frustum and push its centre out toward it.
+                lighting.cascadeViewProj[1] =
+                    FitShadowOrtho(dir, { 0.0f, 1.0f, 18.0f }, 64.0f, 90.0f, 32.0f);
+            }
+            else if constexpr (Simulation::kDemoScene == 3)
+            {
+                // Wide enough to cover the far pillars (BuildShadowShowcaseScene,
+                // out to ~24m) with margin, centred on the player like cascade 0.
+                lighting.cascadeViewProj[1] = FitShadowOrtho(dir, focus, 50.0f, 80.0f, 28.0f);
+            }
+            else
+            {
+                // Scene 1 is small enough that cascade 0 covers almost
+                // everything - this is just a safety margin past it.
+                lighting.cascadeViewProj[1] = FitShadowOrtho(dir, focus, 30.0f, 60.0f, 22.0f);
+            }
+
             lighting.shadowsEnabled = true;
             return lighting;
         }
@@ -308,6 +337,73 @@ namespace engine::game
                 render::debug::Sphere(scene.debugLines, look.point, 0.35f, { 1.0f, 0.4f, 0.2f, 1.0f });
         }
 
+        // Demo scene 3: a deliberate arrangement for graphics work - nothing here
+        // is gameplay, it exists to put shadows, cel shading, rim light and the
+        // shadow cascade seam somewhere easy to look at (docs/shadows.md "씬 3").
+        // No crowd, no wandering extras (Simulation::SpawnActors) - just the
+        // player + static props, all existing mesh/shader resources (Cube/Plane,
+        // the same materials as scene 1's kBoxes).
+        void BuildShadowShowcaseScene(render::Scene3D& scene)
+        {
+            render::MeshDraw ground{};
+            ground.mesh = render::MeshId::Plane;
+            ground.world = math::Scaling({ 28.0f, 1.0f, 28.0f });
+            ground.color = { 0.58f, 0.60f, 0.64f, 1.0f };   // bright neutral so the shadow reads clearly
+            scene.meshDraws.push_back(ground);
+
+            // A tall back wall to catch long, low-angle shadows on a large flat
+            // vertical surface - good for spotting acne/peter-panning at a glance.
+            render::MeshDraw wall{};
+            wall.mesh = render::MeshId::Cube;
+            wall.world = math::Scaling({ 24.0f, 4.0f, 0.4f }) * math::Translation({ 0.0f, 2.0f, -14.0f });
+            wall.color = { 0.50f, 0.48f, 0.46f, 1.0f };
+            scene.meshDraws.push_back(wall);
+
+            // A rising staircase of 5 plinths - shows the shadow gradient
+            // lengthen/soften across a slope of increasing height, right next to
+            // the player for a close look at cel shading + rim light.
+            for (int i = 0; i < 5; ++i)
+            {
+                const float h = 0.5f + static_cast<float>(i) * 0.5f;   // 0.5 .. 2.5
+                render::MeshDraw step{};
+                step.mesh = render::MeshId::Cube;
+                step.world = math::Scaling({ 2.0f, h, 2.0f })
+                           * math::Translation({ -8.0f + static_cast<float>(i) * 2.2f, h * 0.5f, -3.0f });
+                step.color = { 0.62f + 0.02f * static_cast<float>(i), 0.58f, 0.52f, 1.0f };
+                scene.meshDraws.push_back(step);
+            }
+
+            // Thin pillars at graduated distances (3/7/11/17/24m) straddling the
+            // near/far shadow cascade boundary (cascade 0 is a 12m box around the
+            // player, BuildLighting) - the seam between crisp-near and
+            // coarser-far shadow quality should be visible somewhere in this run.
+            constexpr float kPillarDistances[] = { 3.0f, 7.0f, 11.0f, 17.0f, 24.0f };
+            for (const float d : kPillarDistances)
+            {
+                render::MeshDraw pillar{};
+                pillar.mesh = render::MeshId::Cube;
+                pillar.world = math::Scaling({ 0.6f, 3.0f, 0.6f }) * math::Translation({ 6.0f, 1.5f, d });
+                pillar.color = { 0.60f, 0.55f, 0.50f, 1.0f };
+                scene.meshDraws.push_back(pillar);
+            }
+
+            // A couple of small varied shapes right next to the player, same
+            // spirit as kBoxes (scene 1) - close-range detail for the character's
+            // own cast shadow and cel/rim shading.
+            constexpr DemoBox kNearProps[] = {
+                { { 1.2f, 1.2f, 1.2f }, { 3.0f, 0.6f, 1.5f }, { 0.72f, 0.56f, 0.50f, 1.0f } },
+                { { 0.7f, 0.7f, 0.7f }, { -2.5f, 0.35f, 2.0f }, { 0.55f, 0.70f, 0.62f, 1.0f } },
+            };
+            for (const DemoBox& box : kNearProps)
+            {
+                render::MeshDraw draw{};
+                draw.mesh = render::MeshId::Cube;
+                draw.world = math::Scaling(box.scale) * math::Translation(box.pos);
+                draw.color = box.color;
+                scene.meshDraws.push_back(draw);
+            }
+        }
+
         void BuildScene3D(render::Scene3D& scene, const Simulation& simulation)
         {
             // Actor 0 is the player - drawn as the skinned model (ModelMeshPass3D
@@ -346,6 +442,14 @@ namespace engine::game
             if constexpr (Simulation::kDemoScene == 2)
             {
                 BuildCliffScene(scene, simulation);
+            }
+            else if constexpr (Simulation::kDemoScene == 3)
+            {
+                BuildShadowShowcaseScene(scene);
+
+                const math::Vec3 feet = simulation.CharacterPosition();
+                render::debug::Box(scene.debugLines, { feet.x, feet.y + 0.9f, feet.z },
+                                   { 0.30f, 0.90f, 0.30f }, { 0.20f, 1.0f, 0.35f, 1.0f });
             }
             else
             {
@@ -432,7 +536,7 @@ namespace engine::game
 
 #if defined(ENGINE_WITH_3D)
         snapshot.scene3d.camera = BuildCamera(simulation, viewportWidth, viewportHeight);
-        snapshot.scene3d.lighting = BuildLighting(simulation.ElapsedTime());
+        snapshot.scene3d.lighting = BuildLighting(simulation, simulation.ElapsedTime());
         snapshot.scene3d.postProcess = BuildPostProcess();
         BuildScene3D(snapshot.scene3d, simulation);
 #else

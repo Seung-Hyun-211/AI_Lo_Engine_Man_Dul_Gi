@@ -10,12 +10,10 @@
 // must match `cbuffer Frame` in assets/shaders/common3d.hlsli.
 namespace engine::render
 {
-    // Was 2048. Scene 2's ortho frustum is 64m wide (vs scene 1's 12m) to
-    // cover the whole crowd field, so at 2048 its texels were ~3.1cm each -
-    // coarse enough that the shadow edge looked blocky/inconsistent rather
-    // than a clean, even gradient (docs/shadows.md). 4096 halves that to
-    // ~1.6cm without needing a second (cascaded) shadow map. Costs ~64MB for
-    // the depth texture (R32) instead of ~16MB.
+    // Was 2048 (pre-cascade stopgap for scene 2's wide frustum, docs/shadows.md).
+    // Per-cascade resolution - both cascades render into the same size texture
+    // array slice (render/r3d/Lighting.h kShadowCascadeCount). Costs ~64MB *
+    // cascade count for the depth texture (R32) instead of ~16MB each at 2048.
     inline constexpr unsigned kShadowMapSize = 4096;
 
     struct FrameConstantsGpu
@@ -28,7 +26,7 @@ namespace engine::render
         // construction (docs/particle-system-research.md §3) without either
         // feature needing its own cbuffer field.
         float view[16];
-        float lightViewProj[16]; // world -> shadow map clip space
+        float cascadeViewProj[kShadowCascadeCount][16]; // world -> shadow map clip space, one per cascade
         float keyDirection[4];   // xyz = normalised travel direction, w = intensity
         float keyColor[4];       // rgb
         float ambientSky[4];     // rgb, hemisphere fill from above
@@ -41,7 +39,8 @@ namespace engine::render
         const math::Mat4 viewProj = camera.view * camera.projection;
         std::memcpy(out.viewProj, viewProj.m, sizeof(out.viewProj));
         std::memcpy(out.view, camera.view.m, sizeof(out.view));
-        std::memcpy(out.lightViewProj, lighting.lightViewProj.m, sizeof(out.lightViewProj));
+        for (int i = 0; i < kShadowCascadeCount; ++i)
+            std::memcpy(out.cascadeViewProj[i], lighting.cascadeViewProj[i].m, sizeof(out.cascadeViewProj[i]));
 
         const math::Vec3 dir = math::Normalized(lighting.key.direction);
         out.keyDirection[0] = dir.x;
@@ -65,10 +64,11 @@ namespace engine::render
         out.ambientGround[3] = 1.0f;
 
         out.shadowParams[0] = 1.0f / static_cast<float>(kShadowMapSize);
-        // Depth bias, normalised NDC-z. Tightened from 0.0018 alongside the
-        // sharper scene-1 shadow frustum (SnapshotBuilder::BuildLighting) and
-        // the lower rasterizer bias (Dx11Renderer::CreateShadowResources) -
-        // together they cut peter-panning without bringing back acne (docs/shadows.md).
+        // Depth bias, normalised NDC-z, shared by both cascades (an
+        // approximation - they cover different depth ranges, docs/shadows.md).
+        // Tightened from 0.0018 alongside the lower rasterizer bias
+        // (Dx11Renderer::CreateShadowResources) to cut peter-panning without
+        // bringing back acne.
         out.shadowParams[1] = 0.0012f;
         out.shadowParams[2] = lighting.shadowsEnabled ? 1.0f : 0.0f;
         out.shadowParams[3] = 0.0f;

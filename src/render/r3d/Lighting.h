@@ -24,15 +24,21 @@ namespace engine::render
         math::Color ground{ 0.20f, 0.18f, 0.16f, 1.0f };
     };
 
+    // Two cascades: [0] a tight box around the player for a crisp near shadow,
+    // [1] a wide box for whatever else needs one at a distance (a crowd field,
+    // or just a safety margin). SampleShadow (common3d.hlsli) tries [0] first
+    // and falls back to [1] - docs/shadows.md "캐스케이드".
+    inline constexpr int kShadowCascadeCount = 2;
+
     struct Lighting
     {
         DirectionalLight key{};
         AmbientLight ambient{};
 
-        // View-projection for the directional shadow map, fitted to the scene by
-        // the game layer (SnapshotBuilder). Identity + shadowsEnabled=false skips
-        // shadow rendering entirely.
-        math::Mat4 lightViewProj{ math::Mat4::Identity() };
+        // View-projection per cascade for the directional shadow map, fitted by
+        // the game layer (SnapshotBuilder::BuildLighting). Identity +
+        // shadowsEnabled=false skips shadow rendering entirely.
+        math::Mat4 cascadeViewProj[kShadowCascadeCount]{ math::Mat4::Identity(), math::Mat4::Identity() };
         bool shadowsEnabled{ false };
     };
 }

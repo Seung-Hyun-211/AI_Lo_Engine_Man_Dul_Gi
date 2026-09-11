@@ -30,7 +30,7 @@ struct VSOut
 {
     float4 pos        : SV_POSITION;
     float3 nrm        : NORMAL;
-    float4 shadowClip : TEXCOORD1;
+    float3 worldPos   : TEXCOORD1;
     float2 uv         : TEXCOORD0;
     float4 col        : COLOR0;
 };
@@ -55,7 +55,7 @@ VSOut VSMain(VSIn input)
     VSOut output;
     output.pos        = mul(float4(wp, 1.0f), viewProj);
     output.nrm        = wn;
-    output.shadowClip = mul(float4(wp, 1.0f), lightViewProj);
+    output.worldPos   = wp;
     output.uv         = input.uv;
     output.col        = input.icol;
     return output;
@@ -64,7 +64,7 @@ VSOut VSMain(VSIn input)
 GeometryPSOut PSMain(VSOut input)
 {
     float4 tex = diffuse.Sample(samp, input.uv);
-    float shadow = SampleShadow(input.shadowClip);
+    float shadow = SampleShadow(input.worldPos);
     // shadowBias 0, bandSoftness 6 deg, wrap 0.3
     float3 lit = ApplyCelLighting(tex.rgb * input.col.rgb, input.nrm, 0.0f, 6.0f, 0.3f, shadow);
     GeometryPSOut output;

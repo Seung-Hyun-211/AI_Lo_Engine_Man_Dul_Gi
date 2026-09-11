@@ -1,6 +1,8 @@
-// Depth-only instanced shadow draw. The renderer binds lightViewProj at b0
-// (ShadowFrame); transform comes from the per-instance vertex stream (slot 1),
-// so there is no Object cbuffer here. docs/instanced-rendering.md §4.5.
+// Depth-only instanced shadow draw. The renderer runs this once per shadow
+// cascade (docs/shadows.md), rebinding lightViewProj at b0 (ShadowFrame) to
+// that cascade's view-proj each time; transform comes from the per-instance
+// vertex stream (slot 1), so there is no Object cbuffer here.
+// docs/instanced-rendering.md §4.5.
 cbuffer ShadowFrame : register(b0) { row_major float4x4 lightViewProj; };
 
 struct VSIn

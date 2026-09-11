@@ -1,12 +1,15 @@
 #ifndef COMMON3D_HLSLI
 #define COMMON3D_HLSLI
 
+// Must match render/r3d/Lighting.h kShadowCascadeCount.
+#define SHADOW_CASCADE_COUNT 2
+
 // Shared by every 3D pass. Layout must match render/r3d/FrameConstants.h.
 cbuffer Frame : register(b0)
 {
     row_major float4x4 viewProj;
     row_major float4x4 view;            // camera view alone (world -> view space)
-    row_major float4x4 lightViewProj;   // world -> shadow map clip
+    row_major float4x4 cascadeViewProj[SHADOW_CASCADE_COUNT];   // world -> shadow map clip, per cascade
     float4 keyDirection;   // xyz = normalised travel direction, w = intensity
     float4 keyColor;       // rgb
     float4 ambientSky;     // rgb, hemisphere fill from above
@@ -20,7 +23,9 @@ cbuffer Object : register(b1)
     float4 objColor;
 };
 
-Texture2D               shadowMap     : register(t1);
+// One array slice per cascade (docs/shadows.md "캐스케이드") - a single SRV/
+// sampler covers both, indexed by slice in SampleShadow.
+Texture2DArray          shadowMap     : register(t1);
 SamplerComparisonState  shadowSampler : register(s1);
 
 // Hemisphere ambient: sky tint on up-facing surfaces, ground tint on down-facing.
@@ -48,31 +53,42 @@ struct GeometryPSOut
     float4 normal : SV_TARGET1;
 };
 
-// 5x5 PCF directional shadow. Returns 1 (lit) .. 0 (fully shadowed). Points
-// outside the shadow map, or when shadows are disabled, are lit.
-//
-// Was 3x3. Scene 2 (demo-scene.md, the crowd/cliff overlook) spans a much
-// wider ortho frustum than scene 1 (SnapshotBuilder::BuildLighting, 64m vs
-// 12m) over the same kShadowMapSize texture, so its texels cover ~5x more
-// world space. A 3-tap-wide kernel there barely spans one texel's worth of
-// blur, which reads as a blocky, inconsistent edge instead of a smooth
-// gradient - docs/shadows.md. Widening the kernel (not shrinking scene 2's
-// frustum - it has to cover the whole crowd field) buys back a smooth
-// transition at the coarser texel density.
-float SampleShadow(float4 shadowClip)
+// 5x5 PCF sample against one cascade slice. Returns 1 (lit) .. 0 (fully
+// shadowed), or -1 if `worldPos` falls outside this cascade's box (caller
+// tries the next cascade). shadowParams.y (bias) is shared by every cascade -
+// an approximation, since each covers a different depth range (docs/shadows.md).
+float SampleShadowCascade(int cascade, float3 worldPos)
 {
-    if (shadowParams.z < 0.5f) return 1.0f;
-
-    float3 p = shadowClip.xyz / shadowClip.w;
+    float4 clip = mul(float4(worldPos, 1.0f), cascadeViewProj[cascade]);
+    float3 p = clip.xyz / clip.w;
     float2 uv = p.xy * float2(0.5f, -0.5f) + 0.5f;
-    if (uv.x < 0.0f || uv.x > 1.0f || uv.y < 0.0f || uv.y > 1.0f || p.z > 1.0f) return 1.0f;
+    if (uv.x < 0.0f || uv.x > 1.0f || uv.y < 0.0f || uv.y > 1.0f || p.z < 0.0f || p.z > 1.0f)
+        return -1.0f;
 
     float depth = p.z - shadowParams.y;
     float sum = 0.0f;
     [unroll] for (int y = -2; y <= 2; ++y)
     [unroll] for (int x = -2; x <= 2; ++x)
-        sum += shadowMap.SampleCmpLevelZero(shadowSampler, uv + float2(x, y) * shadowParams.x, depth);
+        sum += shadowMap.SampleCmpLevelZero(shadowSampler, float3(uv + float2(x, y) * shadowParams.x, cascade), depth);
     return sum / 25.0f;
+}
+
+// Directional shadow, cascaded (docs/shadows.md "캐스케이드"): tries cascade 0
+// (tight box around the player - crisp near shadow) first, falls back to
+// cascade 1 (wide box - a crowd field, or just a safety margin) when the point
+// falls outside it. Was a single fixed frustum + 3x3 PCF; see SampleShadowCascade
+// for why 5x5. Returns 1 (lit) .. 0 (fully shadowed). Shadows disabled, or
+// outside every cascade, is lit.
+float SampleShadow(float3 worldPos)
+{
+    if (shadowParams.z < 0.5f) return 1.0f;
+
+    [unroll] for (int cascade = 0; cascade < SHADOW_CASCADE_COUNT; ++cascade)
+    {
+        float lit = SampleShadowCascade(cascade, worldPos);
+        if (lit >= 0.0f) return lit;
+    }
+    return 1.0f;
 }
 
 // Smooth Lambert key + hemisphere ambient, key modulated by `shadow` [0..1].

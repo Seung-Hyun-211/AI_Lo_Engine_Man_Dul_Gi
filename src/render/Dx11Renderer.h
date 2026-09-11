@@ -107,11 +107,16 @@ namespace engine::render
         ID3D11ShaderResourceView* m_sceneDepthSrv{};
         std::uint32_t m_sampleCount{ 1 };
 
-        // Directional shadow map (single-sample). See docs/shadows.md.
+        // Directional shadow map, cascaded (single-sample). See docs/shadows.md.
+        // One Texture2DArray slice per cascade - m_shadowDepth/m_shadowSrv cover
+        // every slice, m_shadowDsv has one entry per slice to render into. `2`
+        // is a literal (not render::kShadowCascadeCount) so this header doesn't
+        // need Scene3D.h/Lighting.h under a 2D-only build (rule 7) - Dx11Renderer.cpp
+        // static_asserts the two stay in sync.
         ID3D11Texture2D* m_shadowDepth{};
-        ID3D11DepthStencilView* m_shadowDsv{};
+        ID3D11DepthStencilView* m_shadowDsv[2]{};
         ID3D11ShaderResourceView* m_shadowSrv{};
-        ID3D11Buffer* m_shadowFrameCb{};        // b0 for the depth-only pass: lightViewProj
+        ID3D11Buffer* m_shadowFrameCb{};        // b0 for the depth-only pass: current cascade's view-proj
         ID3D11SamplerState* m_shadowSampler{};
         ID3D11RasterizerState* m_shadowRaster{};
         ID3D11DepthStencilState* m_shadowDepthState{};
