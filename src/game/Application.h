@@ -109,6 +109,10 @@ namespace engine::game
         GameState m_state{ GameState::Title };
         float m_globalTimeScale{ 1.0f };
         float m_fpsSmoothed{ 0.0f };   // EMA of 1/delta, shown top-right
+        // Demo: auto-fire one crowd explosion this many seconds into a session.
+        // Reset every time we (re)enter InGame. 'F' still triggers it manually.
+        float m_inGameElapsed{ 0.0f };
+        bool  m_autoExplodeFired{ false };
 
         std::uint64_t m_frameNumber{};
         math::Vec2 m_pointerPosition{};

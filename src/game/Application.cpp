@@ -10,6 +10,15 @@ namespace engine::game
     namespace
     {
         constexpr wchar_t kWindowTitle[] = L"AI Lo Engine - DX11 2D skeleton";
+
+#if defined(ENGINE_WITH_3D)
+        // Demo crowd blast: ground zero at the middle of the lower field
+        // (crowd z range ~8..40), and how long after entering InGame it auto-fires.
+        constexpr math::Vec3 kBlastCenter{ 0.0f, 0.0f, 24.0f };
+        constexpr float kBlastRadius = 14.0f;
+        constexpr float kBlastPower = 16.0f;
+        constexpr float kAutoBlastDelay = 5.0f;
+#endif
     }
 
     Application::Application(HINSTANCE instance, render::IRenderer& renderer)
@@ -83,6 +92,18 @@ namespace engine::game
                         m_simulation.QueueJump();
                         m_audio.PlaySfx("assets/audio/blip.wav");   // demo hook
                     }
+                    // Auto-fire one blast a few seconds into the session, then
+                    // let 'F' re-trigger it by hand. A real game drives this from
+                    // gameplay (weapon impact, tower AoE), not a timer/keyboard.
+                    m_inGameElapsed += delta;
+                    const bool autoBlast =
+                        !m_autoExplodeFired && m_inGameElapsed >= kAutoBlastDelay;
+                    if (autoBlast) m_autoExplodeFired = true;
+                    if (autoBlast || m_input.KeyPressed('F'))
+                    {
+                        m_simulation.TriggerExplosion(kBlastCenter, kBlastRadius, kBlastPower);
+                        m_audio.PlaySfx("assets/audio/blip.wav");
+                    }
 #endif
                     if (steps > 0)
                     {
@@ -145,6 +166,8 @@ namespace engine::game
     void Application::EnterInGame()
     {
         m_state = GameState::InGame;
+        m_inGameElapsed = 0.0f;
+        m_autoExplodeFired = false;
         m_ui.ClearOverlay();
         m_ui.SetScreen(BuildInGameHud([this] { OpenSettings(); }));
         m_window.SetPointerLocked(true);   // mouse-look / centre-locked cursor

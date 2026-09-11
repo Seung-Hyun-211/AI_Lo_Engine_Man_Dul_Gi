@@ -73,6 +73,8 @@ namespace engine::game
         float speed{ 1.0f };     // m/s
         float phase{ 0.0f };     // bob / drift clock
         float animTime{ 0.0f };  // seconds into the crowd VAT clip (per-agent offset + speed-scaled)
+        math::Vec3 vel{};        // non-zero only while airborne (explosion knockback)
+        bool  airborne{ false }; // true = ballistic arc; skip walk/bob until it lands
 
         // Required by core::ObjectPool: return a recycled slot to spawn-ready
         // state (SpawnSimAgents / the churn pass then fill the fields).
@@ -159,6 +161,13 @@ namespace engine::game
         // Latches a jump request until the next fixed step consumes it, so a
         // Space press on a frame that runs zero steps is not dropped.
         void QueueJump() { m_actors[0].jumpQueued = true; }
+
+        // Radial knockback. Every crowd member within `radius` of `center` gets
+        // an outward + upward impulse (linear distance falloff) and goes
+        // ballistic until it lands back on the field. Main-thread, applied
+        // immediately; the next StepSimAgents integrates the arc. Seed of AoE
+        // knockback for the defense genre. No-op outside demo scene 2.
+        void TriggerExplosion(math::Vec3 center, float radius, float power);
 #endif
 
         // --- reads for the snapshot builder ---

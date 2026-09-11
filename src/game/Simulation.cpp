@@ -397,6 +397,24 @@ namespace engine::game
                 for (std::size_t k = begin; k < end; ++k)
                 {
                     SimAgent& a = slots[active[k]];
+
+                    if (a.airborne)
+                    {
+                        // Ballistic arc from an explosion impulse. Same gravity
+                        // as the player so falls read consistently. animTime is
+                        // left frozen - a running walk cycle mid-air looks wrong.
+                        a.vel.y -= Simulation::kCharGravity * fixedDelta;
+                        a.pos = a.pos + a.vel * fixedDelta;
+                        if (a.pos.y <= 0.0f)
+                        {
+                            a.pos.y = 0.0f;
+                            a.vel = math::Vec3{};
+                            a.airborne = false;
+                            a.heading = std::atan2(a.pos.x, a.pos.z);   // resume walking outward
+                        }
+                        continue;
+                    }
+
                     a.phase += fixedDelta * 4.0f;
                     // Walk cycle advances with the agent's speed so the stride
                     // roughly matches its ground movement (kAnimRefSpeed = the
@@ -439,6 +457,35 @@ namespace engine::game
                               + static_cast<float>(k) * 2.11f);
         }
         ++m_agentChurnCursor;
+    }
+
+    void Simulation::TriggerExplosion(math::Vec3 center, float radius, float power)
+    {
+        if constexpr (kDemoScene != 2) { return; }
+        else
+        {
+            if (radius <= 0.0f) return;
+            const float invR = 1.0f / radius;
+            SimAgent* slots = m_agents.Slots();
+            for (const std::uint32_t idx : m_agents.ActiveIndices())
+            {
+                SimAgent& a = slots[idx];
+                const float dx = a.pos.x - center.x;
+                const float dz = a.pos.z - center.z;
+                const float dist2 = dx * dx + dz * dz;
+                if (dist2 > radius * radius) continue;
+
+                const float dist = std::sqrt(dist2);
+                const float falloff = 1.0f - dist * invR;          // 1 at ground zero -> 0 at the rim
+                float nx = 0.0f, nz = 0.0f;                        // outward XZ dir; centre = straight up
+                if (dist > 1e-4f) { nx = dx / dist; nz = dz / dist; }
+
+                a.vel.x += nx * power * falloff;
+                a.vel.z += nz * power * falloff;
+                a.vel.y += power * falloff * 1.1f + 2.0f;          // upward bias so even the rim lifts off
+                a.airborne = true;
+            }
+        }
     }
 
     void Simulation::UpdateCrowdQueries()

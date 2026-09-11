@@ -50,7 +50,7 @@ namespace engine::render
 
         // Upper bound on instances uploaded per frame. Must match the cap the
         // SnapshotBuilder applies. docs/instanced-rendering.md §4.2/§9.3.
-        static constexpr std::uint32_t kMaxInstances = 16384;
+        static constexpr std::uint32_t kMaxInstances = 32768;
 
         std::array<GpuMesh, static_cast<std::size_t>(MeshId::Count)> m_meshes{};
         const ShaderProgram* m_shader{};              // owned by ShaderLibrary
