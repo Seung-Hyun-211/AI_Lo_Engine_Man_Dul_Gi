@@ -316,8 +316,13 @@ namespace engine::render
         rasterDesc.FillMode = D3D11_FILL_SOLID;
         rasterDesc.CullMode = D3D11_CULL_NONE;   // model winding unverified; lean on bias
         rasterDesc.DepthClipEnable = TRUE;
-        rasterDesc.DepthBias = 1200;
-        rasterDesc.SlopeScaledDepthBias = 2.5f;
+        // Was 1200/2.5 - pushed the caster back far enough to visibly detach
+        // the shadow from its own feet (peter-panning), which read as a hazy/
+        // wrong-looking shadow together with the PCF softening. Lower fixed
+        // bias + moderate slope bias, relying more on the tighter shadow
+        // frustum (SnapshotBuilder::BuildLighting) for acne-free contact. docs/shadows.md.
+        rasterDesc.DepthBias = 400;
+        rasterDesc.SlopeScaledDepthBias = 1.5f;
         ThrowIfFailed(m_device->CreateRasterizerState(&rasterDesc, &m_shadowRaster), "CreateRasterizerState (shadow) failed");
 
         D3D11_DEPTH_STENCIL_DESC dsDesc{};

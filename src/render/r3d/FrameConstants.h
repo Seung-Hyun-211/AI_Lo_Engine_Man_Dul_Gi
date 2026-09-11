@@ -59,7 +59,11 @@ namespace engine::render
         out.ambientGround[3] = 1.0f;
 
         out.shadowParams[0] = 1.0f / static_cast<float>(kShadowMapSize);
-        out.shadowParams[1] = 0.0018f;   // depth bias
+        // Depth bias, normalised NDC-z. Tightened from 0.0018 alongside the
+        // sharper scene-1 shadow frustum (SnapshotBuilder::BuildLighting) and
+        // the lower rasterizer bias (Dx11Renderer::CreateShadowResources) -
+        // together they cut peter-panning without bringing back acne (docs/shadows.md).
+        out.shadowParams[1] = 0.0012f;
         out.shadowParams[2] = lighting.shadowsEnabled ? 1.0f : 0.0f;
         out.shadowParams[3] = 0.0f;
     }

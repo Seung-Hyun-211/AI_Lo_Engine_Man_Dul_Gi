@@ -70,7 +70,7 @@ float3 ApplyCelLighting(float3 albedo, float3 worldNormal,
 
 ## 로드맵 (미구현)
 
-- **포인트/스팟 라이트**: `Lighting` 에 `std::vector<PointLight>` (위치·반경·색). `Frame` cbuffer 를 라이트 배열(cbuffer 상한이면 StructuredBuffer)로, 셰이더에서 누적. 개수 상한·컬링 필요.
+- **포인트/스팟 라이트**: 설계 완료(미구현) — [light-types-design.md](light-types-design.md). `Frame`이 아니라 별도 cbuffer(b4)에 고정 배열로 시작, 개수 늘면 StructuredBuffer.
 - **그림자**: key 라이트 뷰에서 depth 맵 렌더 → 셰이더에서 비교. 오프스크린 RT 인프라 선행 ([shader-pipeline.md](shader-pipeline.md) 로드맵).
 - **rim 라이트**: `1 - dot(N, V)` 로 실루엣 강조 — 셀 룩에 흔함. `common3d.hlsli` 에 함수 추가, cel.hlsl 에서 더함.
 - **시간대/색온도**: `BuildLighting` 이 게임 시간에서 보간.

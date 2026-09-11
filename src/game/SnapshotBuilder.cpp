@@ -121,13 +121,17 @@ namespace engine::game
 
             // Directional shadow map: an ortho frustum fitted around the scene.
             // Scene 2 spreads the crowd across a wide field, so widen the frustum
-            // and push its centre out toward it.
+            // and push its centre out toward it. Scene 1 is a single character
+            // near the origin - the old 22m span spent most of the 2048x2048
+            // map on empty ground, so the character's shadow only got ~90
+            // texels across and read as blurry/hazy. Tightened to fit just the
+            // character + its immediate shadow throw (docs/shadows.md).
             const bool scene2 = Simulation::kDemoScene == 2;
             const math::Vec3 dir = math::Normalized(lighting.key.direction);
             const math::Vec3 center = scene2 ? math::Vec3{ 0.0f, 1.0f, 18.0f } : math::Vec3{ 0.0f, 1.0f, 0.0f };
-            const float span = scene2 ? 64.0f : 22.0f;
-            const float depth = scene2 ? 90.0f : 40.0f;
-            const math::Vec3 eye = center - dir * (scene2 ? 32.0f : 16.0f);
+            const float span = scene2 ? 64.0f : 12.0f;
+            const float depth = scene2 ? 90.0f : 28.0f;
+            const math::Vec3 eye = center - dir * (scene2 ? 32.0f : 11.0f);
             const math::Mat4 view = math::LookAtLH(eye, center, { 0.0f, 1.0f, 0.0f });
             const math::Mat4 proj = math::OrthographicLH(span, span, 0.1f, depth);
             lighting.lightViewProj = view * proj;
