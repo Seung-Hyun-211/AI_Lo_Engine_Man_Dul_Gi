@@ -135,6 +135,20 @@ namespace engine::game
             return lighting;
         }
 
+        // AO strength/radius match what was already visually confirmed
+        // (docs/post-process-gbuffer-research.md §12.11 step 7/8). Fog fades
+        // toward the camera's far clip plane (100, see BuildCamera) so it also
+        // masks the crowd's distance cull (instanced-rendering.md) instead of
+        // objects just popping out of existence.
+        render::PostProcessSettings BuildPostProcess()
+        {
+            render::PostProcessSettings settings{};
+            settings.fogEnabled = true;
+            settings.fogNear = 40.0f;
+            settings.fogFar = 100.0f;
+            return settings;
+        }
+
         // Test-scene props: boxes of a few sizes for the model and each other to
         // cast shadows on. (The old 3D cube/collision demo is disabled.)
         struct DemoBox { math::Vec3 scale; math::Vec3 pos; math::Color color; };
@@ -415,6 +429,7 @@ namespace engine::game
 #if defined(ENGINE_WITH_3D)
         snapshot.scene3d.camera = BuildCamera(simulation, viewportWidth, viewportHeight);
         snapshot.scene3d.lighting = BuildLighting(simulation.ElapsedTime());
+        snapshot.scene3d.postProcess = BuildPostProcess();
         BuildScene3D(snapshot.scene3d, simulation);
 #else
         (void)viewportWidth;

@@ -36,10 +36,19 @@ namespace
         float screenSize[4];   // x=width, y=height
     };
 
-    constexpr float kAoRadius = 0.5f;    // view-space units (metres, engine-conventions.md)
-    constexpr float kAoPower = 1.5f;     // >1 pushes AO toward the extremes - keeps the cel look from muddying (§5.2)
+    // Not exposed via Scene3D::postProcess (§12.9) - unlike radius/power,
+    // there's little reason a caller would want to retune the bias.
     constexpr float kAoBias = 0.025f;
 #endif
+
+    // Layout must match CompositeParams in composite.hlsl / composite_ms.hlsl.
+    struct CompositeParamsGpu
+    {
+        float aoParams[4];    // x = aoStrength
+        float fogParams[4];   // x = fogNear, y = fogFar, z = enabled (0/1)
+        float fogColor[4];    // rgb
+        float depthProj[4];   // z = A, w = B (proj.m[10,14]) - for ViewZFromDepth, fog only
+    };
 }
 
 namespace engine::render
@@ -61,6 +70,12 @@ namespace engine::render
         aoSamplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
         aoSamplerDesc.AddressU = aoSamplerDesc.AddressV = aoSamplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
         ThrowIfFailed(device->CreateSamplerState(&aoSamplerDesc, &m_aoSampler), "CreateSamplerState (ao) failed");
+
+        D3D11_BUFFER_DESC compositeParamsDesc{};
+        compositeParamsDesc.ByteWidth = sizeof(CompositeParamsGpu);
+        compositeParamsDesc.Usage = D3D11_USAGE_DEFAULT;
+        compositeParamsDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        ThrowIfFailed(device->CreateBuffer(&compositeParamsDesc, nullptr, &m_compositeParams), "CreateBuffer (composite params) failed");
 
         // 1x1 white = "no occlusion" - the permanent fallback (see class comment).
         const std::uint8_t white = 255;
@@ -173,6 +188,8 @@ namespace engine::render
         const ShaderProgram* shader = multisampled ? m_ssaoMsShader : m_ssaoShader;
         if (shader == nullptr || m_blurShader == nullptr) return m_whiteAoSrv;
 
+        const auto& postProcess = context.snapshot->scene3d.postProcess;
+
         SsaoParamsGpu params{};
         std::memcpy(params.kernel, m_kernel.data(), sizeof(params.kernel));
         const math::Mat4& proj = context.snapshot->scene3d.camera.projection;
@@ -180,8 +197,8 @@ namespace engine::render
         params.projParams[1] = proj.m[5];    // yScale
         params.projParams[2] = proj.m[10];   // A = far/(far-near)
         params.projParams[3] = proj.m[14];   // B = -near*far/(far-near)
-        params.params[0] = kAoRadius;
-        params.params[1] = kAoPower;
+        params.params[0] = postProcess.aoRadius;
+        params.params[1] = postProcess.aoPower;
         params.params[2] = kAoBias;
         params.params[3] = static_cast<float>(kKernelSize);
         params.screenSize[0] = static_cast<float>(context.viewportWidth);
@@ -253,15 +270,39 @@ namespace engine::render
 
         ID3D11DeviceContext* device = context.context;
 
-        // No depth buffer from here on: the back buffer is always single-
-        // sample, so it could never be bound together with a multisampled
-        // scene depth, and nothing after this point needs depth testing.
+        // aoStrength defaults to "full effect" and fog to "off" so a 2D-only
+        // build (no Scene3D::postProcess to read) still composites correctly -
+        // ao is already the white fallback there (Execute), and fogParams[2]
+        // staying 0 skips the fog branch in the shader entirely.
+        CompositeParamsGpu params{};
+        params.aoParams[0] = 1.0f;
+#if defined(ENGINE_WITH_3D)
+        const auto& postProcess = context.snapshot->scene3d.postProcess;
+        params.aoParams[0] = postProcess.aoStrength;
+        params.fogParams[0] = postProcess.fogNear;
+        params.fogParams[1] = postProcess.fogFar;
+        params.fogParams[2] = postProcess.fogEnabled ? 1.0f : 0.0f;
+        params.fogColor[0] = postProcess.fogColor.r;
+        params.fogColor[1] = postProcess.fogColor.g;
+        params.fogColor[2] = postProcess.fogColor.b;
+        const math::Mat4& proj = context.snapshot->scene3d.camera.projection;
+        params.depthProj[2] = proj.m[10];   // A
+        params.depthProj[3] = proj.m[14];   // B
+#endif
+        device->UpdateSubresource(m_compositeParams, 0, nullptr, &params, 0, 0);
+
+        // No depth buffer *attachment* from here on: the back buffer is always
+        // single-sample, so it could never be bound together with a
+        // multisampled scene depth, and nothing after this point needs depth
+        // testing (fog reads scene depth as a plain SRV, at t2 below, not as
+        // the active DSV).
         ID3D11RenderTargetView* backBuffer = context.backBufferRenderTarget;
         device->OMSetRenderTargets(1, &backBuffer, nullptr);
 
-        ID3D11ShaderResourceView* srvs[2]{ context.sceneColorSrv, aoSrv };
-        device->PSSetShaderResources(0, 2, srvs);
+        ID3D11ShaderResourceView* srvs[3]{ context.sceneColorSrv, aoSrv, context.sceneDepthSrv };
+        device->PSSetShaderResources(0, 3, srvs);
         device->PSSetSamplers(0, 1, &m_aoSampler);
+        device->PSSetConstantBuffers(0, 1, &m_compositeParams);
         device->RSSetState(m_rasterizer);
         device->OMSetBlendState(nullptr, nullptr, 0xffffffff);
         device->IASetInputLayout(nullptr);
@@ -270,8 +311,8 @@ namespace engine::render
         device->PSSetShader(shader->ps, nullptr, 0);
         device->Draw(3, 0);
 
-        ID3D11ShaderResourceView* nullSrvs[2]{ nullptr, nullptr };
-        device->PSSetShaderResources(0, 2, nullSrvs);   // detach - scene colour is a render target again next frame
+        ID3D11ShaderResourceView* nullSrvs[3]{ nullptr, nullptr, nullptr };
+        device->PSSetShaderResources(0, 3, nullSrvs);   // detach - scene colour/depth are render targets again next frame
     }
 
     void PostProcessPass::Release()
@@ -280,6 +321,7 @@ namespace engine::render
         m_compositeMsShader = nullptr;   // owned by ShaderLibrary
         SafeRelease(m_rasterizer);
         SafeRelease(m_aoSampler);
+        SafeRelease(m_compositeParams);
         SafeRelease(m_whiteAoSrv);
         SafeRelease(m_whiteAoTexture);
 

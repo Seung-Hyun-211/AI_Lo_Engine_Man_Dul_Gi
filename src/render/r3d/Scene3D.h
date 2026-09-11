@@ -114,11 +114,30 @@ namespace engine::render
         math::Color color{ 1.0f, 1.0f, 0.0f, 1.0f };
     };
 
+    // Tuning for PostProcessPass's SSAO + fog (docs/post-process-gbuffer-
+    // research.md §12.9). Read directly from Scene3D by PostProcessPass -
+    // these are values, not GPU resources, so they cross the thread boundary
+    // in the snapshot like everything else (rule 3).
+    struct PostProcessSettings
+    {
+        // Default 1.0 (full effect) matches what was already visually
+        // confirmed (docs/post-process-gbuffer-research.md §12.11 step 7/8) -
+        // lower this if AO reads too strong for the cel look (§5.2).
+        float aoStrength{ 1.0f };    // 0 = no AO, 1 = full occlusion strength
+        float aoRadius{ 0.5f };      // view-space units (metres)
+        float aoPower{ 1.5f };       // >1 pushes AO toward the extremes - keeps the cel look from muddying
+        bool  fogEnabled{ false };
+        float fogNear{ 20.0f };      // view-space units (metres)
+        float fogFar{ 80.0f };
+        math::Color fogColor{ 0.44f, 0.49f, 0.57f, 1.0f };   // matches the default clearColor
+    };
+
     // The 3D half of a RenderSnapshot.
     struct Scene3D
     {
         CameraView camera{};
         Lighting lighting{};
+        PostProcessSettings postProcess{};
         std::vector<MeshDraw> meshDraws;
         std::vector<ModelDraw> modelDraws;
         std::vector<DebugLine> debugLines;

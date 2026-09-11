@@ -43,6 +43,10 @@ namespace engine::render
         const ShaderProgram* m_compositeMsShader{};   // composite_ms.hlsl - multisampled scene colour
         ID3D11RasterizerState* m_rasterizer{};         // cull none - winding of the utility triangle is irrelevant
         ID3D11SamplerState* m_aoSampler{};             // linear/clamp - reads whichever AO texture Composite gets
+        // b0 for composite*.hlsl: aoStrength + fog params, filled each frame
+        // from Scene3D::postProcess (docs/post-process-gbuffer-research.md
+        // §12.9) when ENGINE_WITH_3D, else left at "no effect" defaults.
+        ID3D11Buffer* m_compositeParams{};
 
         // 1x1 white R8_UNORM = "no occlusion". The permanent fallback when SSAO
         // isn't available (2D-only build, or before the G-buffer exists).
