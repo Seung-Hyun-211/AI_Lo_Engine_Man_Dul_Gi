@@ -111,11 +111,15 @@ VFX 파티클(머즐 플래시·연기·폭발·불티)은 물리 시뮬레이�
 
 **없어서 새로 필요한 것 한 가지**: 카메라의 월드 공간 right/up 벡터. 빌보드는 화면을 향해야
 하므로 VS가 카메라 축을 알아야 한다. 지금 `Frame` cbuffer(b0, `common3d.hlsli`)는 `viewProj` +
-조명만 있고 `view` 자체나 카메라 축은 없다. `Dx11Renderer`가 매 프레임 `Scene3D::camera`로
-`FrameConstantsGpu`를 채우는 지점(`render/r3d/FrameConstants.h`)에서 `camera.view`의 첫 두
-행(월드 공간 right, up — 뷰 행렬이 정규직교라 행이 곧 카메라 축)을 뽑아 cbuffer에 얹으면 된다.
-**CLAUDE.md 불변 규칙**: `FrameConstantsGpu`(C++)와 `common3d.hlsli`의 `cbuffer Frame` 레이아웃은
-항상 같이 고친다 — 이 필드 추가도 예외 없음.
+조명만 있고 `view` 자체나 카메라 축은 없다. **이 확장은
+[post-process-gbuffer-research.md](post-process-gbuffer-research.md) §12.4가 뷰공간 노멀 때문에
+이미 같은 지점을 요구한다** — 별도로 `camRight`/`camUp` 필드를 새로 추가하지 않고 그 문서가
+추가하는 `view`(4x4, `camera.view` 그대로, row-major) 필드 하나를 공유한다. 셰이더에서는
+`view`의 0행/1행이 곧 월드 공간 카메라 right/up(뷰 행렬이 정규직교라 행이 곧 카메라 축)이므로
+그 자리에서 뽑아 쓴다 — 두 문서가 같은 `Frame` cbuffer 확장을 각자 다른 필드로 중복 요구하던
+문제의 해법. **CLAUDE.md 불변 규칙**: `FrameConstantsGpu`(C++)와 `common3d.hlsli`의 `cbuffer Frame`
+레이아웃은 항상 같이 고친다 — 이 필드 추가도 예외 없음(어느 기능이 먼저 구현되든 `view` 필드를
+한 번만 추가하고 나머지는 재사용).
 
 ---
 
@@ -291,7 +295,7 @@ for each ParticleBatch b (particleBatches 순서 = SnapshotBuilder 가 이미 �
 ### 5.4 셰이더 (`assets/shaders/particle.hlsl`)
 
 ```hlsl
-#include "common3d.hlsli"   // Frame cbuffer(b0) — camRight/camUp 필드 추가 필요 (§3)
+#include "common3d.hlsli"   // Frame cbuffer(b0) — 공유 `view` 필드 필요 (§3, post-process-gbuffer-research.md §12.4)
 
 Texture2D atlasTex : register(t0);
 SamplerState samp : register(s0);
@@ -313,6 +317,9 @@ VSOut VSMain(VSIn i)
     float2 c = kCorner[i.vid];
     float s = sin(i.irot), co = cos(i.irot);
     float2 rc = float2(c.x*co - c.y*s, c.x*s + c.y*co);      // 화면 평면 롤
+    // camRight/camUp = view 의 0행/1행(뷰 행렬이 정규직교라 행이 곧 월드공간 카메라 축)
+    float3 camRight = float3(view._11, view._12, view._13);
+    float3 camUp    = float3(view._21, view._22, view._23);
     float3 worldOffset = (camRight * rc.x + camUp * rc.y) * i.isize;
     VSOut o;
     o.pos = mul(float4(i.ipos + worldOffset, 1), viewProj);
