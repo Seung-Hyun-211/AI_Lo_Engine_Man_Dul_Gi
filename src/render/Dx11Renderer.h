@@ -29,8 +29,10 @@ namespace engine::render
     // The renderer core only owns the device, swap chain, render target, and
     // depth buffer. What actually gets drawn each frame is a list of IRenderPass
     // objects run in order between the frame clear and Present. The default list
-    // is MeshPass3D (3D, depth-tested) then QuadPass2D (2D overlay); call
-    // AddRenderPass before Start() to append more.
+    // is MeshPass3D (3D, depth-tested) then PostProcessPass (hands the frame off
+    // from the scene colour target to the back buffer) then QuadPass2D (2D
+    // overlay); call AddRenderPass before Start() to insert more geometry
+    // stages, or append with atEnd for a pass that must run last.
     class Dx11Renderer final : public IRenderer, private core::NonCopyable
     {
     public:
@@ -80,13 +82,18 @@ namespace engine::render
         ID3D11DeviceContext* m_context{};
         IDXGISwapChain* m_swapChain{};
 
-        // Back buffer: only the resolve/copy destination, never bound for passes.
+        // Back buffer: PostProcessPass's composite destination and, from then on
+        // for the rest of the frame, what the 2D overlay draws into.
         ID3D11RenderTargetView* m_backBufferRtv{};
 
-        // Scene targets the passes render into. Multisampled when m_sampleCount>1;
-        // otherwise m_sceneColorRtv aliases the back buffer and no resolve runs.
+        // Scene targets the geometry stage renders into - always dedicated
+        // textures (never aliases the back buffer, see CreateSceneTargets),
+        // multisampled when m_sampleCount>1.
         ID3D11Texture2D* m_sceneColor{};
         ID3D11RenderTargetView* m_sceneColorRtv{};
+        // Readable alongside the RTV (docs/post-process-gbuffer-research.md §12.3) -
+        // PostProcessPass reads this to hand the frame off to the back buffer.
+        ID3D11ShaderResourceView* m_sceneColorSrv{};
         ID3D11Texture2D* m_sceneDepth{};
         ID3D11DepthStencilView* m_sceneDepthDsv{};
         // Readable alongside the DSV (docs/post-process-gbuffer-research.md §4.1) -

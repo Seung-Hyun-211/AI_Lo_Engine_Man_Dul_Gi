@@ -8,6 +8,7 @@ struct ID3D11Device;
 struct ID3D11DeviceContext;
 struct ID3D11RenderTargetView;
 struct ID3D11DepthStencilView;
+struct ID3D11ShaderResourceView;
 
 namespace engine::render
 {
@@ -26,6 +27,17 @@ namespace engine::render
         std::uint32_t viewportWidth{};
         std::uint32_t viewportHeight{};
         const RenderSnapshot* snapshot{};
+
+        // Populated for the post-process stage only (PostProcessPass) - see
+        // docs/post-process-gbuffer-research.md §12.1/§12.8. `backBufferRenderTarget`
+        // is where that pass composites to and, from then on, what every pass
+        // after it (the 2D overlay) actually draws into via the D3D11 pipeline
+        // state PostProcessPass leaves bound - `renderTarget` above stays the
+        // scene colour target throughout, unchanged, since it is set once for
+        // the whole frame. Every pass other than PostProcessPass ignores these.
+        ID3D11RenderTargetView* backBufferRenderTarget{};
+        ID3D11ShaderResourceView* sceneColorSrv{};
+        std::uint32_t sceneSampleCount{ 1 };
     };
 
     // Handed to RenderShadow(). The renderer has already bound the shadow depth

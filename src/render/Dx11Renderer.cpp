@@ -1,5 +1,6 @@
 #include "render/Dx11Renderer.h"
 
+#include "render/r2d/PostProcessPass.h"
 #include "render/r2d/QuadPass2D.h"
 #if defined(ENGINE_WITH_3D)
 #include "render/r3d/FrameConstants.h"
@@ -35,12 +36,16 @@ namespace engine::render
 {
     Dx11Renderer::Dx11Renderer()
     {
-        // Default pipeline: 3D first (writes depth), then the 2D overlay on top.
-        // The 3D pass is only registered when the 3D module is built in;
-        // AddRenderPass appends further stages (see main.cpp).
+        // Default pipeline: 3D geometry first (writes depth), then
+        // PostProcessPass hands the frame off from the scene colour target to
+        // the back buffer (docs/post-process-gbuffer-research.md §3/§12.1),
+        // then the 2D overlay on top. The 3D pass is only registered when the
+        // 3D module is built in; AddRenderPass inserts further geometry stages
+        // before PostProcessPass (see main.cpp).
 #if defined(ENGINE_WITH_3D)
         m_passes.push_back(std::make_unique<MeshPass3D>());
 #endif
+        m_passes.push_back(std::make_unique<PostProcessPass>());
         m_passes.push_back(std::make_unique<QuadPass2D>());
     }
 
@@ -51,12 +56,15 @@ namespace engine::render
         std::scoped_lock lock(m_mutex);
         if (m_running) throw std::logic_error("AddRenderPass must be called before Start()");
         if (!pass) return;
-        // Default: slot in just before the trailing QuadPass2D overlay so the
-        // quad UI stays on top of 3D stages. `atEnd` appends after everything -
-        // for a pass that must run last (e.g. SpritePass2D, whose scissor
-        // rasterizer state would otherwise leak into QuadPass2D).
-        if (atEnd || m_passes.empty()) m_passes.push_back(std::move(pass));
-        else m_passes.insert(m_passes.end() - 1, std::move(pass));
+        // Default: slot in before the trailing {PostProcessPass, QuadPass2D}
+        // pair so a new geometry pass still runs while the scene colour target
+        // is bound, and the quad UI still ends up on top
+        // (docs/post-process-gbuffer-research.md §12.1/§12.2). `atEnd` appends
+        // after everything - for a pass that must run last (e.g. SpritePass2D,
+        // whose scissor rasterizer state would otherwise leak into QuadPass2D).
+        constexpr std::size_t kTrailingPassCount = 2;   // PostProcessPass, QuadPass2D
+        if (atEnd || m_passes.size() < kTrailingPassCount) m_passes.push_back(std::move(pass));
+        else m_passes.insert(m_passes.end() - static_cast<std::ptrdiff_t>(kTrailingPassCount), std::move(pass));
     }
 
     void Dx11Renderer::Start(HWND window, std::uint32_t width, std::uint32_t height)
@@ -373,27 +381,36 @@ namespace engine::render
     {
         const bool multisampled = m_sampleCount > 1;
 
-        // Colour: a dedicated MSAA texture when multisampled (resolved to the
-        // back buffer each frame); otherwise render straight into the back buffer.
+        // Colour is always a dedicated texture now, multisampled or not - it
+        // used to alias the back buffer's RTV directly when 1x, but the back
+        // buffer can't be bound as a shader resource (the swap chain only
+        // requests DXGI_USAGE_RENDER_TARGET_OUTPUT), and PostProcessPass needs
+        // to read scene colour regardless of sample count. See
+        // docs/post-process-gbuffer-research.md §12.3.
+        D3D11_TEXTURE2D_DESC colorDesc{};
+        colorDesc.Width = width;
+        colorDesc.Height = height;
+        colorDesc.MipLevels = 1;
+        colorDesc.ArraySize = 1;
+        colorDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        colorDesc.SampleDesc.Count = m_sampleCount;
+        colorDesc.Usage = D3D11_USAGE_DEFAULT;
+        colorDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+        ThrowIfFailed(m_device->CreateTexture2D(&colorDesc, nullptr, &m_sceneColor), "CreateTexture2D (scene colour) failed");
+        ThrowIfFailed(m_device->CreateRenderTargetView(m_sceneColor, nullptr, &m_sceneColorRtv), "CreateRenderTargetView (scene colour) failed");
+
+        D3D11_SHADER_RESOURCE_VIEW_DESC colorSrvDesc{};
+        colorSrvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
         if (multisampled)
         {
-            D3D11_TEXTURE2D_DESC colorDesc{};
-            colorDesc.Width = width;
-            colorDesc.Height = height;
-            colorDesc.MipLevels = 1;
-            colorDesc.ArraySize = 1;
-            colorDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-            colorDesc.SampleDesc.Count = m_sampleCount;
-            colorDesc.Usage = D3D11_USAGE_DEFAULT;
-            colorDesc.BindFlags = D3D11_BIND_RENDER_TARGET;
-            ThrowIfFailed(m_device->CreateTexture2D(&colorDesc, nullptr, &m_sceneColor), "CreateTexture2D (MSAA colour) failed");
-            ThrowIfFailed(m_device->CreateRenderTargetView(m_sceneColor, nullptr, &m_sceneColorRtv), "CreateRenderTargetView (MSAA) failed");
+            colorSrvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DMS;
         }
         else
         {
-            m_sceneColorRtv = m_backBufferRtv;
-            m_sceneColorRtv->AddRef();   // released symmetrically in ReleaseSceneTargets
+            colorSrvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+            colorSrvDesc.Texture2D.MipLevels = 1;
         }
+        ThrowIfFailed(m_device->CreateShaderResourceView(m_sceneColor, &colorSrvDesc, &m_sceneColorSrv), "CreateShaderResourceView (scene colour) failed");
 
         // Typeless + BIND_SHADER_RESOURCE (same combination as m_shadowDepth) so a
         // later pass can read depth as t-something while it's still bound as the
@@ -436,7 +453,8 @@ namespace engine::render
         Release(m_sceneDepthSrv);
         Release(m_sceneDepthDsv);
         Release(m_sceneDepth);
-        Release(m_sceneColorRtv);   // an AddRef'd alias of m_backBufferRtv when 1x
+        Release(m_sceneColorSrv);
+        Release(m_sceneColorRtv);
         Release(m_sceneColor);
     }
 
@@ -484,18 +502,16 @@ namespace engine::render
         context.viewportWidth = m_width;
         context.viewportHeight = m_height;
         context.snapshot = &snapshot;
+        // PostProcessPass (always in m_passes, see the constructor) reads these
+        // to hand the frame off from the scene colour target to the back
+        // buffer - see docs/post-process-gbuffer-research.md §12.1/§12.3/§12.8.
+        // It also now does the job the old end-of-frame ResolveSubresource used
+        // to when multisampled, so there is no separate resolve call here.
+        context.backBufferRenderTarget = m_backBufferRtv;
+        context.sceneColorSrv = m_sceneColorSrv;
+        context.sceneSampleCount = m_sampleCount;
         for (std::unique_ptr<IRenderPass>& pass : m_passes)
             pass->Execute(context);
-
-        // Resolve the multisampled colour into the back buffer, then present.
-        if (m_sampleCount > 1)
-        {
-            m_context->OMSetRenderTargets(0, nullptr, nullptr);   // unbind before resolve
-            ID3D11Texture2D* backBuffer{};
-            ThrowIfFailed(m_swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer)), "GetBuffer (resolve) failed");
-            m_context->ResolveSubresource(backBuffer, 0, m_sceneColor, 0, DXGI_FORMAT_R8G8B8A8_UNORM);
-            Release(backBuffer);
-        }
 
         ThrowIfFailed(m_swapChain->Present(settings.verticalSync ? 1 : 0, 0), "Present failed");
     }
