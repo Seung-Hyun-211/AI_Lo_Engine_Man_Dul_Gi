@@ -1,10 +1,10 @@
-# 툰 렌더링: 셀 셰이딩 · 아웃라인 · 크리즈 라인
+# 툰 렌더링: 셀 셰이딩 · 아웃라인 · 크리즈 라인 · 림 라이트
 
-`ModelMeshPass3D` 가 임포트한 FBX 모델을 3패스로 그린다.
+`ModelMeshPass3D` 가 임포트한 FBX 모델을 3패스로 그린다 (림 라이트는 셀 패스 안의 셰이딩 항이라 패스가 늘지 않는다).
 
 ```
 1. 실루엣 아웃라인  outline.hlsl   인버티드 헐, front-cull, 검정 링
-2. 셀 셰이딩 표면    cel.hlsl       텍스처 + 4단 램프 + alpha cutout
+2. 셀 셰이딩 표면    cel.hlsl       텍스처 + 4단 램프 + 림 라이트 + alpha cutout
 3. 내부 크리즈 라인  crease.hlsl    import/CreaseLines 로 CPU 생성한 리본, AO 톤
 ```
 
@@ -40,6 +40,25 @@
 - 더 예쁘게: 툰 램프 텍스처, 얼굴 SDF 섀도우 — 미구현 ([command-playbook](command-playbook.md) 참조).
 
 > **"시꺼멓다" 였던 이유**: 앰비언트가 없고 광원이 위에서만 와서 카메라 정면 면이 전부 50° 초과 → 순검정. key 방향 전상 45° + 앰비언트 + `wrap` 으로 해결. [lighting.md](lighting.md).
+
+### 프레넬(림 라이트)
+
+그레이징 각(실루엣에 가까운 면)을 밴드 하나로 감싸 밝힌다. 연속 프레넬(`pow(1-N·V, power)`) 대신 셀 밴드와 같은 어휘(`smoothstep` 임계값)를 쓴다 — 리서치: [toon-fresnel-research.md](toon-fresnel-research.md).
+
+```hlsl
+// common3d.hlsli — 카메라가 뷰공간 원점이라 새 cbuffer 필드 없이 기존 `view`+WorldToViewNormal 로 충분
+float RimLight(float3 worldNormal, float3 worldPos, float threshold, float softness);
+```
+
+`cel.hlsl` `PSMain`: `lit += keyColor.rgb * RimLight(input.nrm, input.worldPos, CEL_RIM_THRESHOLD, CEL_RIM_SOFTNESS) * uRimStrength;`
+
+| 파라미터 | 위치 | 기본 | 효과 |
+|---|---|---:|---|
+| `CEL_RIM_THRESHOLD` | `cel.hlsl` `#define` | 0.65 | 이 그레이징 값(0..1, 1=완전 실루엣) 이상에서 림 시작 |
+| `CEL_RIM_SOFTNESS` | 〃 | 0.15 | 밴드 경계 전이 폭 — `CEL_BAND_SOFTNESS`와 같은 성격 |
+| `uRimStrength` | `CelParams` b3, `ModelMeshPass3D::MaterialRimStrength` | 0.2 (얼굴/눈 재질은 0) | 최종 곱 세기. 얼굴은 `MaterialShadowBias`와 같은 재질 테이블로 억제 — 눈/눈썹 라인이 지저분해지는 것 방지 |
+
+**아웃라인과 이중 테두리로 안 보이게**: `CEL_RIM_THRESHOLD`를 높게(실루엣 끝부분만), `uRimStrength`를 낮게 유지. 아웃라인(순검정 링)과 셀 표면(+림)은 서로 다른 드로우콜·다른 픽셀이라 실제 렌더 충돌(z-fight)은 없음 — 순전히 "검정 링 + 밝은 링"이 붙어 보이는 미관 문제라 두 값으로 튜닝.
 
 ## 2. 실루엣 아웃라인 (`outline.hlsl`, 인버티드 헐)
 
@@ -101,7 +120,7 @@
 
 ## 사용 방법 (How to use)
 
-**두께·임계·색 조정**: `assets/shaders/cel.hlsl` (램프 밴드), `ModelMeshPass3D.cpp` 의 `kOutlineWidth` (아웃라인), `import::CreaseOptions` (크리즈 — 위 표). `.hlsl` 은 저장 즉시 핫리로드, 나머지는 재빌드.
+**두께·임계·색 조정**: `assets/shaders/cel.hlsl` (램프 밴드 + 림 라이트 `#define`), `ModelMeshPass3D.cpp` 의 `kOutlineWidth` (아웃라인), `import::CreaseOptions` (크리즈 — 위 표). `.hlsl` 은 저장 즉시 핫리로드, 나머지는 재빌드. `uRimStrength` 재질 테이블(`MaterialRimStrength`)만 재빌드 필요.
 
 **다른 모델에 적용**: `ModelMeshPass3D` 는 생성자 경로의 FBX 하나를 그린다. 크리즈는 자동 생성됨. 텍스처는 `MaterialToTga` 이름 테이블이 Unity-chan 전용이라 다른 모델은 FBX 의 텍스처 ref(→ basename `.tga`)에 의존하거나 테이블을 늘려야 함.
 

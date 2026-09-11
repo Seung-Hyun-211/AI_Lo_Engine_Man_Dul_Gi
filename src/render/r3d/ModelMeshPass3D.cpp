@@ -28,7 +28,7 @@ namespace
 {
     struct ObjectConstants { float world[16]; float color[4]; };
     struct OutlineConstants { float width; float pad[3]; };
-    struct CelParamsGpu { float shadowBias; float pad[3]; };   // b3, per-material
+    struct CelParamsGpu { float shadowBias; float rimStrength; float pad[2]; };   // b3, per-material
     struct CreaseVertexGpu { float px, py, pz, r, g, b, a; };
 
     // Silhouette thickness as a fraction of half-screen (see outline.hlsl).
@@ -118,6 +118,19 @@ namespace
             || n == "eye_l1" || n == "eye_r1" || n == "mat_cheek" || n == "cheek" || n == "skin1")
             return 14.0f;
         return 0.0f;
+    }
+
+    // Rim/fresnel strength per material - zeroed on the same face/eye set as
+    // MaterialShadowBias so the grazing-angle glow doesn't muddy eyelashes/
+    // eyeline. docs/toon-fresnel-research.md §6.3.
+    constexpr float kDefaultRimStrength = 0.2f;
+    float MaterialRimStrength(const std::string& materialName)
+    {
+        const std::string n = ToLower(materialName);
+        if (n.rfind("face", 0) == 0 || n == "eyebase" || n == "eyeline"
+            || n == "eye_l1" || n == "eye_r1" || n == "mat_cheek" || n == "cheek" || n == "skin1")
+            return 0.0f;
+        return kDefaultRimStrength;
     }
 }
 
@@ -236,6 +249,7 @@ namespace engine::render
                 material = &result.model.materials[static_cast<std::size_t>(mesh.materialIndex)];
                 sub.color = material->baseColor;
                 sub.shadowBias = MaterialShadowBias(material->name);
+                sub.rimStrength = MaterialRimStrength(material->name);
                 fileName = ResolveTextureFileName(material->name, material->diffuseTexture);
             }
             else
@@ -577,7 +591,7 @@ namespace engine::render
                 perSub.color[3] = sub.color.a * draw.tint.a;
                 device->UpdateSubresource(m_objectConstants, 0, nullptr, &perSub, 0, 0);
 
-                const CelParamsGpu cel{ sub.shadowBias, { 0.0f, 0.0f, 0.0f } };
+                const CelParamsGpu cel{ sub.shadowBias, sub.rimStrength, { 0.0f, 0.0f } };
                 device->UpdateSubresource(m_celConstants, 0, nullptr, &cel, 0, 0);
                 device->PSSetConstantBuffers(3, 1, &m_celConstants);
 

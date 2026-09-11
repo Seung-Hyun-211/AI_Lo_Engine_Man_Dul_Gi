@@ -56,6 +56,7 @@ namespace engine::render
             std::uint32_t vertexStride{};
             math::Color color{ 1.0f, 1.0f, 1.0f, 1.0f };
             float shadowBias{};                    // degrees; larger on face/skin materials
+            float rimStrength{};                   // 0 on face/eye materials; docs/toon-fresnel-research.md
             ID3D11ShaderResourceView* texture{};   // non-owning; owned by m_textures
 
             // Skinning (only set up when the mesh came in skinned and clips

@@ -98,4 +98,19 @@ float3 ApplyCelLighting(float3 albedo, float3 worldNormal,
     return albedo * (HemisphereAmbient(worldNormal) + key);
 }
 
+// Banded rim/fresnel light from the grazing view angle (view-space N.V). No new
+// Frame field needed - the camera sits at the view-space origin, so `view`
+// (added for SSAO, docs/post-process-gbuffer-research.md §3.3) is all this
+// needs. threshold/softness use the same vocabulary as ApplyCelLighting's band
+// edges (0..1 grazing instead of degrees). docs/toon-fresnel-research.md.
+float RimLight(float3 worldNormal, float3 worldPos, float threshold, float softness)
+{
+    float3 viewPos = mul(float4(worldPos, 1.0f), view).xyz;
+    float3 v = normalize(-viewPos);
+    float3 n = normalize(WorldToViewNormal(worldNormal));
+    float grazing = 1.0f - saturate(dot(n, v));
+    float s = max(softness, 0.001f);
+    return smoothstep(threshold - s, threshold + s, grazing);
+}
+
 #endif

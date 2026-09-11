@@ -9,6 +9,11 @@
 //   uShadowBias (b3)             - per-material; ModelMeshPass3D sets a larger
 //                                  value on face / skin materials so the
 //                                  self-shadow does not carve up the face.
+// Rim/fresnel (docs/toon-fresnel-research.md):
+//   CEL_RIM_THRESHOLD/SOFTNESS   - global band position (hot reload)
+//   uRimStrength (b3)            - per-material; ModelMeshPass3D zeroes it on
+//                                  face/eye materials so the grazing glow
+//                                  doesn't muddy eyelashes/eyeline.
 #include "common3d.hlsli"
 
 Texture2D    albedo : register(t0);
@@ -16,15 +21,18 @@ SamplerState samp   : register(s0);
 
 #define CEL_BAND_SOFTNESS 6.0f    // band-edge transition half-width, degrees (0 = hard)
 #define CEL_WRAP          0.35f   // 0 = hard angle bands, 1 = full half-Lambert wrap
+#define CEL_RIM_THRESHOLD 0.65f   // grazing (1-N.V) above which the rim band starts
+#define CEL_RIM_SOFTNESS  0.15f   // rim band edge transition half-width
 
 cbuffer CelParams : register(b3)
 {
-    float uShadowBias;   // degrees
-    float3 _celPad;
-};
+    float uShadowBias;    // degrees
+    float uRimStrength;   // 0 = no rim (default off-face materials get a small value)
+    float2 _celPad;
+}
 
 struct VSIn  { float3 pos : POSITION; float3 nrm : NORMAL; float2 uv : TEXCOORD; };
-struct VSOut { float4 pos : SV_POSITION; float3 nrm : NORMAL; float2 uv : TEXCOORD; float4 shadowClip : TEXCOORD1; };
+struct VSOut { float4 pos : SV_POSITION; float3 nrm : NORMAL; float2 uv : TEXCOORD; float4 shadowClip : TEXCOORD1; float3 worldPos : TEXCOORD2; };
 
 VSOut VSMain(VSIn input)
 {
@@ -34,6 +42,7 @@ VSOut VSMain(VSIn input)
     output.nrm = mul(float4(input.nrm, 0.0f), world).xyz;
     output.uv = float2(input.uv.x, 1.0f - input.uv.y);   // FBX bottom-left -> D3D top-left
     output.shadowClip = mul(worldPos, lightViewProj);
+    output.worldPos = worldPos.xyz;
     return output;
 }
 
@@ -43,8 +52,11 @@ GeometryPSOut PSMain(VSOut input)
     clip(tex.a - 0.35f);                                  // cutout for hair / eyelashes
     float3 base = tex.rgb * objColor.rgb;
     float shadow = SampleShadow(input.shadowClip);
+    float3 lit = ApplyCelLighting(base, input.nrm, uShadowBias, CEL_BAND_SOFTNESS, CEL_WRAP, shadow);
+    float rim = RimLight(input.nrm, input.worldPos, CEL_RIM_THRESHOLD, CEL_RIM_SOFTNESS);
+    lit += keyColor.rgb * rim * uRimStrength;
     GeometryPSOut output;
-    output.color = float4(ApplyCelLighting(base, input.nrm, uShadowBias, CEL_BAND_SOFTNESS, CEL_WRAP, shadow), 1.0f);
+    output.color = float4(lit, 1.0f);
     output.normal = float4(WorldToViewNormal(input.nrm) * 0.5f + 0.5f, 1.0f);
     return output;
 }
