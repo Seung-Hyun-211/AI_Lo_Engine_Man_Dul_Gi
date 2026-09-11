@@ -89,6 +89,9 @@ namespace engine::render
         ID3D11RenderTargetView* m_sceneColorRtv{};
         ID3D11Texture2D* m_sceneDepth{};
         ID3D11DepthStencilView* m_sceneDepthDsv{};
+        // Readable alongside the DSV (docs/post-process-gbuffer-research.md §4.1) -
+        // nothing binds this yet; it exists so a later post-process pass can.
+        ID3D11ShaderResourceView* m_sceneDepthSrv{};
         std::uint32_t m_sampleCount{ 1 };
 
         // Directional shadow map (single-sample). See docs/shadows.md.

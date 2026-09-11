@@ -395,21 +395,45 @@ namespace engine::render
             m_sceneColorRtv->AddRef();   // released symmetrically in ReleaseSceneTargets
         }
 
+        // Typeless + BIND_SHADER_RESOURCE (same combination as m_shadowDepth) so a
+        // later pass can read depth as t-something while it's still bound as the
+        // DSV elsewhere in the frame - see docs/post-process-gbuffer-research.md
+        // §4.1/§12.3. The DSV keeps depth-stencil semantics unchanged
+        // (D24_UNORM_S8_UINT); only the SRV view is new and, until something
+        // actually samples it, this is a no-op resource-shape change.
         D3D11_TEXTURE2D_DESC depthDesc{};
         depthDesc.Width = width;
         depthDesc.Height = height;
         depthDesc.MipLevels = 1;
         depthDesc.ArraySize = 1;
-        depthDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+        depthDesc.Format = DXGI_FORMAT_R24G8_TYPELESS;
         depthDesc.SampleDesc.Count = m_sampleCount;
         depthDesc.Usage = D3D11_USAGE_DEFAULT;
-        depthDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+        depthDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
         ThrowIfFailed(m_device->CreateTexture2D(&depthDesc, nullptr, &m_sceneDepth), "CreateTexture2D (depth) failed");
-        ThrowIfFailed(m_device->CreateDepthStencilView(m_sceneDepth, nullptr, &m_sceneDepthDsv), "CreateDepthStencilView failed");
+
+        D3D11_DEPTH_STENCIL_VIEW_DESC depthDsvDesc{};
+        depthDsvDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+        depthDsvDesc.ViewDimension = multisampled ? D3D11_DSV_DIMENSION_TEXTURE2DMS : D3D11_DSV_DIMENSION_TEXTURE2D;
+        ThrowIfFailed(m_device->CreateDepthStencilView(m_sceneDepth, &depthDsvDesc, &m_sceneDepthDsv), "CreateDepthStencilView failed");
+
+        D3D11_SHADER_RESOURCE_VIEW_DESC depthSrvDesc{};
+        depthSrvDesc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+        if (multisampled)
+        {
+            depthSrvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DMS;
+        }
+        else
+        {
+            depthSrvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+            depthSrvDesc.Texture2D.MipLevels = 1;
+        }
+        ThrowIfFailed(m_device->CreateShaderResourceView(m_sceneDepth, &depthSrvDesc, &m_sceneDepthSrv), "CreateShaderResourceView (scene depth) failed");
     }
 
     void Dx11Renderer::ReleaseSceneTargets()
     {
+        Release(m_sceneDepthSrv);
         Release(m_sceneDepthDsv);
         Release(m_sceneDepth);
         Release(m_sceneColorRtv);   // an AddRef'd alias of m_backBufferRtv when 1x

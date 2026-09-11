@@ -15,6 +15,13 @@ namespace engine::render
     struct FrameConstantsGpu
     {
         float viewProj[16];
+        // Camera view alone (world -> view space), row-major, no transpose needed
+        // (same convention as viewProj). Lets a pixel shader rotate a world-space
+        // normal into view space (docs/post-process-gbuffer-research.md §12.4) or
+        // pull the camera's world-space right/up axes from rows 0/1 for billboard
+        // construction (docs/particle-system-research.md §3) without either
+        // feature needing its own cbuffer field.
+        float view[16];
         float lightViewProj[16]; // world -> shadow map clip space
         float keyDirection[4];   // xyz = normalised travel direction, w = intensity
         float keyColor[4];       // rgb
@@ -27,6 +34,7 @@ namespace engine::render
     {
         const math::Mat4 viewProj = camera.view * camera.projection;
         std::memcpy(out.viewProj, viewProj.m, sizeof(out.viewProj));
+        std::memcpy(out.view, camera.view.m, sizeof(out.view));
         std::memcpy(out.lightViewProj, lighting.lightViewProj.m, sizeof(out.lightViewProj));
 
         const math::Vec3 dir = math::Normalized(lighting.key.direction);

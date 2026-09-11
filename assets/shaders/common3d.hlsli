@@ -5,6 +5,7 @@
 cbuffer Frame : register(b0)
 {
     row_major float4x4 viewProj;
+    row_major float4x4 view;            // camera view alone (world -> view space)
     row_major float4x4 lightViewProj;   // world -> shadow map clip
     float4 keyDirection;   // xyz = normalised travel direction, w = intensity
     float4 keyColor;       // rgb
@@ -26,6 +27,14 @@ SamplerComparisonState  shadowSampler : register(s1);
 float3 HemisphereAmbient(float3 worldNormal)
 {
     return lerp(ambientGround.rgb, ambientSky.rgb, saturate(normalize(worldNormal).y * 0.5f + 0.5f));
+}
+
+// World-space normal -> view-space normal, for a geometry pass's G-buffer output
+// (docs/post-process-gbuffer-research.md §12.4/§12.5). `view` has no scale, so a
+// plain 3x3 rotation is enough - no inverse-transpose needed.
+float3 WorldToViewNormal(float3 worldNormal)
+{
+    return normalize(mul(float4(worldNormal, 0.0f), view).xyz);
 }
 
 // 3x3 PCF directional shadow. Returns 1 (lit) .. 0 (fully shadowed). Points
