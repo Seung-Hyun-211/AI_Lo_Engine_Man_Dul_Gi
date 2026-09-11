@@ -22,6 +22,10 @@ namespace engine::render
     {
         ID3D11Device* device{};
         ID3D11DeviceContext* context{};
+        // The scene colour target. During the geometry stage this is slot 0 of
+        // two bound render targets - slot 1 is the view-space normal G-buffer,
+        // which a pass writes by declaring SV_TARGET1 (or not, see
+        // GeometryPSOut in common3d.hlsli) rather than by reading a field here.
         ID3D11RenderTargetView* renderTarget{};
         ID3D11DepthStencilView* depthStencil{};
         std::uint32_t viewportWidth{};
@@ -37,6 +41,10 @@ namespace engine::render
         // the whole frame. Every pass other than PostProcessPass ignores these.
         ID3D11RenderTargetView* backBufferRenderTarget{};
         ID3D11ShaderResourceView* sceneColorSrv{};
+        // View-space normal G-buffer (docs/post-process-gbuffer-research.md
+        // §12.5) - the geometry stage's PS writes it as a second render target
+        // alongside colour; nothing reads this SRV yet (SSAO lands here later).
+        ID3D11ShaderResourceView* sceneNormalSrv{};
         std::uint32_t sceneSampleCount{ 1 };
     };
 

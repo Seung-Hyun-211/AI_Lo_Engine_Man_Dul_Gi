@@ -37,11 +37,14 @@ VSOut VSMain(VSIn input)
     return output;
 }
 
-float4 PSMain(VSOut input) : SV_TARGET
+GeometryPSOut PSMain(VSOut input)
 {
     float4 tex = albedo.Sample(samp, input.uv);
     clip(tex.a - 0.35f);                                  // cutout for hair / eyelashes
     float3 base = tex.rgb * objColor.rgb;
     float shadow = SampleShadow(input.shadowClip);
-    return float4(ApplyCelLighting(base, input.nrm, uShadowBias, CEL_BAND_SOFTNESS, CEL_WRAP, shadow), 1.0f);
+    GeometryPSOut output;
+    output.color = float4(ApplyCelLighting(base, input.nrm, uShadowBias, CEL_BAND_SOFTNESS, CEL_WRAP, shadow), 1.0f);
+    output.normal = float4(WorldToViewNormal(input.nrm) * 0.5f + 0.5f, 1.0f);
+    return output;
 }

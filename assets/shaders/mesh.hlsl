@@ -14,8 +14,11 @@ VSOut VSMain(VSIn input)
     return output;
 }
 
-float4 PSMain(VSOut input) : SV_TARGET
+GeometryPSOut PSMain(VSOut input)
 {
     float shadow = SampleShadow(input.shadowClip);
-    return float4(ApplyLighting(objColor.rgb, input.nrm, shadow), objColor.a);
+    GeometryPSOut output;
+    output.color = float4(ApplyLighting(objColor.rgb, input.nrm, shadow), objColor.a);
+    output.normal = float4(WorldToViewNormal(input.nrm) * 0.5f + 0.5f, 1.0f);
+    return output;
 }

@@ -65,9 +65,12 @@ VSOut VSMain(VSIn input)
     return output;
 }
 
-float4 PSMain(VSOut input) : SV_TARGET
+GeometryPSOut PSMain(VSOut input)
 {
     float4 tex = diffuse.Sample(samp, input.uv);
     float shadow = SampleShadow(input.shadowClip);
-    return float4(ApplyLighting(tex.rgb * input.col.rgb, input.nrm, shadow), tex.a * input.col.a);
+    GeometryPSOut output;
+    output.color = float4(ApplyLighting(tex.rgb * input.col.rgb, input.nrm, shadow), tex.a * input.col.a);
+    output.normal = float4(WorldToViewNormal(input.nrm) * 0.5f + 0.5f, 1.0f);
+    return output;
 }

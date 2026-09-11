@@ -412,6 +412,16 @@ namespace engine::render
         }
         ThrowIfFailed(m_device->CreateShaderResourceView(m_sceneColor, &colorSrvDesc, &m_sceneColorSrv), "CreateShaderResourceView (scene colour) failed");
 
+        // View-space normal G-buffer, same size/sample count as colour - bound
+        // as a second render target during the geometry stage. See
+        // docs/post-process-gbuffer-research.md §4.2/§12.3.
+        D3D11_TEXTURE2D_DESC normalDesc = colorDesc;
+        ThrowIfFailed(m_device->CreateTexture2D(&normalDesc, nullptr, &m_sceneNormal), "CreateTexture2D (scene normal) failed");
+        ThrowIfFailed(m_device->CreateRenderTargetView(m_sceneNormal, nullptr, &m_sceneNormalRtv), "CreateRenderTargetView (scene normal) failed");
+
+        D3D11_SHADER_RESOURCE_VIEW_DESC normalSrvDesc = colorSrvDesc;
+        ThrowIfFailed(m_device->CreateShaderResourceView(m_sceneNormal, &normalSrvDesc, &m_sceneNormalSrv), "CreateShaderResourceView (scene normal) failed");
+
         // Typeless + BIND_SHADER_RESOURCE (same combination as m_shadowDepth) so a
         // later pass can read depth as t-something while it's still bound as the
         // DSV elsewhere in the frame - see docs/post-process-gbuffer-research.md
@@ -453,6 +463,9 @@ namespace engine::render
         Release(m_sceneDepthSrv);
         Release(m_sceneDepthDsv);
         Release(m_sceneDepth);
+        Release(m_sceneNormalSrv);
+        Release(m_sceneNormalRtv);
+        Release(m_sceneNormal);
         Release(m_sceneColorSrv);
         Release(m_sceneColorRtv);
         Release(m_sceneColor);
@@ -480,8 +493,16 @@ namespace engine::render
         if (shadows) RenderShadowMap(snapshot);
 #endif
 
-        m_context->OMSetRenderTargets(1, &m_sceneColorRtv, m_sceneDepthDsv);
+        // Geometry stage: colour + view-space normal MRT (docs/post-process-
+        // gbuffer-research.md §12.3/§12.5). A pass whose PS doesn't declare
+        // SV_TARGET1 (outline, debug lines, shadow) just leaves the normal
+        // target at this clear value for its pixels - see common3d.hlsli's
+        // GeometryPSOut comment.
+        ID3D11RenderTargetView* geometryTargets[2]{ m_sceneColorRtv, m_sceneNormalRtv };
+        m_context->OMSetRenderTargets(2, geometryTargets, m_sceneDepthDsv);
         m_context->ClearRenderTargetView(m_sceneColorRtv, snapshot.clearColor);
+        const float neutralNormal[4]{ 0.5f, 0.5f, 1.0f, 1.0f };   // decodes to view-space (0,0,1)
+        m_context->ClearRenderTargetView(m_sceneNormalRtv, neutralNormal);
         m_context->ClearDepthStencilView(m_sceneDepthDsv, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
         const D3D11_VIEWPORT viewport{ 0, 0, static_cast<float>(m_width), static_cast<float>(m_height), 0, 1 };
         m_context->RSSetViewports(1, &viewport);
@@ -509,6 +530,7 @@ namespace engine::render
         // to when multisampled, so there is no separate resolve call here.
         context.backBufferRenderTarget = m_backBufferRtv;
         context.sceneColorSrv = m_sceneColorSrv;
+        context.sceneNormalSrv = m_sceneNormalSrv;
         context.sceneSampleCount = m_sampleCount;
         for (std::unique_ptr<IRenderPass>& pass : m_passes)
             pass->Execute(context);

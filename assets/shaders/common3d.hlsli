@@ -37,6 +37,17 @@ float3 WorldToViewNormal(float3 worldNormal)
     return normalize(mul(float4(worldNormal, 0.0f), view).xyz);
 }
 
+// Two-target output for the geometry stage: colour plus the view-space normal
+// G-buffer (docs/post-process-gbuffer-research.md §12.5). A pass with no
+// meaningful normal to contribute (outline, debug lines) just returns a plain
+// `float4 : SV_TARGET` instead of this struct - D3D11 leaves an unwritten
+// render target slot at its cleared value for that pixel, no error.
+struct GeometryPSOut
+{
+    float4 color  : SV_TARGET0;
+    float4 normal : SV_TARGET1;
+};
+
 // 3x3 PCF directional shadow. Returns 1 (lit) .. 0 (fully shadowed). Points
 // outside the shadow map, or when shadows are disabled, are lit.
 float SampleShadow(float4 shadowClip)

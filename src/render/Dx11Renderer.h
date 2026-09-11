@@ -94,6 +94,12 @@ namespace engine::render
         // Readable alongside the RTV (docs/post-process-gbuffer-research.md §12.3) -
         // PostProcessPass reads this to hand the frame off to the back buffer.
         ID3D11ShaderResourceView* m_sceneColorSrv{};
+        // View-space normal G-buffer (docs/post-process-gbuffer-research.md
+        // §12.3/§12.5) - bound as a second render target alongside colour
+        // during the geometry stage. Nothing reads m_sceneNormalSrv yet.
+        ID3D11Texture2D* m_sceneNormal{};
+        ID3D11RenderTargetView* m_sceneNormalRtv{};
+        ID3D11ShaderResourceView* m_sceneNormalSrv{};
         ID3D11Texture2D* m_sceneDepth{};
         ID3D11DepthStencilView* m_sceneDepthDsv{};
         // Readable alongside the DSV (docs/post-process-gbuffer-research.md §4.1) -

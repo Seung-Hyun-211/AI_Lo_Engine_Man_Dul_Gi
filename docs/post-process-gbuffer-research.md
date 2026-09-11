@@ -1,8 +1,9 @@
 # 포스트프로세싱 인프라 + G-버퍼(노멀/깊이/AO) 연구
 
-**상태: §12.11 순서 1~3 구현됨(`Frame.view` 필드, 씬 깊이 SRV, `PostProcessPass` 패스스루 —
-아직 노멀·SSAO·안개는 없음, 순수 컬러 합성만), 나머지(4~9) 미구현.** "렌더 후 화면의
-노멀·깊이·AO 정보를 들고 있으면
+**상태: §12.11 순서 1~5 구현됨(`Frame.view` 필드, 씬 컬러·깊이 SRV, `PostProcessPass` 패스스루,
+지오메트리 5개 셰이더가 view-space 노멀 MRT 출력 — 아직 아무도 노멀을 안 읽음, SSAO·안개도
+없음), 나머지(6~9, 깊이/노멀 리졸브·SSAO·합성 확장) 미구현.** VS 빌드·실행 확인됨(사용자,
+1~3 시점). "렌더 후 화면의 노멀·깊이·AO 정보를 들고 있으면
 다양한 그래픽 연출이 가능하다"는 아이디어를 이 엔진 구조에 맞게 조사하고 설계한다 — SSAO,
 스크린스페이스 아웃라인, 거리 안개, 소프트 파티클, 톤매핑 같은 화면 연출들이 공통으로 요구하는
 **오프스크린 RT 인프라 + G-버퍼(노멀/깊이) 확보**가 핵심이다.
@@ -452,12 +453,12 @@ renderer.AddRenderPass(std::make_unique<SpritePass2D>(...), /*atEnd=*/true);
 
 | 리소스 | 변경 |
 |---|---|
-| `m_sceneColor`/`m_sceneColorRtv` | `BindFlags`에 `D3D11_BIND_SHADER_RESOURCE` 추가(합성 단계가 읽어야 함) + **신규** SRV(`m_sceneColorSrv`, 멀티샘플이면 `Texture2DMS` 뷰). **1x MSAA일 때 "백버퍼를 그대로 씀" 최적화(`m_sceneColorRtv = m_backBufferRtv; AddRef()`)는 폐기** — 백버퍼는 SRV로 바인드할 수 없으므로(스왑체인이 `DXGI_USAGE_RENDER_TARGET_OUTPUT`으로만 생성됨) `PostProcessPass`가 있는 한 씬 컬러는 샘플수 무관 **항상 실제 텍스처**여야 한다. 합성 단계는 이 SRV를 읽어 **`m_backBufferRtv`에 직접** 쓴다(백버퍼는 출력 전용으로만 바인드하면 되므로 SRV가 없어도 문제 없음) |
-| `m_sceneDepth`/`m_sceneDepthDsv` | 포맷 `D24_UNORM_S8_UINT` → `R24G8_TYPELESS`, `BindFlags`에 `D3D11_BIND_SHADER_RESOURCE` 추가. DSV 뷰는 `D24_UNORM_S8_UINT`로 그대로, **신규** SRV 뷰(`R24_UNORM_X8_TYPELESS`) 추가 → `m_sceneDepthSrv` |
-| `m_sceneNormal`/`m_sceneNormalRtv` | **신규.** `RGBA8_UNORM`, `RENDER_TARGET|SHADER_RESOURCE`, 씬 컬러와 같은 크기/샘플수 |
-| `m_sceneNormalResolved`/`m_sceneNormalResolvedSrv` | **신규, 멀티샘플일 때만.** 논-MS `RGBA8_UNORM`, `ResolveSubresource`로 채움(하드웨어 리졸브 가능 — 컬러와 동일 방식) |
-| `m_sceneDepthResolved`/`m_sceneDepthResolvedSrv` | **신규, 멀티샘플일 때만.** 논-MS `R32_FLOAT`. 깊이는 하드웨어 리졸브가 없으므로 `PostProcessPass`(또는 별도 작은 풀스크린 패스)가 `Texture2DMS<float>::Load(px, 0)`로 채움(§4.3의 "샘플 0" 방식) |
-| `CreateSceneTargets`/`ReleaseSceneTargets`/`ResizeBackBuffer` | 위 5개 리소스 생성/해제/리사이즈 반영 |
+| `m_sceneColor`/`m_sceneColorRtv` | **구현됨.** `BindFlags`에 `D3D11_BIND_SHADER_RESOURCE` 추가(합성 단계가 읽어야 함) + **신규** SRV(`m_sceneColorSrv`, 멀티샘플이면 `Texture2DMS` 뷰). **1x MSAA일 때 "백버퍼를 그대로 씀" 최적화(`m_sceneColorRtv = m_backBufferRtv; AddRef()`)는 폐기** — 백버퍼는 SRV로 바인드할 수 없으므로(스왑체인이 `DXGI_USAGE_RENDER_TARGET_OUTPUT`으로만 생성됨) `PostProcessPass`가 있는 한 씬 컬러는 샘플수 무관 **항상 실제 텍스처**여야 한다. 합성 단계는 이 SRV를 읽어 **`m_backBufferRtv`에 직접** 쓴다(백버퍼는 출력 전용으로만 바인드하면 되므로 SRV가 없어도 문제 없음) |
+| `m_sceneDepth`/`m_sceneDepthDsv` | **구현됨.** 포맷 `D24_UNORM_S8_UINT` → `R24G8_TYPELESS`, `BindFlags`에 `D3D11_BIND_SHADER_RESOURCE` 추가. DSV 뷰는 `D24_UNORM_S8_UINT`로 그대로, **신규** SRV 뷰(`R24_UNORM_X8_TYPELESS`) 추가 → `m_sceneDepthSrv`(아직 아무도 안 읽음) |
+| `m_sceneNormal`/`m_sceneNormalRtv` | **구현됨.** `RGBA8_UNORM`, `RENDER_TARGET|SHADER_RESOURCE`, 씬 컬러와 같은 크기/샘플수. 지오메트리 스테이지가 컬러와 함께 2번째 렌더타깃으로 바인드(`m_sceneNormalSrv`는 아직 아무도 안 읽음) |
+| `m_sceneNormalResolved`/`m_sceneNormalResolvedSrv` | **미구현(다음 단계), 멀티샘플일 때만.** 논-MS `RGBA8_UNORM`, `ResolveSubresource`로 채움(하드웨어 리졸브 가능 — 컬러와 동일 방식) |
+| `m_sceneDepthResolved`/`m_sceneDepthResolvedSrv` | **미구현(다음 단계), 멀티샘플일 때만.** 논-MS `R32_FLOAT`. 깊이는 하드웨어 리졸브가 없으므로 `PostProcessPass`(또는 별도 작은 풀스크린 패스)가 `Texture2DMS<float>::Load(px, 0)`로 채움(§4.3의 "샘플 0" 방식) |
+| `CreateSceneTargets`/`ReleaseSceneTargets`/`ResizeBackBuffer` | **구현됨(컬러/깊이/노멀 3종)** — 리졸브 산출물 2종은 다음 단계에서 추가 |
 | 프레임 끝 `if (m_sampleCount > 1) ResolveSubresource(backBuffer, ..., m_sceneColor, ...)` | **`PostProcessPass`가 활성화되면 이 호출이 그 패스 내부로 흡수된다** — 합성 셰이더가 `Texture2DMS` 컬러를 직접 읽어 AO를 곱하며 그 자체가 "커스텀 리졸브"를 겸함(별도 리졸브 불필요). 포스트 파이프라인이 없으면(1x MSAA 또는 아직 안 만든 상태) 기존 단순 리졸브 경로를 그대로 유지 — 두 경로 병존 |
 
 ### 12.4 `FrameConstants.h` + `common3d.hlsli` — `Frame` cbuffer 확장
@@ -482,33 +483,36 @@ row_major float4x4 view;
 
 ### 12.5 지오메트리 셰이더 — PS 출력 시그니처 변경 (내용은 무시, 구조만)
 
-`float4 PSMain(...) : SV_TARGET` → `PSOut PSMain(...)` 형태로 바뀌는 파일들. **셀 밴드 각도·
-크리즈 색 같은 셰이딩 로직 자체는 그대로 두고 반환 방식만 바꾼다.**
+`float4 PSMain(...) : SV_TARGET` → `GeometryPSOut PSMain(...)` 형태로 바뀌는 파일들. **셀 밴드
+각도·크리즈 색 같은 셰이딩 로직 자체는 그대로 두고 반환 방식만 바꾼다.**
 
 | 파일 | 변경 | 비고 |
 |---|---|---|
-| `mesh.hlsl` | SV_TARGET1 추가(노멀) | |
-| `model.hlsl` | SV_TARGET1 추가 | |
-| `cel.hlsl` | SV_TARGET1 추가 | |
-| `mesh_instanced.hlsl` | SV_TARGET1 추가 | 크라우드 인스턴스 |
-| `mesh_instanced_toon.hlsl` | SV_TARGET1 추가 | |
-| `outline.hlsl` | **안 바꿔도 됨** | 검정 링만 그리고 노멀에 의미 있는 값이 없음 — D3D11은 MRT 중 일부 슬롯만 쓰는 PS를 허용하므로 SV_TARGET1을 안 써도 유효하다(그 픽셀의 노멀 버퍼는 클리어값 그대로 유지) |
-| `crease.hlsl` | **판단 필요** | 크리즈 리본이 노멀에 기여해야 SSAO/엣지검출이 리본 자리를 반영 — 안 넣으면 그 자리는 밑면 노멀로 남아 약간 부정확(허용 가능한 근사인지는 실측 필요) |
-| `shadow.hlsl`/`shadow_instanced.hlsl` | **안 바꿈** | 셰도우 depth-only 패스는 컬러/노멀 타깃 자체가 안 바인딩됨(무관) |
-| `debugline.hlsl` | **판단 필요** | 디버그 라인이 G-버퍼에 노멀을 남기면 SSAO 계산에 (원치 않게) 영향 — 보통 노멀 미출력이 맞음 |
+| `mesh.hlsl` | **구현됨** — SV_TARGET1 추가(노멀) | |
+| `model.hlsl` | **구현됨** | |
+| `cel.hlsl` | **구현됨** | |
+| `mesh_instanced.hlsl` | **구현됨** | 크라우드 인스턴스 |
+| `mesh_instanced_toon.hlsl` | **구현됨** | |
+| `outline.hlsl` | **안 바꿈(계획대로)** | 검정 링만 그리고 노멀에 의미 있는 값이 없음 — D3D11은 MRT 중 일부 슬롯만 쓰는 PS를 허용하므로 SV_TARGET1을 안 써도 유효하다(그 픽셀의 노멀 버퍼는 클리어값 그대로 유지) |
+| `crease.hlsl` | **판단 필요, 아직 보류** | 크리즈 리본이 노멀에 기여해야 SSAO/엣지검출이 리본 자리를 반영 — 안 넣으면 그 자리는 밑면 노멀로 남아 약간 부정확(허용 가능한 근사인지는 실측 필요) |
+| `shadow.hlsl`/`shadow_instanced.hlsl` | **안 바꿈(계획대로)** | 셰도우 depth-only 패스는 컬러/노멀 타깃 자체가 안 바인딩됨(무관) |
+| `debugline.hlsl` | **안 바꿈(1차 판단: 미출력)** | 디버그 라인이 G-버퍼에 노멀을 남기면 SSAO 계산에 (원치 않게) 영향 — 노멀 미출력 쪽으로 구현. 필요해지면 재검토 |
 
-**공용 헬퍼 사용 예** (`common3d.hlsli::WorldToViewNormal`, §12.4):
+실제로 쓴 구조(공용 `GeometryPSOut`, `common3d.hlsli`에 정의 — 5개 파일이 전부 이 타입을
+반환, 개별 정의 아님):
 
 ```hlsl
-struct PSOut { float4 color : SV_TARGET0; float4 normal : SV_TARGET1; };
+// common3d.hlsli
+struct GeometryPSOut { float4 color : SV_TARGET0; float4 normal : SV_TARGET1; };
 
-PSOut PSMain(VSOut input)
+// mesh.hlsl (예시 — 나머지 4개도 같은 패턴)
+GeometryPSOut PSMain(VSOut input)
 {
-    PSOut o;
     float shadow = SampleShadow(input.shadowClip);
-    o.color  = float4(ApplyLighting(objColor.rgb, input.nrm, shadow), objColor.a);
-    o.normal = float4(WorldToViewNormal(input.nrm) * 0.5f + 0.5f, 1.0f);
-    return o;
+    GeometryPSOut output;
+    output.color  = float4(ApplyLighting(objColor.rgb, input.nrm, shadow), objColor.a);
+    output.normal = float4(WorldToViewNormal(input.nrm) * 0.5f + 0.5f, 1.0f);
+    return output;
 }
 ```
 
@@ -571,14 +575,14 @@ struct Scene3D { /* ...기존... */ PostProcessSettings postProcess{}; };
 
 | 파일 | 종류 |
 |---|---|
-| `src/render/Dx11Renderer.h`/`.cpp` | **수정됨** — 씬 타깃 리소스 확장(§12.3, 색+깊이 SRV까지), 파이프라인에 `PostProcessPass` 상시 등록 + `AddRenderPass` 기본 삽입 지점을 트레일링 2개 기준으로(§12.1). MRT(노멀)·SSAO는 아직 |
-| `src/render/RenderPass.h` | **수정됨** — `PassContext`에 `backBufferRenderTarget`/`sceneColorSrv`/`sceneSampleCount` 추가(§12.8, 옵션 A). 노멀/AO SRV 필드는 그 단계에서 추가 |
+| `src/render/Dx11Renderer.h`/`.cpp` | **수정됨** — 씬 타깃 리소스 확장(§12.3, 색+깊이+노멀 3종 + SRV), 지오메트리 스테이지 MRT 바인드(색+노멀), 파이프라인에 `PostProcessPass` 상시 등록 + `AddRenderPass` 기본 삽입 지점을 트레일링 2개 기준으로(§12.1). SSAO·리졸브는 아직 |
+| `src/render/RenderPass.h` | **수정됨** — `PassContext`에 `backBufferRenderTarget`/`sceneColorSrv`/`sceneNormalSrv`/`sceneSampleCount` 추가(§12.8, 옵션 A). AO SRV 필드는 그 단계에서 추가 |
 | `src/render/r3d/FrameConstants.h` | **수정됨** — `view` 필드 추가(§12.4) |
-| `assets/shaders/common3d.hlsli` | **수정됨** — `cbuffer Frame`에 `view` 추가 + `WorldToViewNormal` 헬퍼(§12.4/§12.5, 헬퍼는 아직 아무도 안 부름 — 노멀 MRT 단계에서 사용 시작) |
-| `assets/shaders/{mesh,model,cel,mesh_instanced,mesh_instanced_toon}.hlsl` | **미구현(다음 단계)** — PS 출력 2개로(§12.5) |
-| `assets/shaders/{outline,shadow,shadow_instanced,debugline}.hlsl` | 안 바꿈(§12.5) |
-| `assets/shaders/crease.hlsl` | 판단 필요(§12.5) |
-| `src/render/r3d/MeshPass3D.cpp`/`ModelMeshPass3D.cpp` | 아직 변경 없음(§12.6) |
+| `assets/shaders/common3d.hlsli` | **수정됨** — `cbuffer Frame`에 `view` 추가 + `WorldToViewNormal` 헬퍼 + `GeometryPSOut` 공용 구조체(§12.4/§12.5) |
+| `assets/shaders/{mesh,model,cel,mesh_instanced,mesh_instanced_toon}.hlsl` | **구현됨** — `GeometryPSOut` 반환으로 SV_TARGET1(노멀) 추가(§12.5) |
+| `assets/shaders/{outline,shadow,shadow_instanced,debugline}.hlsl` | **안 바꿈(계획대로)**(§12.5) |
+| `assets/shaders/crease.hlsl` | 판단 필요, 아직 보류(§12.5) |
+| `src/render/r3d/MeshPass3D.cpp`/`ModelMeshPass3D.cpp` | **변경 없음, 계획대로**(§12.6) — MRT 바인딩은 `Dx11Renderer`가, 셰이더 파일만 갱신하면 충분했다 |
 | `src/render/r2d/PostProcessPass.h`/`.cpp` | **구현됨(패스스루만)** — 계획한 위치(`r3d/`)에서 `r2d/`로 변경, 이유는 위 §12.7 표 |
 | `assets/shaders/fullscreen.hlsli` | **구현됨**(§12.7) |
 | `assets/shaders/depth_resolve.hlsl` | **미구현(다음 단계)**(§12.7) |
@@ -599,15 +603,19 @@ struct Scene3D { /* ...기존... */ PostProcessSettings postProcess{}; };
    "패스스루"(AO/안개 없이 순수 컬러 합성)만. 옛 프레임 끝 `ResolveSubresource` 호출은
    제거하고 이 패스의 합성 셰이더(멀티샘플이면 `composite_ms.hlsl`)가 그 역할을 흡수(§4.3/§12.3).
    **이 컨테이너는 MSBuild가 없어 컴파일 검증 못 함 — Visual Studio 빌드 확인 필요.**
-4. 노멀 MRT(§12.3 노멀 부분 + §12.5 셰이더들, `MeshPass3D`의 `mesh.hlsl`부터) — 디버그 뷰로 노멀 시각화.
-5. 나머지 지오메트리 셰이더(`model.hlsl`/`cel.hlsl`/인스턴스드 2종)도 SV_TARGET1 추가.
+4. ~~노멀 MRT(§12.3 노멀 부분 + §12.5 셰이더들, `MeshPass3D`의 `mesh.hlsl`부터)~~ **완료.**
+5. ~~나머지 지오메트리 셰이더(`model.hlsl`/`cel.hlsl`/인스턴스드 2종)도 SV_TARGET1 추가~~
+   **완료** — 4·5를 한 커밋으로 같이 했다(전부 같은 기계적 패턴이라 시각 확인 없이도 위험이
+   낮다고 판단, §11 참고). **디버그 뷰(§7.4)는 여전히 없음** — 노멀이 실제로 채워지는지는
+   SSAO/합성이 그 값을 소비하기 시작하는 8단계에서 화면으로 간접 확인된다.
 6. 깊이 다운샘플(§12.7 `depth_resolve.hlsl`) + 노멀 리졸브.
 7. SSAO(§12.7 `ssao.hlsl`) — 디버그 뷰로 AO 단독 확인.
 8. 합성(`composite.hlsl`/`composite_ms.hlsl` 확장, MSAA 리졸브는 이미 흡수됨) — AO 곱 + 안개, 셀 룩에 맞게 세기 조정.
 9. (선택) `crease.hlsl` 노멀 기여 여부 결정, 스크린스페이스 아웃라인 프로토타입.
 
-각 단계 독립 검증 가능. 1~3단계(완료)만으로도 다른 이펙트(소프트 파티클, 향후 톤매핑)를 위한
-배관이 갖춰진다.
+각 단계 독립 검증 가능. 1~5단계(완료)만으로도 다른 이펙트(소프트 파티클, 향후 톤매핑)를 위한
+배관이 갖춰진다. **4~5단계는 화면에 아무 변화가 없어야 정상**(노멀을 아무도 안 읽으므로) —
+빌드 성공 + 기존과 동일한 화면이 곧 검증이다.
 
 ---
 
