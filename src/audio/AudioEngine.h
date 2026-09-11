@@ -6,10 +6,13 @@
 #include <string>
 
 // Minimal audio: an XAudio2 mastering voice with two submixes (music, sfx),
-// fire-and-forget PCM WAV one-shots, and one looping music track. Main-thread
-// API; XAudio2 runs its own mixer thread. If XAudio2 is unavailable the engine
-// constructs fine and every call is a silent no-op (the game still runs).
-// See docs/audio-design.md, docs/roadmap.md (rec 3).
+// pooled PCM WAV one-shots, and one looping (self-wrapping, chunk-streamed)
+// music track. Main-thread API; XAudio2 mixes on its own thread, and
+// PlayMusic additionally owns a dedicated std::thread that streams the music
+// file off disk in chunks so neither main nor render/job threads block on
+// file IO (docs/audio-design.md §1/§6 "진짜 스트리밍"). If XAudio2 is
+// unavailable the engine constructs fine and every call is a silent no-op
+// (the game still runs). See docs/audio-design.md, docs/roadmap.md (rec 3).
 namespace engine::audio
 {
     class AudioEngine final : private core::NonCopyable

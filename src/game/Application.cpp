@@ -125,6 +125,7 @@ namespace engine::game
     {
         m_state = GameState::Title;
         m_window.SetPointerLocked(false);
+        m_audio.StopMusic();
         m_ui.ClearOverlay();
         m_ui.SetScreen(BuildTitleScreen(
             [this] { EnterInGame(); },
@@ -147,6 +148,10 @@ namespace engine::game
         m_ui.ClearOverlay();
         m_ui.SetScreen(BuildInGameHud([this] { OpenSettings(); }));
         m_window.SetPointerLocked(true);   // mouse-look / centre-locked cursor
+        // Demo hook (docs/audio-design.md §4/§5): exercises the streaming music
+        // path end-to-end. blip.wav is a placeholder loop - swap for a real
+        // track when one exists, the call site does not change.
+        m_audio.PlayMusic("assets/audio/blip.wav");
     }
 
     void Application::OpenSettings()
