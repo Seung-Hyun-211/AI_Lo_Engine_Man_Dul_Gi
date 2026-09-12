@@ -139,7 +139,7 @@ namespace engine::game
             a.health -= amount;
             if (a.health <= 0.0f)
             {
-                ++m_killCount;
+                AwardKill();
                 SpawnGibs(a.pos);         // before RespawnAgentInPlace overwrites pos (§3); safe here - main thread, no worker in flight
                 RespawnAgentInPlace(a);   // no ragdoll fling for a plain hit - that is TriggerExplosion's job
             }
@@ -240,6 +240,7 @@ namespace engine::game
         StepOrdnance(fixedDelta);   // before StepSimAgents so a trigger this step still affects this step's crowd integration
         StepSimAgents(fixedDelta);
         StepGibs(fixedDelta);
+        StepMatchPhase(fixedDelta);
         // Crowd colliders + look-ray + overlap tint run ONCE per frame from
         // Application::UpdateCrowdQueries(), not here - they are O(crowd) and
         // render-only, so per-sub-step made a slow frame spiral.
@@ -551,7 +552,7 @@ namespace engine::game
             if (a.needsKillCount)
             {
                 a.needsKillCount = false;
-                ++m_killCount;   // burn-DoT death only (§7) - other death paths already bump this themselves
+                AwardKill();   // burn-DoT death only (§7) - other death paths already award this themselves
             }
         }
 
@@ -626,6 +627,47 @@ namespace engine::game
         }
     }
 
+    void Simulation::AwardKill()
+    {
+        ++m_killCount;
+        m_supplies += kSupplyPerKill;
+    }
+
+    void Simulation::EndCombatPhase()
+    {
+        if constexpr (kDemoScene != 2) { return; }
+        else
+        {
+            for (const auto& handle : m_agentHandles) m_agents.Release(handle);
+            m_agentHandles.clear();
+            m_agentChurnCursor = 0;
+        }
+    }
+
+    void Simulation::StepMatchPhase(float fixedDelta)
+    {
+        if constexpr (kDemoScene != 2) { return; }
+        else
+        {
+            m_phaseTimeLeft -= fixedDelta;
+            if (m_phaseTimeLeft > 0.0f) return;
+
+            if (m_phase == MatchPhase::Combat)
+            {
+                EndCombatPhase();
+                m_phase = MatchPhase::Prep;
+                m_phaseTimeLeft = kPrepDuration;
+            }
+            else   // Prep -> Combat: next wave
+            {
+                SpawnSimAgents();
+                ++m_waveNumber;
+                m_phase = MatchPhase::Combat;
+                m_phaseTimeLeft = kCombatDuration;
+            }
+        }
+    }
+
     void Simulation::TriggerExplosion(math::Vec3 center, float radius, float power, float damage)
     {
         if constexpr (kDemoScene != 2) { return; }
@@ -659,7 +701,7 @@ namespace engine::game
                 if (a.health > 0.0f)
                 {
                     a.health -= damage * falloff;
-                    if (a.health <= 0.0f) ++m_killCount;
+                    if (a.health <= 0.0f) AwardKill();
                 }
             }
         }
@@ -698,10 +740,14 @@ namespace engine::game
         else
         {
             if (!m_lookRay.hit) return;   // nothing to place on
+            const int cost = kind == OrdnanceKind::Mortar ? kMortarCost : kMineCost;
+            if (m_supplies < cost) return;   // §0.1 - insufficient funds, no shop UI yet so this is the whole gate
+
             const auto handle = m_ordnance.Acquire();
             PlacedOrdnance* o = m_ordnance.Get(handle);
-            if (!o) return;   // pool full - drop the placement, not fatal
+            if (!o) return;   // pool full - drop the placement, not fatal (funds NOT spent)
 
+            m_supplies -= cost;
             o->kind = kind;
             o->pos = m_lookRay.point;
             if (kind == OrdnanceKind::Mortar)
@@ -767,6 +813,8 @@ namespace engine::game
         {
             if (!m_lookRay.hit) return;                      // nothing to place on
             if (m_slowZones.size() >= kMaxSlowZones) return;  // fixed cap (§6) - drop, not fatal
+            if (m_supplies < kWireCost) return;               // §0.1 - insufficient funds
+            m_supplies -= kWireCost;
             m_slowZones.push_back({ m_lookRay.point, kWireRadius, kWireSpeedMul });
         }
     }

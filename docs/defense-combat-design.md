@@ -17,7 +17,7 @@
 
 ---
 
-## 0. 게임 루프 — 전투 → 정산 → 정비, 무한 반복
+## 0. 게임 루프 — 전투 → 정산 → 정비, 무한 반복 (핵심 상태기계 구현 완료, §0.1/§0.3/§0.5는 아직 설계만)
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -68,7 +68,7 @@ Combat(60s)  ──타이머 만료──▶  전멸 처리(§0.2)  ──▶  W
   `EnterTitle()`. 그 외엔 무한 반복(승리 조건 없음 — 엔드리스 웨이브 디펜스, `synopsis.md` 장르
   그대로). 최고 웨이브 도달 수가 스코어.
 
-### 0.1 자원 경제 — 정비 구매용 화폐
+### 0.1 자원 경제 — 정비 구매용 화폐 (구현 완료 — 획득/소비, 상점 UI는 없음)
 
 "지뢰를 심든 박격포 포탄을 사는" 에는 화폐가 필요하다.
 
@@ -82,6 +82,22 @@ int m_supplies{ 0 };   // 정비 페이즈에서 소비. 정찰/보너스 등 �
 - **소비**: 정비 페이즈(§0.4)의 상점 UI에서 `PlacedOrdnance`/`SlowZone` 배치 또는 무기 재고
   (`m_mortarAmmo`/`m_mineAmmo` 카운트, §4) 충전에 사용. 부족하면 배치/구매 버튼 비활성.
 - **표시**: `WaveResults`(§0.3)에서 "이번 웨이브 획득 + 누적", 정비 UI에서 "현재 보유".
+
+**구현 노트** (`Simulation.h/.cpp`):
+- `typeId`별 보상 테이블은 안 만들었다 — 크라우드가 아직 단일 타입이라 `kSupplyPerKill`(고정
+  10) 하나면 충분(YAGNI). 여러 타입이 생기면 그때 테이블화.
+- 획득은 `AwardKill()`(신규 private 헬퍼)이 `++m_killCount`와 `m_supplies += kSupplyPerKill`을
+  같이 처리 — 기존 3곳의 킬 집계 지점(`DamageAgent`/`TriggerExplosion`/화염 도트의
+  `needsKillCount` 소비)을 전부 이 한 곳으로 통일해서 새 보상 로직이 하나만 있으면 됐다.
+  `EndCombatPhase`(§0.2 전멸)와 목표 도달(`reachedGoal`)은 `AwardKill`을 안 부르므로 자동으로
+  보상 대상에서 빠진다(문서가 요구한 그대로).
+- **소비는 상점 UI 없이 바로 배치 함수에 넣었다** — `PlaceOrdnance`/`PlaceSlowZone`이 각자
+  `kMortarCost`(30)/`kMineCost`(20)/`kWireCost`(15)를 확인해 부족하면 조용히 no-op(풀이 꽉
+  찼을 때와 같은 "드롭, 치명적 아님" 처리). §0.4가 상정한 "버튼 비활성화" UI 피드백은 아직
+  없지만 자금 부족 시 실제로 배치가 안 되는 동작 자체는 이미 완성.
+- 검증: 라이플 자동발사로 킬→`supplies`+10/킬 누적, 박격포/지뢰/철조망 순서로 자동 소비 시도
+  — 잔액 부족한 항목(철조망)만 계속 배치가 안 됨(zones 그대로)을 확인. 대량 폭발로 581킬이
+  한 번에 나는 상황에서도 `supplies` 값이 일관되게 누적/차감됨(오버플로우·불일치 없음).
 
 ### 0.2 웨이브 종료 — 전멸 처리
 
@@ -109,6 +125,32 @@ void Simulation::EndCombatPhase()
 - **워커 안전**: `state=Die` 대입은 자기 슬롯 필드라 `ParallelFor` 워커 안에서도 안전(규칙 6) —
   이 루프 자체를 병렬화할 수도 있지만, 웨이브 끝은 프레임당 1회뿐인 이벤트라 메인에서 순차
   순회해도 비용 무시할 만함(수천 개면 병렬화, 측정 게이트).
+
+**구현 노트** (`Simulation.h/.cpp`) — **핵심 상태기계만** 구현, §0.1(자원)/§0.3(정산 화면)/
+§0.5(에스컬레이션)는 아직 설계만(범위를 좁힌 판단, 아래):
+- `agent.state`(Alive/Die) 열거형은 안 만들었다 — 실제 `SimAgent`엔 그런 필드가 없고 `health`
+  float 만 있다. `EndCombatPhase`는 그 대신 **`m_agentHandles`를 전부 `m_agents.Release()`**
+  — 사망 파이프라인을 거치지 않고 풀에서 바로 비움(스케치의 `state=Die`보다 한 단계 더 직접적).
+  `skipGibs` 플래그도 안 만들었다 — `EndCombatPhase`가 `DamageAgent`/`TriggerExplosion` 등
+  기존 사망 경로를 아예 안 거치므로 애초에 기브가 안 붙는다(플래그로 끌 필요 자체가 없음).
+  `m_killCount`도 안 늘어난다(이건 "죽인 것"이 아니라 "웨이브 종료 청소").
+  **쓰러짐 애니메이션·지연 연출은 스코프 밖** — 순간 `Release`.
+- `StepMatchPhase(fixedDelta)`가 `Step()`의 **맨 마지막**에 돈다 — 이번 프레임의 다른 모든
+  시스템(무기·기브·오드넌스)이 여전히 "이전" 페이즈를 보고 처리되고, 전환은 다음 프레임부터
+  적용된다. 프레임 도중 `SpawnSimAgents()`(풀 `Init`)가 같은 프레임의 다른 코드와 겹치는 걸
+  피하려는 단순한 재진입 회피.
+- **`GameState::WaveResults`/정산 화면 UI 자체는 안 만들었다** — Combat 종료 시 정산 화면 없이
+  바로 Prep 으로 넘어간다(§0.4 가 이미 "정비→전투 전환은 화면 전환 없음"이라고 적어둔 것과
+  같은 무전환 패턴을 Combat→Prep 에도 적용한 셈). `Simulation::Phase()`/`PhaseTimeLeft()`/
+  `WaveNumber()` 접근자는 만들어 뒀으니 정산 화면·HUD 타이머는 이 값을 그대로 읽으면 된다.
+- **§0.1 자원(`m_supplies`)/재고 게이팅은 없음** — 오드넌스/철조망 배치는 지금도(§4/§6) 무제한
+  이다. 상점 UI가 나올 때 같이 붙이는 게 자연스러움.
+- **§0.5 에스컬레이션 없음** — 웨이브마다 `SpawnSimAgents()`가 항상 같은 `kActiveCrowd.count`
+  로 리스폰(난이도 곡선 없음). `WaveDirector`(호드 설계) 자체가 아직 없어서 자연히 스코프 밖.
+- 검증: `kCombatDuration`/`kPrepDuration`을 3초로 임시 단축해 3사이클 관찰 —
+  Combat 중 `liveAgents=16384` 유지 → 타이머 만료 즉시 `liveAgents=0`(Prep, 크래시 없음,
+  `StepSimAgents`의 기존 "풀 비면 즉시 반환" 그대로 작동) → Prep 만료 즉시 `liveAgents=16384`
+  복귀 + `wave` 1→2→3 증가. 전부 원복 후 재검증.
 
 ### 0.3 정산 화면 (`GameState::WaveResults`)
 

@@ -46,6 +46,11 @@ namespace engine::game
     // order); the rest are no-ops until their own step.
     enum class WeaponKind : std::uint8_t { Rifle, Mortar, Mine, WireFence, Flamethrower };
 
+    // Combat vs. build/prep (docs/defense-combat-design.md §0). Owned by
+    // Simulation, not GameState - Application only knows InGame/WaveResults
+    // (scene-flow-design.md), never branches on this.
+    enum class MatchPhase : std::uint8_t { Combat, Prep };
+
     // One moving thing in the 3D demo scene. Homogeneous, so it lives in a plain
     // std::vector (docs/entity-lifecycle-design.md §3A - no EntityId needed until
     // there are entity *kinds* with different component sets).
@@ -217,6 +222,23 @@ namespace engine::game
         static constexpr float kFlameHalfAngleCos = 0.9397f;   // cos(20 deg) - ~40 deg total cone width
         static constexpr float kFlameDps = 25.0f;              // damage per second while burning
         static constexpr float kFlameRefreshSeconds = 0.35f;   // burnTimeLeft refill per cone tick - keeps burning this long after leaving the cone
+
+        // Wave loop (docs/defense-combat-design.md §0) - core state machine
+        // only (§0.1 resource economy, §0.3 results screen, §0.5 escalation
+        // are separate, not-yet-built follow-ups; see that doc's own §10).
+        static constexpr float kCombatDuration = 60.0f;
+        static constexpr float kPrepDuration = 60.0f;
+
+        // Resource economy (docs/defense-combat-design.md §0.1) - v1 is a
+        // flat per-kill reward (the crowd is homogeneous, no per-type table
+        // yet) spent on placement. No shop UI exists, so the spend side is
+        // enforced right in PlaceOrdnance/PlaceSlowZone (insufficient funds =
+        // silent no-op, same shape as those already having a "drop, not
+        // fatal" failure path for a full pool).
+        static constexpr int kSupplyPerKill = 10;
+        static constexpr int kMortarCost = 30;
+        static constexpr int kMineCost = 20;
+        static constexpr int kWireCost = 15;
 #endif
 
         Simulation(core::JobSystem& jobs, int worldWidth, int worldHeight);
@@ -290,6 +312,10 @@ namespace engine::game
 
         [[nodiscard]] float ObjectiveHealth() const { return m_objectiveHealth; }
         [[nodiscard]] int KillCount() const { return m_killCount; }
+        [[nodiscard]] MatchPhase Phase() const { return m_phase; }
+        [[nodiscard]] float PhaseTimeLeft() const { return m_phaseTimeLeft; }
+        [[nodiscard]] int WaveNumber() const { return m_waveNumber; }
+        [[nodiscard]] int Supplies() const { return m_supplies; }
 #endif
 
         // --- reads for the snapshot builder ---
@@ -363,6 +389,22 @@ namespace engine::game
         // is held (unlike the other weapons' single-shot FireWeapon calls) -
         // linear scan, same reasoning as TriggerExplosion/StepOrdnance's own.
         void ApplyFlameCone(math::Vec3 origin, math::Vec3 dir, float range, float halfAngleCos);
+        // Ticks the Combat/Prep timer and transitions phases (docs/defense-
+        // combat-design.md §0). Runs last in Step() so this frame's other
+        // systems still saw the OLD phase - a transition takes effect next
+        // frame, avoiding mid-frame reentrancy (e.g. SpawnSimAgents
+        // re-Init()ing the pool while StepSimAgents might still be mid-scan).
+        void StepMatchPhase(float fixedDelta);
+        // Combat -> Prep: sweeps every live agent back to the pool (§0.2).
+        // Not a kill - no gibs, no kill-count credit (doc's own call: a
+        // few hundred simultaneous gibs would instantly fill that 256 pool).
+        void EndCombatPhase();
+        // Credits a weapon kill (docs/defense-combat-design.md §0.1/§2) -
+        // ++m_killCount + the flat supply reward, together so every kill
+        // path (DamageAgent, TriggerExplosion, the burn-DoT post-Wait()
+        // pass) stays in sync. NOT called by EndCombatPhase's wave-sweep or
+        // ReachedGoal - neither is a weapon kill (§0.1's own distinction).
+        void AwardKill();
 #endif
 
         core::JobSystem& m_jobs;
@@ -391,6 +433,11 @@ namespace engine::game
         core::ObjectPool<GibPiece> m_gibs{ kGibPoolCapacity };   // death VFX pieces (§3); fixed capacity, no per-scene Init needed
         core::ObjectPool<PlacedOrdnance> m_ordnance{ kOrdnancePoolCapacity };   // mortars/mines (§4)
         std::vector<SlowZone> m_slowZones;   // barbed wire (§6); never shrinks mid-match, capped at kMaxSlowZones
+
+        MatchPhase m_phase{ MatchPhase::Combat };   // wave loop (§0)
+        float m_phaseTimeLeft{ kCombatDuration };
+        int   m_waveNumber{ 1 };
+        int   m_supplies{ 0 };   // resource economy (§0.1)
 #endif
     };
 }
