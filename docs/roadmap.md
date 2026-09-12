@@ -12,11 +12,11 @@
 
 | 영역 | 됨 | 부분/설계 | 없음 |
 |---|---|---|---|
-| 렌더 | MSAA 씬타깃, 셀+아웃라인+크리즈, 방향광 1개 + 단일 셰도우맵, MeshPass3D(큐브/평면 + **인스턴스드 드로우** + 프러스텀·거리 컬), QuadPass2D, 디버그 드로우 패스 | SpritePass2D + 아틀라스(무압축), ModelMeshPass3D(정적+CPU스키닝) | 포인트/스팟광, CSM, 투명 정렬, 인스턴스 LOD/빌보드, sRGB 파이프라인, 메시 LOD |
+| 렌더 | MSAA 씬타깃, 셀+아웃라인+크리즈+프레넬(림), 방향광 1개 + **2캐스케이드 섀도우맵**(근접 고정+원거리 씬별), G-버퍼(view-space 노멀)+SSAO(반구커널+블러)+거리 안개(포스트프로세스 합성), MeshPass3D(큐브/평면 + **인스턴스드 드로우** + 프러스텀·거리 컬), QuadPass2D, 디버그 드로우 패스 | SpritePass2D + 아틀라스(무압축), ModelMeshPass3D(정적+CPU스키닝) | 포인트/스팟광(`light-types-design.md`, 설계만), 카메라 프러스텀 기반 진짜 CSM(지금은 플레이어 중심 동심 박스 2개), 투명 정렬, 인스턴스 LOD/빌보드, sRGB 파이프라인, 메시 LOD |
 | 애니메이션 | CPU LBS 스키닝, 클립 리타깃, Locomotion→클립 스냅, 재생 모드(Once/PingPong), 크로스페이드(로컬 TRS lerp), 파라메트릭 점프 | 2D 프레임 애니(설계만) | **루트 모션, GPU 스키닝, IK, 블렌드 트리** |
 | 물리/충돌 | Box/Sphere 탐지, layer/mask, Contacts, 3D 균일 그리드 브로드페이즈, 레이캐스트 2D·3D(Closest/Any/All) + 데모 씬 2 `Simulation` 연동 | — | **레이캐스트 그리드 가속(D3b), 2D 브로드페이즈, 스윕/CCD, 캡슐, 트리거 enter/exit 이벤트, 재사용 캐릭터 컨트롤러** |
 | 에셋 | FBX+스키닝, 이미지 디코드 seam, atlas_pack v1(무압축) | — | BC7 압축, AssetRegistry, 비동기 로더, 핫리로드(아틀라스/모델), 글리프 아틀라스 |
-| 게임 프레임워크 | 씬 상태(Title/InGame/Settings), 고정 스텝 + time scale, EntityId 뼈대, `core::ObjectPool<T>`, 오디오 최소 믹서(XAudio2) | ScrollList v1 | **오디오 스트리밍/3D음, 세이브, 이벤트 버스, 프리팹/직렬화, 게임 루프(장르 미정)** |
+| 게임 프레임워크 | 씬 상태(Title/InGame/Settings), 고정 스텝 + time scale, EntityId 뼈대, `core::ObjectPool<T>`, **오디오 스트리밍(전용 스레드) + voice 풀링(XAudio2)** | ScrollList v1 | **오디오 3D 위치음(X3DAudio)·OGG, 세이브, 이벤트 버스, 프리팹/직렬화, 게임 루프(장르 미정)** |
 | 입력 | 키보드/마우스/휠 | — | 게임패드(XInput), 리바인딩, 액션맵 레이어 |
 | 툴/디버그 | entity 메모리 벤치, atlas_pack | — | 프레임타임 HUD/프로파일러(FPS 표시만 됨), 인게임 콘솔, 엔티티 인스펙터, 리플레이 |
 
@@ -136,7 +136,7 @@ if (auto hit = world.RaycastClosest(down)) { actor.pos.y = hit->point.y; actor.g
 |---|---|---|
 | ~~브로드페이즈(균일 그리드)~~ ✅ 3D `Step()` | N² 탈출. 남음: 레이캐스트 DDA 가속(D3b), 2D, BVH | `collider-design.md` |
 | 재사용 캐릭터 컨트롤러 컴포넌트(move-and-slide) | 지금 `Simulation::StepOneActor` 에 하드코딩 — 재사용/조립 불가 | 새 `game/CharacterController` |
-| ~~오디오 서브시스템(XAudio2 최소 믹서)~~ ✅ → 스트리밍/3D음/OGG 후속 | 볼륨 슬라이더 살아남 | `docs/audio-design.md` §6 |
+| ~~오디오 서브시스템(XAudio2 믹서 + 스트리밍 + voice 풀링)~~ ✅ → 3D음/OGG 후속 | 볼륨 슬라이더 살아남 | `docs/audio-design.md` §6 |
 | winding 검증 + back-face cull | 지금 전 3D 패스가 `CULL_NONE` (`engine-conventions.md` §10) | `engine-conventions.md` |
 | AssetRegistry + 비동기 로더 | 시작 검은 창, 런타임 로드 불가 | `loading-and-streaming.md`(설계 완료) |
 | BC7/BC4 압축 (`atlas_pack --format bc7`) | 현재 무압축 `.dds` — 메모리 4배 | `atlas-build-pipeline.md` §5 |
@@ -150,7 +150,7 @@ if (auto hit = world.RaycastClosest(down)) { actor.pos.y = hit->point.y; actor.g
 | sRGB 렌더 파이프라인 | 감마 정확 (`lighting.md`) |
 | 시뮬/렌더 파이프라이닝 | 매 프레임 `ParallelFor().Wait()` 완전 블록 |
 | 프레임타임 HUD / 프로파일러 | 성능 회귀 감지 (FPS 우상단 표시는 됨 — playbook 9) |
-| 라이트 배열(포인트/스팟) + CSM | 단일 방향광·단일 캐스케이드 (`lighting.md`) |
+| 라이트 배열(포인트/스팟) + 카메라 프러스텀 기반 진짜 CSM | 단일 방향광·2캐스케이드(플레이어 중심 동심 박스, `shadows.md`) — 설계는 `light-types-design.md` |
 | 메시 LOD / 임포스터 | 디스턴스 스왑 없음 (인스턴스 크라우드 LOD 는 `instanced-rendering.md` §5, 메시 자체 LOD 는 별개) |
 | 스왑체인 `FLIP_DISCARD` | 레거시 `DISCARD` (`CLAUDE.md` 알려진 이슈) |
 | 결정성 리플레이(입력 로그 + 프레임 해시) | 회귀 테스트 (`time-design.md` 로드맵) |
@@ -160,7 +160,8 @@ if (auto hit = world.RaycastClosest(down)) { actor.pos.y = hit->point.y; actor.g
 
 | 항목 | 결정할 것 |
 |---|---|
-| ~~장르 / 시놉시스~~ | **확정: 대규모 디펜스** (`synopsis.md`). 남은 결정: 시점(탑다운 vs 3인칭), 저지 수단(타워/유닛/혼합), 적 표현(스켈레탈/인스턴스 메시/스프라이트) |
+| ~~장르 / 시놉시스~~ | **확정: 대규모 디펜스** (`synopsis.md`). 남은 결정: 시점(탑다운 vs 3인칭), 적 표현(스켈레탈/인스턴스 메시/스프라이트). 저지 수단은
+부분 확정(혼합 — `synopsis.md` §"아직 결정 필요" 2, `defense-combat-design.md`) |
 | Live2D/Spine 2D 리깅 | 상용 SDK 라이선스, vendor 가능 여부 (`animation-design.md` §4) |
 | 스크립팅 vs 데이터 주도 튜닝 | Lua/wren vs JSON/토큰 테이블 |
 
@@ -174,8 +175,8 @@ if (auto hit = world.RaycastClosest(down)) { actor.pos.y = hit->point.y; actor.g
 | ~~D2~~ ✅ | **다수 엔티티 풀 + `core::ObjectPool<T>`** (AoS. SoA 승격은 측정 게이트) | 수백~수천 적/투사체를 개별 `new` 없이 스폰·재사용 | `src/core/ObjectPool.h`, **`instanced-rendering.md` §6** |
 | ~~D3~~ ✅ (Step) | **브로드페이즈(균일 그리드)** — 3D `Step()` 완료. 레이캐스트 DDA 가속(D3b)만 남음 | 다수 대 다수 충돌·타겟 질의 — 선형 스캔 N² 불가 | `collider-design.md` "브로드페이즈" |
 | ~~D4~~ ✅ | **인스턴싱 렌더** — 인스턴스드 드로우 + 프러스텀·거리 컬 + 거리 LOD 2단계(§8-1·2·3). 크라우드 = FBX 메시(`MeshId::CrowdModel`) + 디퓨즈 텍스처(§9.6-A) + **1클립 VAT 애니**(§9.6-B), 수·모델은 `game/CrowdConfig.h`(§9.5). 빌보드/중간 티어·VAT 확장(법선/셰도우/다중클립)·`AgentStore` 남음 | 같은 메시 수천 개를 draw call 소수로 | **`instanced-rendering.md`** (§3~§5, 구현순서 §8) |
-| D5 | **웨이브/스폰 + HP/데미지 + 목표 지점·패배 판정** | 게임 루프 자체 | 새 `game/` 시스템 |
-| ~~D6~~ ✅ | 오디오 최소 믹서 | 타격·스폰·경보음 + 설정 슬라이더 살리기 | `audio-design.md` (최소 구현) |
+| D5 | **무한 웨이브(전투 60초/정비 60초 반복) + HP/데미지 + 목표 지점·패배 판정 + 무기 5종(총·화염방사기·박격포·지뢰·철조망)** | 게임 루프 자체 | 설계 완료 → 구현. [defense-combat-design.md](defense-combat-design.md) |
+| ~~D6~~ ✅ | 오디오 (믹서 + 스트리밍 + voice 풀링) | 타격·스폰·경보음 + 설정 슬라이더 살리기 | `audio-design.md` |
 | — | 애니 재생 모드/크로스페이드(§2.1) | 플레이어 유닛/보스엔 필요하나 **적 다수엔 저비용 표현이 맞음** → 시점·적 표현 확정 후로 미룸 | P0 → 낮춤 |
 
 ---
@@ -184,14 +185,17 @@ if (auto hit = world.RaycastClosest(down)) { actor.pos.y = hit->point.y; actor.g
 
 1. ~~**애니 재생 모드 + 크로스페이드**~~ ✅ (§2.1) — Once/PingPong + 로컬 TRS lerp 크로스페이드 + 파라메트릭 점프 구현. 블렌드 트리·루트 모션은 후속.
 2. ~~**레이캐스트 + 디버그 드로우 패스**~~ ✅ (§2.2) — 3D 레이 3질의 + `DebugDrawPass` 구현. 2D 대칭·`Simulation` 연동만 남음.
-3. ~~**오디오 최소 믹서**~~ ✅ — XAudio2 마스터 + music/sfx 서브믹스 + PCM 원샷/루핑, 설정 볼륨 3버스 연결(`docs/audio-design.md`). 스트리밍·OGG·3D음은 후속.
-4. **장르/시놉시스 확정** — 부분 완료: 장르 **대규모 디펜스** 확정(`synopsis.md`). 남은 결정: 시점, 저지 수단, 적 표현.
+3. ~~**오디오 믹서 + 스트리밍 + voice 풀링**~~ ✅ — XAudio2 마스터 + music/sfx 서브믹스 + PCM 원샷(포맷별 voice 풀) + 루핑 음악(전용 스레드 청크 스트리밍), 설정 볼륨 3버스 연결(`docs/audio-design.md`). OGG·3D음은 후속.
+4. **장르/시놉시스 확정** — 부분 완료: 장르 **대규모 디펜스** 확정, 저지 수단 부분 확정(무기 5종, `defense-combat-design.md`)(`synopsis.md`). 남은 결정: 시점, 적 표현.
 5. **AssetRegistry + 비동기 로더** (`loading-and-streaming.md` 설계 완료 → 구현) — 시작 시 검은 창을 없애고, 씬 전환·아틀라스 그룹 로드를 가능하게 한다.
 
 착수 순서 제안: **1·2·3 완료 → (4 결정) → 5**.
 
-**현재 위치 (2026-09 기준)**: D1 ✅ · D2 ✅ · D3 ✅(3D `Step()` 그리드) · D4 ✅(인스턴싱 + 컬 + LOD 2단계 + FBX 정적 크라우드 메시, 설정은 `game/CrowdConfig.h`). **핵심 인프라 4개 완료.** 데모 씬 2 = 절벽 위 플레이어 + `kActiveCrowd`(현재 1500 좀비) 조망. 남은 갈래:
-- **D5 — 웨이브/스폰 + HP/데미지 + 목표 지점·패배 판정**: 게임 루프 본체. 여기부터 "게임 사이클".
+**현재 위치 (2026-09 기준)**: D1 ✅ · D2 ✅ · D3 ✅(3D `Step()` 그리드) · D4 ✅(인스턴싱 + 컬 + LOD 2단계 + FBX 정적 크라우드 메시, 설정은 `game/CrowdConfig.h`). **핵심 인프라 4개 완료.** 데모 씬 2 = 절벽 위 플레이어 + `kActiveCrowd`(현재 16384 좀비, 규모 실험치)
+조망 + 폭발 넉백 데모. 지금 커밋된 `kDemoScene` 기본값은 그래픽 작업용 씬 3(크라우드 없는 그림자/
+조명 쇼케이스, `shadows.md` "씬 3") — 씬 2 를 보려면 값을 바꿔야 함. 남은 갈래:
+- **D5 — 웨이브/스폰 + HP/데미지 + 목표 지점·패배 판정 + 무기 5종**: 게임 루프 본체. 여기부터
+  "게임 사이클". 설계 완료(`defense-combat-design.md`) → 구현 순서는 그 문서 §10.
 - **D4 잔여 — VAT 확장(법선·셰도우 실루엣·다중 클립·fp16) / 빌보드·중간 LOD(§5.3)**. (디퓨즈 §9.6-A·1클립 VAT §9.6-B 는 ✅)
 - **D3b — 레이캐스트 그리드 DDA**: `RaycastClosest/Any/All` 을 그리드 traversal 로 (지금은 선형). 짧은 사거리 질의(타워) 많아지면 실효.
 - **`game/AgentStore` SoA 승격**: 측정 게이트 (§6.2).

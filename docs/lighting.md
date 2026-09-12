@@ -15,7 +15,14 @@ struct AmbientLight {                       // 헤미스피어 필 (평면 회�
     math::Color sky{ 0.34f, 0.38f, 0.46f, 1.0f };     // 위 향한 면
     math::Color ground{ 0.20f, 0.18f, 0.16f, 1.0f };  // 아래 향한 면
 };
-struct Lighting { DirectionalLight key{}; AmbientLight ambient{}; };
+// 2캐스케이드 방향광 그림자(구현됨, docs/shadows.md) — [0] 플레이어 중심 고정 박스,
+// [1] 씬별 원거리 박스. shadowsEnabled=false 면 셰도우맵 렌더 자체를 스킵.
+struct Lighting {
+    DirectionalLight key{};
+    AmbientLight ambient{};
+    math::Mat4 cascadeViewProj[kShadowCascadeCount]{};
+    bool shadowsEnabled{ false };
+};
 ```
 
 `Scene3D::lighting` 로 스냅샷에 포함. `SnapshotBuilder::BuildLighting(elapsed)` 가 매 프레임 세팅한다:
@@ -31,12 +38,17 @@ struct Lighting { DirectionalLight key{}; AmbientLight ambient{}; };
 ```hlsl
 cbuffer Frame : register(b0) {
     row_major float4x4 viewProj;
+    row_major float4x4 view;                          // world→view (노멀 회전·빌보드 축용)
+    row_major float4x4 cascadeViewProj[kShadowCascadeCount];  // world→섀도우맵 클립공간, 캐스케이드별
     float4 keyDirection;   // xyz = 정규화된 진행방향, w = 세기
     float4 keyColor;       // rgb
     float4 ambientSky;     // rgb, 위 향한 면
     float4 ambientGround;  // rgb, 아래 향한 면
+    float4 shadowParams;   // x=텍셀크기, y=depth bias, z=활성화(0/1)
 };
 ```
+
+(그림자·G-버퍼용 `view`/`cascadeViewProj`/`shadowParams` 확장은 `docs/shadows.md`·`docs/post-process-gbuffer-research.md` 가 계약 — 이 문서는 조명 필드만 다룬다.)
 
 `MeshPass3D` / `ModelMeshPass3D` 둘 다 `FrameConstantsGpu` + `FillFrameConstants` 를 쓴다 (중복 제거). `outline.hlsl` / `crease.hlsl` 도 `common3d.hlsli` 를 include 하므로 레이아웃은 맞아야 하지만 조명 필드는 읽지 않는다.
 
@@ -58,7 +70,7 @@ float3 ApplyCelLighting(float3 albedo, float3 worldNormal,
 
 - key `intensity` 1.0 → 1.35, 배경 clearColor·바닥색을 밝은 청회색으로.
 - flat ambient(회색 0.18) → **헤미스피어 앰비언트**(sky 0.36 / ground 0.21). 그림자면·아래면이 살아나 전체가 화사.
-- 더 깊은 방법(미구현): sRGB/리니어 파이프라인(백버퍼·텍스처 `_SRGB` → 중간톤 밝기 정상화), rim 라이트(실루엣 pop), 노출/톤매핑, 두 번째 필 라이트.
+- 더 깊은 방법(미구현): sRGB/리니어 파이프라인(백버퍼·텍스처 `_SRGB` → 중간톤 밝기 정상화), 노출/톤매핑, 두 번째 필 라이트. (rim 라이트는 구현됨 — 아래 "구현됨" 절.)
 
 ## "시꺼멓다" 였던 이유 → 지금
 
@@ -68,11 +80,15 @@ float3 ApplyCelLighting(float3 albedo, float3 worldNormal,
 | 광원이 위(`-y`)에서만 → 카메라 정면(법선 ~ -z)은 50°+ → 검정 | key 방향 `{0.35,-0.55,0.75}` (전상 3/4) → 정면 chest ≈ 40° → 0.33 밴드 |
 | key 색·세기 개념 없음 | `keyColor` rgb + `w` 세기 |
 
+## 구현됨 (이 문서 작성 당시엔 로드맵이었던 것)
+
+- ~~**그림자**~~ — 방향광 2캐스케이드 셰도우맵 + PCF. [shadows.md](shadows.md) 가 계약.
+- ~~**rim 라이트**~~ — 프레넬(`1 - dot(N,V)`, 뷰공간) 밴드형, 재질별 강도. [toon-rendering.md](toon-rendering.md), 리서치 기록은 [toon-fresnel-research.md](toon-fresnel-research.md).
+
 ## 로드맵 (미구현)
 
-- **포인트/스팟 라이트**: 설계 완료(미구현) — [light-types-design.md](light-types-design.md). `Frame`이 아니라 별도 cbuffer(b4)에 고정 배열로 시작, 개수 늘면 StructuredBuffer.
-- **그림자**: key 라이트 뷰에서 depth 맵 렌더 → 셰이더에서 비교. 오프스크린 RT 인프라 선행 ([shader-pipeline.md](shader-pipeline.md) 로드맵).
-- **rim 라이트**: `1 - dot(N, V)` 로 실루엣 강조 — 셀 룩에 흔함. `common3d.hlsli` 에 함수 추가, cel.hlsl 에서 더함.
+- **포인트/스팟 라이트**: 설계 완료(미구현) — [light-types-design.md](light-types-design.md). `Frame`이 아니라 별도 cbuffer(b4)에 고정 배열로 시작, 개수 늘면 StructuredBuffer. 1단계는 그림자 없는 라이트만(포인트/스팟 그림자는 큐브맵/원근맵 비용이 커서 후순위).
+- **카메라 프러스텀 기반 진짜 CSM**: 지금은 플레이어 중심 동심 박스 2개(구현은 훨씬 단순하지만 카메라가 아주 멀리/비스듬히 볼 때 최적은 아님) — [shadows.md](shadows.md) "한계".
 - **시간대/색온도**: `BuildLighting` 이 게임 시간에서 보간.
 - **라이트 프로브/IBL**: 앰비언트를 방향별로 (SH9). 나중에.
 

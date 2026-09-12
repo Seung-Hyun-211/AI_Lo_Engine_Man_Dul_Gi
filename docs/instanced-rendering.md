@@ -6,8 +6,8 @@
 배치를 나눈다. 군중은 `core::ObjectPool<SimAgent>`(`src/core/ObjectPool.h`) 에 살고,
 `ParallelFor` 는 `ActiveIndices()` 를 쪼개 돌며, 스텝마다 1마리 풀 재활용(churn).
 크라우드의 **수·모델·크기는 `game/CrowdConfig.h` 의 `kActiveCrowd` 하나가 결정**(§9.5) —
-현재 `kCrowdZombies`(1500, `assets/models/zombie/Zombie1.FBX` 정적 bind pose). 원래 데모는
-`kCrowdBoxes`(600 큐브) 프리셋으로 한 줄 복귀.
+현재 `kCrowdZombies`(16384/16384, `assets/models/zombie/Zombie1.FBX` + VAT 애니, 규모 실험치·
+실측 미검증). 원래 데모는 `kCrowdBoxes`(600 큐브) 프리셋으로 한 줄 복귀.
 남은 것: LOD 중간 티어/빌보드(§5.3), SoA 승격(§6.2, 측정 게이트), VAT 확장(법선·셰도우·다중
 클립·fp16 — §9.6-B "남음"). 크라우드 디퓨즈 텍스처 + 1클립 VAT 애니는 구현됨(§9.6-A/B).
 이 문서는 그 벽을 넘기 위한 **엔진 일반 선행작업** 전체를 설계한다 — 정적/강체 인스턴스를 한
@@ -461,7 +461,8 @@ namespace engine::game
    `render::MeshInstance`/`InstanceBatch` + `Scene3D::{meshInstances,instanceBatches}`,
    `MeshPass3D` 확장(slot1 `PER_INSTANCE_DATA`, DYNAMIC VB `Map(WRITE_DISCARD)` 1회, 배치당
    `DrawIndexedInstanced`), `mesh_instanced.hlsl` + `shadow_instanced.hlsl`(셰도우 인스턴스 경로).
-   `BuildCliffScene` 크라우드가 배치 1개로. `kMaxInstances = 16384`.
+   `BuildCliffScene` 크라우드가 배치 1개로. `kMaxInstances = 32768`(크라우드 규모 실험으로
+   16384→32768 상향, `kCrowdZombies` 참고).
 2. ~~**프러스텀 + 최대거리 컬링**~~ ✅ `SnapshotBuilder` 익명 헬퍼 `MakeFrustum`(Gribb-Hartmann,
    이 엔진 행렬 규약에 맞춤) + `SphereInFrustum` + `EyeFromView`. 데모 씬 2 크라우드를 컬 후
    `MeshInstance` 로. (`math::MakeFrustum` 승격은 두 번째 사용처가 생기면.)
@@ -528,7 +529,7 @@ if (inst.size() > first)
 | 컬링 최대 거리 | `BuildCliffScene` 의 `kAgentCullDist` (현재 100) |
 | LOD 경계 (근→원, 그림자 컷) | `BuildCliffScene` 의 `kAgentShadowDist` (현재 34) |
 | 프러스텀 구 테스트 반경 | `BuildCliffScene` 인라인 `height * 0.6f` |
-| 인스턴스 상한(프레임당) | `MeshPass3D::kMaxInstances` (16384). GPU 측에서 안전하게 자름. **SnapshotBuilder 쪽 캡은 아직 없음** — 규모 커지면 같은 값으로 추가 |
+| 인스턴스 상한(프레임당) | `MeshPass3D::kMaxInstances` (32768, `kCrowdZombies` count 16384 의 2배 여유). GPU 측에서 안전하게 자름. **SnapshotBuilder 쪽 캡은 아직 없음** — 규모 커지면 같은 값으로 추가 |
 | 셰도우 캐스트 LOD 컷 | `MeshPass3D::DrawInstanced` 의 `batch.lod >= 2` continue (+ 전부 원거리면 업로드 생략) |
 
 ### 9.4 하지 말 것
@@ -563,7 +564,7 @@ m_jobs.ParallelFor(0, n, c, [&](size_t b, size_t e){ for(...) store.Despawn(i); 
 ```cpp
 struct CrowdConfig { int count, capacity; CrowdMesh mesh; CrowdShading shading; float height, colliderRadius; };
 inline constexpr CrowdConfig kCrowdBoxes  { 600, 1024, CrowdMesh::Cube,  CrowdShading::Smooth, 0.5f, 0.30f };
-inline constexpr CrowdConfig kCrowdZombies{ 5000, 8192, CrowdMesh::Model, CrowdShading::Toon,  1.8f, 0.50f };
+inline constexpr CrowdConfig kCrowdZombies{ 16384, 16384, CrowdMesh::Model, CrowdShading::Toon,  1.8f, 0.50f };
 inline constexpr CrowdConfig kActiveCrowd = kCrowdZombies;   // ← 이 줄만 바꾸면 스왑
 static_assert(kActiveCrowd.capacity >= kActiveCrowd.count, ...);   // 슬롯 부족 방지
 ```

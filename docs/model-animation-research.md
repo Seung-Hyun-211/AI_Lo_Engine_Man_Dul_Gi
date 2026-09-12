@@ -118,13 +118,15 @@ sampler.Evaluate(model.skeleton, model.animations[0], timeSeconds, skin);
 - **강체 부착 서브메시**: Unity-chan 의 `MTH_DEF`/`EYE_DEF`/`EL_DEF`/`BLW_DEF`/`eye_*`/`head_back` 은 스킨 웨이트가 없고 head 노드에 자식으로 매달려 있다. `BuildMesh` 가 스킨 없는 메시의 가장 가까운 조상 본을 `ModelMesh::attachBone` 에 기록하고, `ModelMeshPass3D` 가 그 서브메시를 `SubMesh::rigidBone` 로 표시해 웨이트 없이 그 본의 스킨 매트릭스 하나로 전 정점을 변환한다(`SkinAndUpload`). 부착 본이 다른 스킨 메시에서 쓰여 `inverseBind` 가 채워져 있어야 정확하다. 안 하면 얼굴만 T포즈 위치에 남는다(2025-09 데모 버그, 수정됨).
 - **클립 선두 프레임 트림**: Unity-chan 클립 take 는 `time_begin` 이 실제 모션보다 한 프레임 앞이라 프레임 0 이 바인드(T)포즈 → 루프·상태 전환마다 1프레임 T포즈 팝. `BakeClip` 이 `Skeleton` 인자를 받아 "모든 트랙의 첫 키가 바인드 로컬 TRS 와 일치" 할 때만 선두 키를 버리고 시간·duration 을 재기준한다(정상적으로 rest 에서 시작하는 클립은 건드리지 않음).
 
-### 5.3 애니메이션 상태 — 설계, 조건부 재생은 구현됨 (§5.3a)
+### 5.3 애니메이션 상태 — 조건부 재생 + 크로스페이드 구현됨 (§5.3a)
 
-- **크로스페이드 블렌딩**: 두 클립을 각각 평가해 본별 `math::Slerp`(회전) + lerp(T/S), 가중치 `blend∈[0,1]`. `AnimationSampler` 에 `EvaluateBlend(skelA, clipA, tA, clipB, tB, blend, out)` 추가. — 미구현.
+- **크로스페이드 블렌딩** — ✅ **구현됨**: `AnimationSampler::EvaluateBlended`(두 클립을 각각 평가해 본별 `math::Slerp`(회전) + lerp(T/S), 가중치 `blend∈[0,1]`) + `CharacterAnimationState`(`Pose()` 가 상태 전환 시 0.15s 동안 `from*`/`blend` 를 채움). `Scene3D::ModelDraw::animFrom*`/`animBlend` 로 스냅샷에 값 전달. [roadmap.md](roadmap.md) §2.1.
 - **애디티브**: `delta = clip_additive(t) * bind⁻¹` 를 베이스 포즈에 곱. 상체 조준 위 걷기 등. — 미구현.
 - **본 마스크**: 본별 가중치 배열로 하반신=locomotion, 상반신=action. — 미구현.
-- **상태 머신**: 아래 §5.3a가 실제로 들어간, 조건부(시간 만료) 전이만 있는 최소 버전이다. 크로스페이드·가중치 블렌딩이 있는 완전한 `AnimatorController`는 여전히 미구현.
-- **루트 모션**: 루트 본의 XZ 변위를 뽑아 캐릭터 트랜스폼에 적용, 포즈에서는 제거. — 미구현.
+- **상태 머신**: §5.3a가 실제로 들어간 버전 — Locomotion(게임플레이 신호) 전이 + 크로스페이드 +
+  파라메트릭 점프([roadmap.md](roadmap.md) §2.1, 점프 아크의 phase 0..1 로 클립 시간 구동). 가중치
+  블렌딩(본 마스크)이 있는 완전한 `AnimatorController`는 여전히 미구현.
+- **루트 모션**: 루트 본의 XZ 변위를 뽑아 캐릭터 트랜스폼에 적용, 포즈에서는 제거. — 미구현([demo-scene.md](demo-scene.md) "알려진 한계"에 시각적 겹침으로 기록).
 
 ### 5.3a 조건부 클립 재생 — 실제 구현 (`game::CharacterAnimationState`)
 
@@ -184,11 +186,11 @@ sampler.Evaluate(model.skeleton, model.animations[0], timeSeconds, skin);
 | `ModelImporter` — 메시/스킨/스켈레톤 | ✅ **실제 FBX 검증됨** (Unity-chan: 23 mesh / 48k vert / 140 bone / 15 skinned. 가중치 합=1 위반 0, 본 index 범위 초과 0, 스켈레톤 위상정렬 OK). `tools/fbx_probe.cpp` 로 확인 |
 | `ModelImporter` — 머티리얼 | ✅ 이름·컬러 추출. `pbr.base_color` 없으면 `fbx.diffuse_color` 폴백 |
 | `ModelImporter` — 애니메이션 bake | ✅ 컴파일. **애니메이션 있는 FBX 로 미검증** (Unity-chan 모델 FBX 엔 클립 없음 — 별도 파일) |
-| `AnimationSampler` (CPU 포즈 평가, loop) | ✅ 컴파일. 실데이터 미검증, 블렌딩 미구현 |
+| `AnimationSampler` (CPU 포즈 평가, loop + `EvaluateBlended` 크로스페이드) | ✅ 컴파일 + 데모에서 매 상태 전환마다 실행 확인. GPU 실측(색상/이음새)은 여전히 미검증(이 컨테이너 GPU 없음) |
 | `ModelMeshPass3D` — 텍스처 + 스키닝 | ✅ FBX 를 시작 시 로드해 VB/IB 생성(스킨드 서브메시는 DYNAMIC). `import::LoadImageFromFile`(png/jpg/tga) 로 디퓨즈 텍스처 → SRV + linear-wrap 샘플러(V flip + alpha cutout). 머티리얼→파일은 FBX ref basename 우선, 없으면 이름 테이블. **CPU 스키닝**(§5.2a): `animClipIndex`/`animClipTime` 이 있으면 매 프레임 `AnimationSampler::Evaluate` + LBS 로 정점 재계산 후 `Map/Unmap` 업로드, 없으면 기존 바인드 포즈 그대로. 셰이더 변경 없음. 크리즈 라인은 바인드 포즈 고정(한계) |
 | 클립 리타깃 로딩 (`import::LoadAnimationClipsFromFile`) | ✅ 본 이름 매칭으로 클립 전용(메시 없는) FBX를 대상 스켈레톤에 구움. Unity-chan 26개 클립(`render/r3d/CharacterAnimationClips.h`)에 사용 |
 | `SkinnedMeshPass3D` (새 GPU 스킨 패스, §5.2 원안) | ❌ 설계만 — 실제로는 §5.2a 의 CPU 경로가 대신 구현됨. 인스턴스 여럿을 각자 다른 애니메이션으로 세우려면 여전히 필요 |
-| 조건부 클립 재생 (`game::CharacterAnimationState`) | ✅ §5.3a — 타이머 조건의 라운드로빈만. 크로스페이드/블렌딩/루트 모션은 여전히 ❌ 설계만 (§5.3) |
+| 조건부 클립 재생 + 크로스페이드 (`game::CharacterAnimationState`) | ✅ §5.3a — 게임플레이 신호 기반 전이 + 0.15s 크로스페이드 + 파라메트릭 점프. 애디티브/본 마스크/루트 모션은 여전히 ❌ 설계만 (§5.3) |
 | 텍스처 베이킹 애니메이션 (본 행렬 텍스처 / VAT) | ❌ 연구·설계만 (§5.5) — 군중/다수 인스턴스용, 캐릭터 소수면 §5.2a 로 충분 |
 
 관찰: Unity-chan FBX 는 단위가 **cm** (키 ≈156 유닛). `ImportOptions::scale = 0.01` 로 미터화. 텍스처 경로는 원본 `.psd` 참조 (stale) — 실제 `.tga` 는 FBX 옆에. 에셋 경로 해석기는 별도 과제.
@@ -237,15 +239,15 @@ sampler.EvaluateBindPose(model.skeleton, skinMatrices);
 ### 캐릭터에 애니메이션 재생 붙이기 (실제로 이렇게 돼 있다)
 
 1. 클립 목록을 `render/r3d/CharacterAnimationClips.h` 처럼 데이터 전용 헤더로 선언(`{name, file, holdSeconds}`). `ModelMeshPass3D::LoadModel` 이 스켈레톤 로드 직후 이 표를 순회하며 `import::LoadAnimationClipsFromFile` 로 굽는다.
-2. 재생 조건은 `game::CharacterAnimationState`(§5.3a) 같은 작은 클래스에 캡슐화 — `Tick(fixedDelta)` 가 조건을 보고 `ClipIndex()`/`ClipTime()` 을 갱신. `Simulation` 이 고정 스텝마다 `Tick` 을 부른다.
-3. `SnapshotBuilder` 가 `ModelDraw::animClipIndex = simulation.HeroAnimClipIndex(); animClipTime = simulation.HeroAnimClipTime();` 로 값만 복사.
-4. 그 이상은 아무것도 할 필요 없다 — `ModelMeshPass3D` 가 그 값을 보고 스스로 스킨해서 그린다.
+2. 재생 상태는 `game::CharacterAnimationState`(§5.3a) 에 캡슐화 — 매 고정 스텝 `Update(dt, Locomotion)`(시간 기반) 또는 `UpdateParametric(dt, Locomotion, phase01)`(게이지/아크 기반, 점프가 이 경로) 를 부른다. 상태가 바뀌면 내부적으로 크로스페이드를 시작하고, `Pose()` 가 그 결과(`AnimPose{clipIndex, clipTime, playMode, from*, blend}`)를 값으로 낸다. `Simulation::StepOneActor` 가 고정 스텝마다 이걸 부른다.
+3. `SnapshotBuilder` 가 `actor.anim.Pose()` 의 각 필드를 `ModelDraw::animClipIndex`/`animClipTime`/`animPlayMode`/`animParametric`/`animFrom*`/`animBlend` 에 값으로 복사.
+4. 그 이상은 아무것도 할 필요 없다 — `ModelMeshPass3D` 가 그 값을 보고 스스로 (필요하면 두 클립을 `EvaluateBlended` 로 섞어) 스킨해서 그린다.
 
 새 캐릭터를 여러 마리(각자 다른 애니메이션) 세우고 싶다면 이 경로로는 안 된다 — `ModelMeshPass3D` 는 여전히 "one model, one shared VB set"이다. 그때는 §5.2 의 진짜 `SkinnedMeshPass3D`(인스턴스별 작은 본 팔레트만 스냅샷에 싣는 GPU 경로)로 넘어간다.
 
-### 조건 바꾸기 (라운드로빈 → 실제 게임플레이)
+### Locomotion 전이 조건 바꾸기
 
-`CharacterAnimationState::Tick` 의 조건(`m_holdElapsed >= holdSeconds`)만 실제 신호로 바꾸면 된다 — 예: 이동 중이면 walk 클립 유지, 멈추면 wait 로 전환. `ClipIndex()`/`ClipTime()` 을 읽는 `Simulation`/`SnapshotBuilder`/`ModelMeshPass3D` 쪽은 손댈 필요가 없다(조건과 재생 로직이 분리돼 있다는 게 이 구조의 핵심).
+지금은 이미 실제 게임플레이 신호다(§5.3a) — `Simulation::StepOneActor` 가 접지·평면 속도·Shift 로 `Locomotion` 을 결정해 `Update`/`UpdateParametric` 에 넘긴다. 조건을 바꾸려면 그 결정 로직만 고치면 된다. `Pose()`/`ClipIndex()`/`ClipTime()` 을 읽는 `Simulation`/`SnapshotBuilder`/`ModelMeshPass3D` 쪽은 손댈 필요가 없다(조건과 재생 로직이 분리돼 있다는 게 이 구조의 핵심). 새 `Locomotion` 값을 늘리려면 `CharacterAnimationState.h` 의 enum + `ClipFor`/`PlayModeFor` 매핑 한 줄씩([demo-scene.md](demo-scene.md) "다른 클립 쓰기").
 
 ### 텍스처 베이킹 애니메이션 사용 (구현 후, 인스턴스가 많을 때만)
 

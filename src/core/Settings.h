@@ -34,8 +34,9 @@ namespace engine::core
         float musicVolume{ 1.0f };
         float sfxVolume{ 1.0f };
 
-        // 0.1..3.0 / bool. Stored only - no mouse-driven camera or aim exists
-        // yet to read these.
+        // 0.1..3.0 / bool. Stored only - a mouse-driven camera exists now
+        // (Simulation::UpdateCameraLook), but it still uses its own hardcoded
+        // kMouseSensitivity and never reads these (docs/game-settings.md §1).
         float mouseSensitivity{ 1.0f };
         bool invertMouseY{ false };
 

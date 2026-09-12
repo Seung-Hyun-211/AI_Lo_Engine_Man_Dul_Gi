@@ -72,10 +72,12 @@ SnapshotBuilder (game/)
 
 ## 데모 씬 2 — 절벽 위 조망 + 시뮬레이션 군중
 
-`Simulation::kDemoScene` (`static constexpr int`, 기본 `2`) 로 고른다. `1` = 위에서 설명한
-로컬 배속 액터 3인 + 작은 슬랩. `2` = **같은 플레이어**가 메사(mesa) 위에 서서 앞쪽 넓은
-평지를 내려다보고, 그 아래에서 다수의 경량 개체(`SimAgent`)가 배회한다. 대규모 디펜스
-장르([synopsis.md](synopsis.md))의 "다수 오브젝트" 파이프라인 씨앗.
+`Simulation::kDemoScene` (`static constexpr int`, **지금 기본값 `3`** — 그래픽 작업용) 로
+고른다. `1` = 위에서 설명한 로컬 배속 액터 3인 + 작은 슬랩. `2` =
+**같은 플레이어**가 메사(mesa) 위에 서서 앞쪽 넓은 평지를 내려다보고, 그 아래에서 다수의
+경량 개체(`SimAgent`)가 배회한다. 대규모 디펜스 장르([synopsis.md](synopsis.md))의
+"다수 오브젝트" 파이프라인 씨앗. `3` = 크라우드 없는 그림자/조명 쇼케이스 — 정적 씬이라
+이 문서보다 [shadows.md](shadows.md) "씬 3" 이 계약.
 
 ```text
 Simulation (game/)
@@ -131,17 +133,26 @@ SnapshotBuilder (game/)
 
 ### 사용 방법 (How to use)
 
-- **씬 전환**: `src/game/Simulation.h` 의 `Simulation::kDemoScene` 를 `1` 또는 `2` 로. 리빌드.
-  (런타임 토글이 필요해지면 생성자 인자로 승격 — 지금은 YAGNI.)
+- **씬 전환**: `src/game/Simulation.h` 의 `Simulation::kDemoScene` 를 `1`/`2`/`3` 으로. 리빌드.
+  (런타임 토글이 필요해지면 생성자 인자로 승격 — 지금은 YAGNI.) 지금 커밋된 기본값은 `3`
+  (그림자/조명 쇼케이스, [shadows.md](shadows.md) "씬 3") — 크라우드·폭발 데모를 보려면 `2` 로.
 - **군중 설정 = `game/CrowdConfig.h` 의 `kActiveCrowd`** (한 줄). 프리셋: `kCrowdBoxes`(600 큐브,
-  원래 데모) / `kCrowdZombies`(5000, `Zombie1.FBX` + VAT + **`CrowdShading::Toon` 기본**).
+  원래 데모) / `kCrowdZombies`(16384/16384, `Zombie1.FBX` + VAT + **`CrowdShading::Toon` 기본**,
+  규모 실험치 — 실측 미검증).
   `CrowdConfig{count, capacity, mesh, shading, height, colliderRadius}` — `Simulation`(스폰·풀·
   콜라이더)·`SnapshotBuilder`(메시·셰이더·높이·피벗)가 전부 이걸 읽는다. `capacity >= count` 는
   `static_assert` 로 강제. `shading`(`Smooth`=`mesh_instanced.hlsl` / `Toon`=`mesh_instanced_toon.hlsl`,
   엔진 셀 룩)이 배치 셰이더를 고른다(§9.7). 모델 파일은 `MeshPass3D.cpp` 의 `kCrowdModelFbx`.
   상세 [instanced-rendering.md](instanced-rendering.md) §9.5·§9.7.
-  렌더는 배치 1~2개 = `DrawIndexedInstanced`, 상한 `MeshPass3D::kMaxInstances`(16384). 좀비
-  ~4.8k tris → 5000 ≈ 24M tris/프레임(실 GPU 여유, WARP 는 슬라이드쇼 — **우상단 FPS 로 확인**).
+  렌더는 배치 1~2개 = `DrawIndexedInstanced`, 상한 `MeshPass3D::kMaxInstances`(32768, count 의
+  2배 여유). 좀비 ~4.8k tris → 16384 ≈ 79M tris/프레임(실 GPU 기준 미실측 — WARP 는 슬라이드쇼,
+  **우상단 FPS 로 확인**).
+- **폭발 넉백 데모(씬 2 전용)**: `Application` 이 InGame 진입 5초 뒤 자동 1회, 이후 `F` 키로
+  재발파 — `Simulation::TriggerExplosion(center, radius, power)` 가 반경 내 `SimAgent` 에게
+  바깥+위 임펄스(거리 선형 감쇠)를 줘 포물선으로 튕겨나가게 한다(`SimAgent::vel/airborne`,
+  `StepSimAgents` 가 낙하 적분). 좌표·반경·세기는 `Application.cpp` 익명 네임스페이스의
+  `kBlastCenter/Radius/Power/kAutoBlastDelay`. `kDemoScene != 2` 면 `TriggerExplosion` 자체가
+  no-op. 실제 게임에서는 타이머/키 대신 게임플레이 이벤트(투사체 충돌, 타워 AoE)가 불러야 한다.
 - **FPS 표시**: `Application` 이 `1/delta` EMA(`m_fpsSmoothed`) → `SnapshotBuilder::Build(fps)` →
   `ui::DrawRect`+`DrawText` 우상단(모든 화면 위). 끄려면 `Build` 호출에서 `fps` 를 0 으로.
 - **좀비 메시**: `Zombie1.FBX`(정적 bind pose, T포즈). **Z-up** 으로 들어와서(ufbx axis target

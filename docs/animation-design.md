@@ -28,10 +28,11 @@ anim/
 
 | 구성요소 | 상태 |
 |---|---|
-| `anim::AnimationSampler`(CPU 포즈 평가, LBS 준비) | ✅ 구현됨 |
-| Unity-chan 클립 재생 (CPU 스키닝 + 조건부 라운드로빈) | ✅ 구현됨 — `model-animation-research.md` §5.2a/§5.3a. `SkinnedMeshPass3D`(§5.2 원안, GPU 스킨 새 패스)가 아니라 기존 `ModelMeshPass3D` 를 CPU 스킨으로 확장한 형태 |
+| `anim::AnimationSampler`(CPU 포즈 평가, LBS 준비 + `EvaluateBlended` 크로스페이드) | ✅ 구현됨 |
+| Unity-chan 클립 재생 (CPU 스키닝 + 게임플레이 신호 기반 Locomotion 전환) | ✅ 구현됨 — `model-animation-research.md` §5.2a/§5.3a. `SkinnedMeshPass3D`(§5.2 원안, GPU 스킨 새 패스)가 아니라 기존 `ModelMeshPass3D` 를 CPU 스킨으로 확장한 형태 |
+| 재생 모드(`anim::PlayMode{Loop,Once,PingPong}`) + 크로스페이드(0.15s, 로컬 TRS lerp) + 파라메트릭 점프(`UpdateParametric`) | ✅ 구현됨 — `game::CharacterAnimationState`, [roadmap.md](roadmap.md) §2.1 |
 | `SkinnedMeshPass3D`(GPU 스키닝 전용 새 패스, §5.2 원안) | ❌ 설계만 — 인스턴스 여럿을 각자 다른 애니메이션으로 세울 때 필요 |
-| 크로스페이드/애디티브/본 마스크/루트 모션 | ❌ 설계만 |
+| 애디티브/본 마스크/루트 모션 | ❌ 설계만 |
 | 텍스처 베이킹 애니메이션(본 행렬 텍스처 / VAT, 군중용) | ❌ 연구·설계만 — `model-animation-research.md` §5.5 |
 
 이 문서가 추가하는 것은 하나: 상태 머신을 만들 때 **3D 전용으로 새로 짜지 말고** §3의 제네릭 `anim::core::AnimatorController<TClip>`을 3D 클립 타입으로 인스턴스화해서 쓴다(2D와 구조를 맞춰 나중에 로직 두 벌을 유지하지 않도록).
