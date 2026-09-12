@@ -104,6 +104,44 @@ namespace engine::game
                         m_simulation.TriggerExplosion(kBlastCenter, kBlastRadius, kBlastPower);
                         m_audio.PlaySfx("assets/audio/blip.wav");
                     }
+                    // Rifle (docs/defense-combat-design.md §5): left click fires
+                    // at whatever UpdateCrowdQueries() last put in the look-ray.
+                    if (m_input.MousePressed(0))
+                    {
+                        m_simulation.FireWeapon(WeaponKind::Rifle);
+                        m_audio.PlaySfx("assets/audio/blip.wav");   // demo hook - no muzzle SFX yet
+                    }
+                    // Mortar/mine placement (docs/defense-combat-design.md §4):
+                    // '1'/'2' are a demo stand-in for the real prep-phase UI
+                    // (§0.4, not built yet) - both place at the current
+                    // look-ray ground hit, same aim source as the rifle.
+                    if (m_input.KeyPressed('1'))
+                    {
+                        m_simulation.PlaceOrdnance(OrdnanceKind::Mortar);
+                        m_audio.PlaySfx("assets/audio/blip.wav");
+                    }
+                    if (m_input.KeyPressed('2'))
+                    {
+                        m_simulation.PlaceOrdnance(OrdnanceKind::Mine);
+                        m_audio.PlaySfx("assets/audio/blip.wav");
+                    }
+                    // Barbed wire (docs/defense-combat-design.md §6): '3', same
+                    // demo-key convention as '1'/'2' above.
+                    if (m_input.KeyPressed('3'))
+                    {
+                        m_simulation.PlaceSlowZone();
+                        m_audio.PlaySfx("assets/audio/blip.wav");
+                    }
+                    // Flamethrower (docs/defense-combat-design.md §7): right
+                    // mouse HELD, not a press edge - the cone re-applies every
+                    // frame it's down. No continuous-loop SFX yet
+                    // (audio-design.md is one-shot/looping-clip only, no
+                    // per-frame-safe loop start/stop API), so this stays
+                    // silent for now rather than spamming PlaySfx per frame.
+                    if (m_input.MouseDown(1))
+                    {
+                        m_simulation.FireWeapon(WeaponKind::Flamethrower);
+                    }
 #endif
                     if (steps > 0)
                     {

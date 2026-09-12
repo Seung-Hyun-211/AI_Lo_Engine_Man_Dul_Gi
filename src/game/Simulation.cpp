@@ -110,6 +110,40 @@ namespace engine::game
         agent.speed = 0.8f + std::fmod(seed, 5.0f) * 0.35f;              // 0.8 .. 2.2 m/s
         agent.phase = seed * 0.37f;
         agent.animTime = std::fmod(seed * 0.618f, 3.0f);                 // desync the walk cycle
+        agent.spawnPoint = agent.pos;   // returns here on death/goal-reach (§4.5); health/reachedGoal
+                                        // are already spawn-ready from ObjectPool::Acquire's Reset()
+    }
+
+    void Simulation::RespawnAgentInPlace(SimAgent& agent)
+    {
+        agent.pos = agent.spawnPoint;
+        agent.vel = math::Vec3{};
+        agent.airborne = false;
+        agent.health = kAgentMaxHealth;
+        agent.burnDps = 0.0f;
+        agent.burnTimeLeft = 0.0f;   // a fresh spawn doesn't inherit the old slot's burn (§7)
+        // reachedGoal is NOT touched here - a caller flagging it (StepSimAgents'
+        // goal-reach branch) sets it right after this call returns, and it is
+        // the post-Wait() pass that clears it once consumed (rule 6).
+        agent.heading = std::atan2(kCrowdGoal.x - agent.pos.x, kCrowdGoal.z - agent.pos.z);
+    }
+
+    void Simulation::DamageAgent(std::uint32_t slot, float amount)
+    {
+        if constexpr (kDemoScene != 2) { return; }
+        else
+        {
+            if (amount <= 0.0f || slot >= m_agents.Capacity()) return;
+            SimAgent& a = m_agents.Slots()[slot];
+            if (a.health <= 0.0f) return;   // already dead this frame (e.g. explosion mid-air)
+            a.health -= amount;
+            if (a.health <= 0.0f)
+            {
+                ++m_killCount;
+                SpawnGibs(a.pos);         // before RespawnAgentInPlace overwrites pos (§3); safe here - main thread, no worker in flight
+                RespawnAgentInPlace(a);   // no ragdoll fling for a plain hit - that is TriggerExplosion's job
+            }
+        }
     }
 
     void Simulation::SpawnSimAgents()
@@ -203,7 +237,9 @@ namespace engine::game
         StepCollision2D();
 #if defined(ENGINE_WITH_3D)
         StepActors(fixedDelta, /*globalPaused=*/false, intent);
+        StepOrdnance(fixedDelta);   // before StepSimAgents so a trigger this step still affects this step's crowd integration
         StepSimAgents(fixedDelta);
+        StepGibs(fixedDelta);
         // Crowd colliders + look-ray + overlap tint run ONCE per frame from
         // Application::UpdateCrowdQueries(), not here - they are O(crowd) and
         // render-only, so per-sub-step made a slow frame spiral.
@@ -392,7 +428,7 @@ namespace engine::game
         // unique slot, so writes to slots[active[k]] never overlap (invariant 6).
         // This is the seed of the mass-object path (docs/instanced-rendering.md §6).
         m_jobs.ParallelFor(0, active.size(), 32,
-            [slots, &active, fixedDelta](std::size_t begin, std::size_t end)
+            [slots, &active, fixedDelta, &slowZones = m_slowZones](std::size_t begin, std::size_t end)
             {
                 for (std::size_t k = begin; k < end; ++k)
                 {
@@ -407,12 +443,44 @@ namespace engine::game
                         a.pos = a.pos + a.vel * fixedDelta;
                         if (a.pos.y <= 0.0f)
                         {
-                            a.pos.y = 0.0f;
-                            a.vel = math::Vec3{};
-                            a.airborne = false;
-                            a.heading = std::atan2(a.pos.x, a.pos.z);   // resume walking outward
+                            // TriggerExplosion may have already brought health
+                            // to 0 while airborne - let the fling finish, then
+                            // respawn on landing instead of resuming the walk
+                            // (docs/defense-combat-design.md §3 "왜 이게 죽음 같은가").
+                            if (a.health <= 0.0f)
+                            {
+                                // Gibs need core::ObjectPool::Acquire, unsafe inside a
+                                // worker - flag it (own slot only) for the post-Wait()
+                                // pass below, same pattern as reachedGoal (rule 6).
+                                a.pendingGibPos = a.pos;
+                                a.needsGibSpawn = true;
+                                Simulation::RespawnAgentInPlace(a);
+                            }
+                            else { a.pos.y = 0.0f; a.vel = math::Vec3{}; a.airborne = false; }
                         }
                         continue;
+                    }
+
+                    // Flamethrower DoT (docs/defense-combat-design.md §7): a
+                    // direct health write to this worker's own slot is safe
+                    // (rule 6) - only the shared kill-count/gib hookup below
+                    // defers to the post-Wait() pass. Paused while airborne
+                    // (handled above) so the two death paths never overlap.
+                    if (a.burnTimeLeft > 0.0f)
+                    {
+                        a.burnTimeLeft = std::max(0.0f, a.burnTimeLeft - fixedDelta);
+                        if (a.health > 0.0f)
+                        {
+                            a.health -= Simulation::kFlameDps * fixedDelta;
+                            if (a.health <= 0.0f)
+                            {
+                                a.pendingGibPos = a.pos;
+                                a.needsGibSpawn = true;
+                                a.needsKillCount = true;
+                                Simulation::RespawnAgentInPlace(a);
+                                continue;
+                            }
+                        }
                     }
 
                     a.phase += fixedDelta * 4.0f;
@@ -420,26 +488,72 @@ namespace engine::game
                     // roughly matches its ground movement (kAnimRefSpeed = the
                     // clip's authored travel speed). VAT wraps by frame count.
                     a.animTime += fixedDelta * (a.speed / 1.4f);
-                    // Lazy heading drift so the crowd churns without a RNG.
-                    a.heading += std::sin(a.phase * 0.11f + static_cast<float>(active[k])) * fixedDelta * 0.9f;
+
+                    // Seek the objective (docs/defense-combat-design.md §1) - the
+                    // field has no obstacles, so a straight-line turn-toward is
+                    // enough; a FlowField (horde-design.md) is only worth it once
+                    // there is geometry to route around.
+                    const math::Vec3 toGoal = Simulation::kCrowdGoal - a.pos;
+                    const float distToGoal = math::Length(toGoal);
+                    if (distToGoal <= Simulation::kCrowdGoalRadius)
+                    {
+                        // Reached the objective: respawn now (own slot only,
+                        // safe), then flag it - m_objectiveHealth itself is
+                        // shared state, decremented by the caller after
+                        // Wait() (rule 6), never inside this worker.
+                        Simulation::RespawnAgentInPlace(a);
+                        a.reachedGoal = true;
+                        continue;
+                    }
+
+                    const float targetHeading = std::atan2(toGoal.x, toGoal.z);
+                    float turnDelta = targetHeading - a.heading;
+                    while (turnDelta > kPi) turnDelta -= 2.0f * kPi;
+                    while (turnDelta < -kPi) turnDelta += 2.0f * kPi;
+                    const float maxTurn = Simulation::kAgentSeekTurnRate * fixedDelta;
+                    a.heading += math::Clamp(turnDelta, -maxTurn, maxTurn);
+
+                    // Barbed wire (docs/defense-combat-design.md §6): read-only
+                    // scan, safe from inside a worker (m_slowZones is only ever
+                    // mutated main-thread, before Step() starts - rule 6).
+                    float speedMul = 1.0f;
+                    for (const SlowZone& zone : slowZones)
+                    {
+                        const float zdx = a.pos.x - zone.center.x;
+                        const float zdz = a.pos.z - zone.center.z;
+                        if (zdx * zdx + zdz * zdz <= zone.radius * zone.radius)
+                            speedMul = std::min(speedMul, zone.speedMul);
+                    }
 
                     const math::Vec3 dir{ std::sin(a.heading), 0.0f, std::cos(a.heading) };
-                    a.pos = a.pos + dir * (a.speed * fixedDelta);
+                    a.pos = a.pos + dir * (a.speed * speedMul * fixedDelta);
                     a.pos.y = 0.2f + 0.15f * std::sin(a.phase);   // small bob above the field
-
-                    // Bounce the heading off the field box edges.
-                    if (a.pos.x < -kFieldHalf || a.pos.x > kFieldHalf)
-                    {
-                        a.heading = -a.heading;
-                        a.pos.x = math::Clamp(a.pos.x, -kFieldHalf, kFieldHalf);
-                    }
-                    if (a.pos.z < kFieldAgentZLo || a.pos.z > kFieldAgentZHi)
-                    {
-                        a.heading = kPi - a.heading;
-                        a.pos.z = math::Clamp(a.pos.z, kFieldAgentZLo, kFieldAgentZHi);
-                    }
+                    a.pos.x = math::Clamp(a.pos.x, -kFieldHalf, kFieldHalf);   // loose side rail only
                 }
             }).Wait();
+
+        // Consume this step's "reached the objective" flags (rule 6 - shared
+        // m_objectiveHealth only touched here, serially, after every worker's
+        // Wait()). Same pattern as the churn pass right below.
+        for (const std::uint32_t idx : active)
+        {
+            SimAgent& a = slots[idx];
+            if (a.reachedGoal)
+            {
+                a.reachedGoal = false;
+                m_objectiveHealth = std::max(0.0f, m_objectiveHealth - kObjectiveDamagePerBreach);
+            }
+            if (a.needsGibSpawn)
+            {
+                a.needsGibSpawn = false;
+                SpawnGibs(a.pendingGibPos);
+            }
+            if (a.needsKillCount)
+            {
+                a.needsKillCount = false;
+                ++m_killCount;   // burn-DoT death only (§7) - other death paths already bump this themselves
+            }
+        }
 
         // Demo churn: recycle one crowd member through the pool every N steps so
         // Acquire / Release / stale-handle rejection stay exercised (this is not
@@ -459,7 +573,60 @@ namespace engine::game
         ++m_agentChurnCursor;
     }
 
-    void Simulation::TriggerExplosion(math::Vec3 center, float radius, float power)
+    void Simulation::SpawnGibs(math::Vec3 pos)
+    {
+        if constexpr (kDemoScene != 2) { return; }
+        else
+        {
+            // Deterministic scatter (no <random>, same fmod-hash convention as
+            // SeedAgent), seeded off the running kill count so consecutive
+            // deaths don't reuse the same directions/count.
+            const float seed = static_cast<float>(m_killCount) * 5.437f + 1.0f;
+            const int spread = kZombieGibs.countMax - kZombieGibs.countMin + 1;
+            const int count = kZombieGibs.countMin + static_cast<int>(std::fmod(seed, static_cast<float>(spread)));
+            for (int i = 0; i < count; ++i)
+            {
+                const float s = seed + static_cast<float>(i) * 13.7f;
+                const auto handle = m_gibs.Acquire();
+                GibPiece* g = m_gibs.Get(handle);
+                if (!g) continue;   // pool full - drop this piece, not fatal (visual only)
+
+                const float yaw = std::fmod(s * 2.399963f, 2.0f * kPi);
+                const float speed = kZombieGibs.speedMin + std::fmod(s, 1.0f) * (kZombieGibs.speedMax - kZombieGibs.speedMin);
+                g->pos = pos;
+                g->vel = { std::sin(yaw) * speed, speed * 0.8f + 1.5f, std::cos(yaw) * speed };
+                g->life = kZombieGibs.life;
+                g->selfIndex = handle.index;
+                g->selfGeneration = handle.generation;
+            }
+        }
+    }
+
+    void Simulation::StepGibs(float fixedDelta)
+    {
+        if constexpr (kDemoScene != 2) { return; }
+        else
+        {
+            GibPiece* slots = m_gibs.Slots();
+            // Copy: Release() below swap-removes from the pool's own active
+            // list, which would desync a live range-for over that same list.
+            const std::vector<std::uint32_t> active = m_gibs.ActiveIndices();
+            for (const std::uint32_t idx : active)
+            {
+                GibPiece& g = slots[idx];
+                if (g.pos.y > 0.0f)
+                {
+                    g.vel.y -= kCharGravity * fixedDelta;   // same fall as the player/airborne agents
+                    g.pos = g.pos + g.vel * fixedDelta;
+                    if (g.pos.y <= 0.0f) { g.pos.y = 0.0f; g.vel = math::Vec3{}; }   // lands and stops - reads as debris until life runs out
+                }
+                g.life -= fixedDelta;
+                if (g.life <= 0.0f) m_gibs.Release({ g.selfIndex, g.selfGeneration });
+            }
+        }
+    }
+
+    void Simulation::TriggerExplosion(math::Vec3 center, float radius, float power, float damage)
     {
         if constexpr (kDemoScene != 2) { return; }
         else
@@ -484,6 +651,142 @@ namespace engine::game
                 a.vel.z += nz * power * falloff;
                 a.vel.y += power * falloff * 1.1f + 2.0f;          // upward bias so even the rim lifts off
                 a.airborne = true;
+
+                // Damage reuses the same distance falloff already computed for
+                // knockback (docs/defense-combat-design.md §2). Death while
+                // airborne respawns on landing (StepSimAgents), not here - the
+                // ragdoll fling should still play out before it returns.
+                if (a.health > 0.0f)
+                {
+                    a.health -= damage * falloff;
+                    if (a.health <= 0.0f) ++m_killCount;
+                }
+            }
+        }
+    }
+
+    void Simulation::FireWeapon(WeaponKind kind)
+    {
+        if constexpr (kDemoScene != 2) { return; }
+        else
+        {
+            switch (kind)
+            {
+            case WeaponKind::Rifle:
+                // LookRayResult already IS the hitscan - UpdateCrowdQueries()
+                // built it against last frame's aim (docs/defense-combat-design.md
+                // §5). A miss (m_lookRay.hit == false) is simply a whiffed shot.
+                if (m_lookRay.hit) DamageAgent(m_lookRay.agentSlot, kRifleDamage);
+                break;
+            case WeaponKind::Mortar:
+            case WeaponKind::Mine:
+                break;   // placed via PlaceOrdnance instead (§4/§8 - not an instant fire-and-forget)
+            case WeaponKind::WireFence:
+                break;   // placed via PlaceSlowZone instead (§6/§8, same reasoning as Mortar/Mine)
+            case WeaponKind::Flamethrower:
+                // §7 - continuous: Application calls FireWeapon every frame
+                // the trigger is held, not just on the press edge like Rifle.
+                ApplyFlameCone(m_lookRay.origin, m_lookRay.dir, kFlameRange, kFlameHalfAngleCos);
+                break;
+            }
+        }
+    }
+
+    void Simulation::PlaceOrdnance(OrdnanceKind kind)
+    {
+        if constexpr (kDemoScene != 2) { return; }
+        else
+        {
+            if (!m_lookRay.hit) return;   // nothing to place on
+            const auto handle = m_ordnance.Acquire();
+            PlacedOrdnance* o = m_ordnance.Get(handle);
+            if (!o) return;   // pool full - drop the placement, not fatal
+
+            o->kind = kind;
+            o->pos = m_lookRay.point;
+            if (kind == OrdnanceKind::Mortar)
+            {
+                o->fuseSeconds = kMortarFuseSeconds;
+                o->radius = kMortarRadius;
+                o->power = kMortarPower;
+                o->damage = kMortarDamage;
+            }
+            else   // Mine
+            {
+                o->fuseSeconds = 0.0f;   // proximity trigger, not a timer - see StepOrdnance
+                o->radius = kMineRadius;
+                o->power = kMinePower;
+                o->damage = kMineDamage;
+            }
+            o->selfIndex = handle.index;
+            o->selfGeneration = handle.generation;
+        }
+    }
+
+    void Simulation::StepOrdnance(float fixedDelta)
+    {
+        if constexpr (kDemoScene != 2) { return; }
+        else
+        {
+            PlacedOrdnance* slots = m_ordnance.Slots();
+            // Copy: Release() below swap-removes from the pool's own active
+            // list, which would desync a live range-for over that same list
+            // (same reasoning as StepGibs).
+            const std::vector<std::uint32_t> active = m_ordnance.ActiveIndices();
+            for (const std::uint32_t idx : active)
+            {
+                PlacedOrdnance& o = slots[idx];
+                bool trigger = false;
+                if (o.kind == OrdnanceKind::Mortar)
+                {
+                    o.fuseSeconds -= fixedDelta;
+                    trigger = o.fuseSeconds <= 0.0f;
+                }
+                else   // Mine: trigger the moment anything living enters its radius
+                {
+                    for (const std::uint32_t agentIdx : m_agents.ActiveIndices())
+                    {
+                        const SimAgent& a = m_agents.Slots()[agentIdx];
+                        const float dx = a.pos.x - o.pos.x;
+                        const float dz = a.pos.z - o.pos.z;
+                        if (dx * dx + dz * dz <= o.radius * o.radius) { trigger = true; break; }
+                    }
+                }
+
+                if (!trigger) continue;
+                TriggerExplosion(o.pos, o.radius, o.power, o.damage);
+                m_ordnance.Release({ o.selfIndex, o.selfGeneration });
+            }
+        }
+    }
+
+    void Simulation::PlaceSlowZone()
+    {
+        if constexpr (kDemoScene != 2) { return; }
+        else
+        {
+            if (!m_lookRay.hit) return;                      // nothing to place on
+            if (m_slowZones.size() >= kMaxSlowZones) return;  // fixed cap (§6) - drop, not fatal
+            m_slowZones.push_back({ m_lookRay.point, kWireRadius, kWireSpeedMul });
+        }
+    }
+
+    void Simulation::ApplyFlameCone(math::Vec3 origin, math::Vec3 dir, float range, float halfAngleCos)
+    {
+        if constexpr (kDemoScene != 2) { return; }
+        else
+        {
+            SimAgent* slots = m_agents.Slots();
+            for (const std::uint32_t idx : m_agents.ActiveIndices())
+            {
+                SimAgent& a = slots[idx];
+                const math::Vec3 toAgent = a.pos - origin;
+                const float dist = math::Length(toAgent);
+                if (dist > range || dist < 1e-4f) continue;
+                if (math::Dot(toAgent * (1.0f / dist), dir) < halfAngleCos) continue;   // outside the cone
+
+                a.burnDps = kFlameDps;
+                a.burnTimeLeft = kFlameRefreshSeconds;   // refill - the burn outlasts release by this much
             }
         }
     }

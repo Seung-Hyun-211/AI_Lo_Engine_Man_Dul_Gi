@@ -291,6 +291,10 @@ namespace engine::game
                 {
                     inst.colorRgba = PackRgba(1.0f, 0.82f, 0.15f, 1.0f);   // look-ray target (gold)
                 }
+                else if (a.burnTimeLeft > 0.0f)
+                {
+                    inst.colorRgba = PackRgba(1.0f, 0.35f, 0.05f, 1.0f);   // burning (§7)
+                }
                 else if (slotIdx < touching.size() && touching[slotIdx] != 0)
                 {
                     inst.colorRgba = PackRgba(1.0f, 0.42f, 0.34f, 1.0f);   // overlapping a neighbour (red)
@@ -318,6 +322,49 @@ namespace engine::game
                 scene.meshInstances.insert(scene.meshInstances.end(),
                                            lodBucket[lod].begin(), lodBucket[lod].end());
                 scene.instanceBatches.push_back(batch);
+            }
+
+            // Gib pieces (docs/defense-combat-design.md §3): a handful of live
+            // pieces at once, so plain non-instanced MeshDraw entries (own
+            // batch by construction) are simplest - no new InstanceBatch
+            // bookkeeping for a count this small. Cube stand-in per GibConfig.h
+            // until real limb/head meshes exist.
+            for (const std::uint32_t idx : simulation.Gibs().ActiveIndices())
+            {
+                const GibPiece& g = simulation.Gibs().Slots()[idx];
+                render::MeshDraw draw{};
+                draw.mesh = render::MeshId::Cube;
+                draw.world = math::Scaling({ 0.18f, 0.18f, 0.18f }) * math::Translation(g.pos);
+                draw.color = { 0.42f, 0.12f, 0.10f, 1.0f };   // dark red - reads as gore at this size
+                scene.meshDraws.push_back(draw);
+            }
+
+            // Placed mortars/mines (docs/defense-combat-design.md §4): same
+            // "small count, plain MeshDraw" reasoning as the gibs above - no
+            // aim-preview visual yet (§8/§10 step 4's "조준 프리뷰" is deferred,
+            // same YAGNI call as skipping WeaponIntent for now).
+            for (const std::uint32_t idx : simulation.Ordnance().ActiveIndices())
+            {
+                const PlacedOrdnance& o = simulation.Ordnance().Slots()[idx];
+                render::MeshDraw draw{};
+                draw.mesh = render::MeshId::Cube;
+                draw.world = math::Scaling({ 0.3f, 0.3f, 0.3f }) * math::Translation(o.pos);
+                draw.color = o.kind == OrdnanceKind::Mortar
+                    ? math::Color{ 1.0f, 0.55f, 0.1f, 1.0f }    // orange - counting down
+                    : math::Color{ 0.85f, 0.1f, 0.1f, 1.0f };   // red - armed, proximity trigger
+                scene.meshDraws.push_back(draw);
+            }
+
+            // Barbed wire slow zones (docs/defense-combat-design.md §6): flat
+            // static patches, no rotation/animation - one MeshDraw each, same
+            // "small count" reasoning as gibs/ordnance above.
+            for (const SlowZone& zone : simulation.SlowZones())
+            {
+                render::MeshDraw draw{};
+                draw.mesh = render::MeshId::Cube;
+                draw.world = math::Scaling({ zone.radius, 0.05f, zone.radius }) * math::Translation(zone.center);
+                draw.color = { 0.35f, 0.30f, 0.20f, 1.0f };   // dull rusty brown
+                scene.meshDraws.push_back(draw);
             }
 
             // Debug draw: player AABB + a yellow line along the cliff edge the

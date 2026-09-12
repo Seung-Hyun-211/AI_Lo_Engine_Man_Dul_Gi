@@ -9,8 +9,17 @@
 ## 1. 상태
 
 ```cpp
-enum class GameState { Title, InGame };
+enum class GameState { Title, InGame, WaveResults };
 ```
+
+`WaveResults`(설계만 — [defense-combat-design.md](defense-combat-design.md) "정산 화면")는 바로
+아래 "향후 필요하면"의 실제 사례: 웨이브 종료 시 전체화면으로 전환하는 요약 화면. `InGame` 과
+똑같이 `SetScreen`(오버레이 아님 — Settings 처럼 다른 화면 위에 얹는 게 아니라 그 자체가
+화면), `Simulation::Step` 은 Title 과 동일하게 건너뛴다(§2 게이팅 조건에 `WaveResults` 도 추가).
+전투(Combat)와 정비(Prep)는 **둘 다 `GameState::InGame`** 로 남는다 — 둘 다 `Simulation::Step`
+이 계속 돌아야 하기 때문(플레이어가 정비 중에도 걸어다니며 배치함); 그 안의 세부 모드
+(`Simulation::MatchPhase{Combat,Prep}`)는 `Simulation` 이 소유한다(`GameState` 는 "화면·스텝
+게이팅"만 알고 게임 로직의 세부 모드는 모른다 — SRP, `defense-combat-design.md` 가 그 계층).
 
 `game::Application`이 `m_state`로 소유한다. **Settings는 별도 상태가 아니다** — `ui::UIContext`의 모달 오버레이(`SetOverlay`/`ClearOverlay`)로 Title 위에도 InGame 위에도 얹을 수 있다("타이틀 화면에서, 인게임 화면에서 설정창을 열어" 요구사항이 그대로 이 구조다). 오버레이가 있으면:
 
@@ -32,6 +41,11 @@ enum class GameState { Title, InGame };
      │   Settings (모달 오버레이)     │  ← 어느 화면 위에도 얹힘, CLOSE/ESC로 복귀
      └─────────────────────────────┘
 ```
+
+`InGame` 진입 뒤의 세부 루프(전투 60초 → 정산 → 정비 60초 → 다음 웨이브, 무한 반복)는
+`GameState` 전환 없이 `InGame` 안에서 도는 게임플레이 상태 머신이다 — `WaveResults` 만 화면이
+바뀌므로 `GameState` 값을 하나 쓴다. 다이어그램·판정 로직은 [defense-combat-design.md](defense-combat-design.md)
+§0 이 계약.
 
 ## 2. `Application`이 조율하는 방식
 
@@ -62,6 +76,8 @@ void Application::EnterInGame()
 if (m_state == GameState::InGame && !m_ui.HasOverlay())
     for (int step = 0; step < steps; ++step)
         m_simulation.Step(m_timestep.Step(), intent);
+// WaveResults 는 Title 처럼 이 조건에 안 걸림 — 조건에 새 상태를 추가할 필요가 없다(||가 아니라
+// InGame만 체크하므로 나머지 전부는 이미 "정지"로 취급됨).
 ```
 
 `m_timestep.Advance(delta)`는 이 조건과 무관하게 항상 호출한다 — 내부 누적기가 알아서 백로그를 버리므로(`FixedTimestep::Advance`, `docs/time-design.md`) 정지 중에도 안전하다. 정지 중엔 스냅샷만 계속 만들어 제출한다(UI가 매 프레임 다시 그려져야 하므로).

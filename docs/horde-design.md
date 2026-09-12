@@ -13,7 +13,9 @@
 관련: [model-animation-research.md](model-animation-research.md) §5.5(VAT 원리), §5.2a(현행 CPU 스킨),
 [multithreaded_game_engine_architecture.md](multithreaded_game_engine_architecture.md),
 [time-design.md](time-design.md), [collider-design.md](collider-design.md),
-[command-playbook.md](command-playbook.md) 2c(브로드페이즈)·3b(새 패스), [roadmap.md](roadmap.md).
+[command-playbook.md](command-playbook.md) 2c(브로드페이즈)·3b(새 패스), [roadmap.md](roadmap.md),
+[defense-combat-design.md](defense-combat-design.md)(60초 웨이브·HP/데미지 — §4.5 무한 리스폰이
+그 문서의 소비처).
 
 ---
 
@@ -118,6 +120,56 @@ namespace engine::game
   봉긋 솟게 하고, 앞줄을 타 넘은 개체가 벽 너머 셀로 떨어지면 그 셀 방향장을 다시 따라간다.
   네비메시·경로탐색 없이 밀도만으로 "쏟아짐" 이 나온다.
 
+### 3.4 영구 누적 — 개선안: 높이 필드 (모래더미가 "쌓인 채로 남게")
+
+§3.3 의 `climb` 항은 **그 순간의 이웃 밀도**에만 반응한다 — 정직한 반응이지만, 카메라가 다른
+곳을 보다가 돌아오면 덩어리가 "기억"을 안 하고 다시 밀도부터 쌓아야 한다. 실제로 벽 앞에
+시체/좀비가 눌려 쌓인 더미처럼 **한번 쌓이면 계속 거기 있는** 느낌을 원하면, 순간 밀도 대신
+**영구(또는 서서히만 줄어드는) 높이 필드**를 별도로 둔다 — 컴퓨트 셰이더 없이, `FlowField` 와
+같은 CPU 그리드 패턴 그대로.
+
+```cpp
+// game/PileField.h — FlowField 와 같은 원점/셀 크기를 쓰거나, 더 굵은(예: 2배) 자체 그리드.
+// 인스턴스 수가 시각적 디테일을 담당하므로 그리드 자체는 굵어도 된다(§4 표와 같은 원칙).
+class PileField final : private core::NonCopyable
+{
+public:
+    PileField(math::Vec2 originXZ, int cols, int rows, float cellSize);
+
+    // 정착한(거의 안 움직이는 + 벽에 막힌) 개체 하나가 자기 셀에 기여. 스텝당 소량,
+    // 셀당 상한(kPileCapHeight)에서 클램프. **메인 스레드에서 순차 호출만** — 여러 에이전트가
+    // 같은 셀에 동시에 더하는 건 공유 카운터 증가라 ParallelFor 워커 안에서 금지(규칙 6).
+    void Settle(math::Vec3 pos, float amount);
+
+    // 선택: 초당 kDecayPerSec 만큼 전체 감쇠(0 이면 영구 누적, 기본값).
+    void Decay(float dt);
+
+    [[nodiscard]] float SampleHeight(math::Vec3 worldXZ) const;   // 바이리니어
+
+private:
+    math::Vec2 m_originXZ; int m_cols, m_rows; float m_cellSize;
+    std::vector<float> m_height;   // 셀당 누적 높이(m)
+};
+```
+
+- **쓰기(메인, 스텝 사이 아니라 스텝 안이지만 순차)**: 파트 B 의 `ParallelFor` 가 끝나고
+  `Fence().Wait()` 한 **직후**, 정착 판정(`|vel| < kSettleSpeed && flow.Blocked(pos + dir*probe)`
+  — 이미 §4.2 에서 계산해 둔 값 재사용) 이 참인 개체만 순회하며 `Settle(pos, kSettleRate*dt)`.
+  정착 개체는 전체의 일부(입구/벽 앞에 뭉친 개체들)뿐이라 이 순차 루프는 싸다.
+- **읽기(파트 B `ParallelFor` 안, read-only라 규칙 6 문제 없음)**: §4.2 의 `climb` 항을
+  `dens > kClimbDensity` 대신(또는 함께) `pileField.SampleHeight(posR[i] + dir*probe)` 로 바꾼다
+  — "내가 가려는 셀에 이미 쌓인 높이"를 목표 Y로 삼아 lerp. 이렇게 하면 그 순간 이웃이 적어도
+  (카메라가 잠깐 다른 곳을 본 사이 무리가 흩어졌다 다시 모여도) 더미의 물리적 흔적이 남는다.
+- **상한(`kPileCapHeight`)**: 셀 하나가 무한히 높아지면 안 되므로 캐릭터 키의 N배(예: 4~6배)
+  에서 클램프 — 그 이상은 `climb` 목표 Y가 더 안 늘어나고 옆 셀로 흘러넘치는 것(분리력 + 흘러
+  넘친 개체가 옆 셀에서 새로 정착)으로 자연히 처리된다, 별도 오버플로 로직 불필요.
+- **감쇠는 기본 0**(데모는 웨이브가 끝나도 더미가 안 없어지는 게 오히려 자연스러움) — 라운드가
+  끝나고 정리해야 하면 웨이브 종료 시 `PileField` 를 통째로 재생성(0으로 리셋)하는 쪽이 서서히
+  깎는 `Decay` 보다 단순.
+- 이 필드는 **좀비 SoA(`Horde`) 와 완전히 분리된 값**이라(자기 자신을 소유), `Horde::Step` 이
+  참조만 하고 소유는 `Simulation`(또는 `WaveDirector`)이 갖는다 — 파트 A/B 의 "SoA 는 자기
+  자신만 쓴다" 원칙과 같은 이유로 별도 클래스를 둔다(SRP).
+
 ---
 
 ## 4. 파트 B — 호드 시뮬 (`game/Horde.*`)
@@ -187,6 +239,8 @@ namespace engine::game
         wall = flow.Blocked(posR[i]+dir*probe) ? 벽법선 밀기 : 0
         dens = 이웃 수 / 기대치
         climb = dens > kClimbDensity ? Vec3{0, kClimbRise, 0} : 0
+        // 개선안(§3.4): climb 대신/추가로 pileField.SampleHeight(posR[i]+dir*probe) 를 목표 Y로 —
+        // 순간 밀도가 아니라 영구 누적된 더미 높이를 따라간다.
         desired = norm(dir)*speed(typeId,state) + sep*kSep + wall*kWall + climb
         m_vel[i] = lerp(m_vel[i], desired, kAccel*dt)          (관성)
         posW[i]  = posR[i] + m_vel[i]*dt
@@ -220,6 +274,51 @@ namespace engine::game
 - 호드는 좀비끼리 `CollisionWorld3D` 에 안 넣는다 — 분리력이 그 역할. 넣는 건 좀비-vs-정적
   지형(벽 관통 방지)과 좀비-vs-플레이어(피해). 벽 관통은 플로우필드 `Blocked` + wallAvoid 로
   대부분 처리되고, 콜라이더는 보정용.
+
+### 4.5 웨이브 동안 무한 리스폰 — 죽으면 출발점으로
+
+[defense-combat-design.md](defense-combat-design.md) §0 의 "60초 동안 좀비가 쏟아진다"를 SoA
+로 풀면: **디스폰이 아니라 죽을 때마다 자기 슬롯을 출발점 상태로 리셋**하는 것 — free-list를
+전혀 안 거친다. 이게 §4.3(free-list 스폰/디스폰)과 다른, 별도의 훨씬 싼 경로다.
+
+```cpp
+// Horde 필드 추가 (§4.1)
+std::vector<math::Vec3> m_spawnPoint;   // 이 슬롯이 리스폰될 때 돌아갈 자리 (Spawn() 때 1회 결정, 재사용)
+
+// Horde::Step 이 매 스텝 받는 값 하나 — WaveDirector 가 60초 타이머로 갱신해 넘김
+bool waveActive;   // false 부터는 죽으면 진짜 디스폰(§4.3)으로
+```
+
+```text
+// §4.2 스텝의 state==Die 분기 확장 (사망 애니메이션이 끝난 뒤)
+if state == Die and dieAnimDone:
+    if waveActive:
+        // 리스폰: 자기 슬롯 필드만 리셋. Acquire/Release 전혀 안 씀.
+        posW[i]      = m_spawnPoint[i]
+        m_vel[i]     = Vec3{}
+        m_health[i]  = MaxHealthFor(typeId[i])
+        m_state[i]   = Chase
+        m_clipId[i]  = kWalkClip;  m_animTime[i] = 0    // VAT 가 걷기 클립 0프레임부터 다시
+        // burn/slow 같은 상태이상 필드가 있으면 여기서 클리어 (defense-combat-design.md §7)
+    else:
+        m_state[i] = Dead   // 웨이브 종료 후엔 §4.3 free-list 디스폰 경로로
+```
+
+- **규칙 6과 관계 — 이 경로가 §4.3 보다 싼 이유**: 리스폰이 건드리는 건 `slots[i]`(자기
+  칸)뿐이다 — 공유 `m_freeList`/`m_alive` 를 전혀 안 만지므로 **`ParallelFor` 워커 안에서 그대로
+  해도 안전**하다(§4.3 의 `Spawn`/`Despawn`은 메인 스레드 전용이었던 것과 대조). `waveActive`
+  는 이번 스텝 내내 안 변하는 값이라(메인이 스텝 시작 전에 결정) 워커가 읽기만 해도 안전.
+- **`m_alive`/capacity 가 웨이브 길이와 무관해짐**: 웨이브가 도는 동안 활성 슬롯 수가 한 번도
+  안 바뀐다 — "60초 동안 총 몇 마리가 죽고 다시 오는가"가 아니라 "동시에 몇 마리를 살아있게
+  유지하는가"만 `kCapacity`를 결정한다. `defense-combat-design.md`의 "1분간 쏟아짐"이 스폰
+  레이트 곡선 없이 이 트릭 하나로 풀린다 — §4.3 의 free-list 스폰은 이제 "초기 개체 수 채우기
+  (+ 필요하면 웨이브 중 규모 증가)"만 담당하고, 정상 순환은 여기가 담당(SRP로 계층 분리됨).
+- **출발점 고정**: `m_spawnPoint[i]` 는 `Spawn()` 호출 시 1회 결정(여러 스폰 볼륨이 있으면
+  슬롯 인덱스 기반 결정적 분배 — `SeedAgent` 관행과 동일, RNG 없음) 되고 죽을 때마다 재사용 —
+  매번 같은 자리에서 다시 나와야 "스트림"으로 읽힌다(무작위로 아무 데서나 리스폰하면 산만해짐).
+- **웨이브 종료**: `waveActive=false` 이후 죽는 개체는 리스폰 대신 진짜 `Dead`(§4.3 free-list
+  디스폰) — 살아남은 개체는 그대로 두고 플레이어가 정리(스코어). 즉시 필드를 비워야 하면
+  살아있는 슬롯 전체를 강제 `Dead` 처리하는 헬퍼 하나만 추가(이 설계 범위 밖, 필요해지면).
 
 ---
 
@@ -314,7 +413,7 @@ VAT 는 클립 경계에서 튀지 않게 하려면 크로스페이드가 필요
 | 1 (D3D11 은 렌더 스레드만) | VAT `CreateTexture2D`·인스턴스 버퍼 `Map` 전부 `HordePass3D` 안. 굽기(CPU)는 값 배열만 산출 |
 | 3 (경계는 값 스냅샷만) | `std::vector<HordeInstance>` (POD 20B). 본 팔레트·`Horde` 포인터 안 넘김 |
 | 4 (1슬롯 메일박스) | 80KB/프레임, 오래된 프레임 버려도 무해 |
-| 6 (ParallelFor 범위 독립) | 워커는 `posW[i]` 자기 칸만 쓰고 `posR`(불변) 만 읽음. 스폰/디스폰·grid rebuild·vector 재할당은 스텝 밖 메인 |
+| 6 (ParallelFor 범위 독립) | 워커는 `posW[i]` 자기 칸만 쓰고 `posR`(불변) 만 읽음. **자기 슬롯 안에서의** 리스폰 필드 리셋(§4.5)은 워커 안에서도 안전 — `Acquire`/`Release`(free-list)만 스텝 밖 메인 |
 | 7 (2D/3D 분리) | `game/Horde`·`game/FlowField` 는 `math` 공통만. 렌더는 `render/r3d/HordePass3D`. `ENGINE_WITH_3D` 로 감쌈 |
 | 8 (충돌은 탐지만) | `CollisionWorld3D` 는 contact 만. 넉백·밀어내기는 `Horde` 안 |
 
@@ -330,6 +429,10 @@ VAT 는 클립 경계에서 튀지 않게 하려면 크로스페이드가 필요
 3. **VAT 굽기 + `horde.hlsl`** — LOD0 만. 이제 애니메이션 좀비.
 4. **LOD1 + 임포스터(LOD2)** → 4k+ 목표. 원거리 그림자 컬.
 5. **웨이브 디렉터**(스폰 볼륨·시간축·강도 곡선) + 사망 처리 다듬기.
+5a. **무한 리스폰(§4.5)** — `waveActive` 게이팅 + 죽으면 출발점으로. 5(디렉터)와 거의 동시에
+   하는 게 자연스럽다 — 디렉터가 `waveActive` 값의 소유자.
+5b. (선택, 1 이후 언제든) **`PileField`(§3.4)** — 순간 밀도 `climb` 을 영구 누적 높이로 승격.
+   더미가 "쌓인 채로 남는" 느낌이 필요해지면; 1단계 게임필만으로 충분하면 건너뛴다.
 6. (선택) 클립 크로스페이드, 프레임 보간, 래그돌-라이트.
 
 각 단계는 독립적으로 커밋 가능하고, 1 이후 언제든 "현재 규모로 충분" 하면 멈춰도 된다.
@@ -355,13 +458,18 @@ director.SetSchedule({
 });
 
 // 고정 스텝 (Simulation::Step 안, 플레이어 스텝 뒤)
-director.Step(dt, m_horde, camera-visible-set);   // 안 보이는 볼륨에서만 Spawn 호출
+director.Step(dt, m_horde, camera-visible-set);   // 안 보이는 볼륨에서만 Spawn 호출 (초기 채우기)
 flow.Rebuild(playerPos);                          // 내부에서 N스텝 게이트
-m_horde.Step(dt, flow, playerPos, attackHits);
+m_horde.Step(dt, flow, playerPos, attackHits, director.WaveActive());   // §4.5 리스폰 게이트
 ```
 
 목표를 바꾸려면(방어 지점, 탈출구) `flow.Rebuild(objectivePos)` 의 인자만 교체. 다중 목표는
 `Rebuild(span<Vec3>)` 로 여러 셀을 0 으로 시드.
+
+**60초 웨이브(`defense-combat-design.md` §0)** 는 `director.WaveActive()` 가
+`waveElapsed < 60.0f` 인 동안 `true` — 그동안 §4.5 가 죽은 슬롯을 계속 출발점으로 되돌려
+"쏟아짐"을 유지한다. `SetSchedule` 의 `ratePerSec` 곡선은 이제 "웨이브 시작 시 몇 마리로
+채우는가/중간에 증원하는가"만 결정하고, 정상 순환(죽으면 다시 옴)은 스케줄과 무관하게 돈다.
 
 ### 8.2 새 좀비 종류 추가
 
@@ -383,6 +491,8 @@ m_horde.Step(dt, flow, playerPos, attackHits);
 | LOD 거리, 임포스터 전환 | `SnapshotBuilder` 의 `kLodNear/kLodMid` |
 | VAT sampleRate, fp 포맷 | `HordePass3D` VAT 굽기 상수 |
 | 웨이브 강도 곡선 | `WaveDirector::SetSchedule` (데이터) |
+| 더미 누적/상한/감쇠(§3.4) | `PileField` 의 `kSettleRate`/`kPileCapHeight`/`kDecayPerSec` |
+| 웨이브 길이/리스폰 게이트(§4.5) | `WaveDirector` 의 `waveDurationSeconds`, `WaveActive()` |
 
 ### 8.4 하지 말 것
 
@@ -403,6 +513,9 @@ struct HordeInstance { std::vector<Mat4> palette; };         // 금지
 
 // ✗ 패스에서 ClipCursor/셰이더 인라인 컴파일 / MeshPass3D 수정
 // horde.hlsl 은 assets/shaders/, shaders.Get(...). 기존 패스는 OCP.
+
+// ✗ PileField::Settle 을 ParallelFor 워커 안에서 (§3.4) — 같은 셀에 여러 에이전트가
+// 동시에 더하면 공유 카운터 증가라 규칙 6 위반. Fence().Wait() 뒤 메인에서 순차로만.
 ```
 
 - 플로우필드 재빌드를 매 스텝 하지 말 것 — N스텝 게이트. 목표가 안 움직이면 스킵.
@@ -426,6 +539,17 @@ struct HordeInstance { std::vector<Mat4> palette; };         // 금지
   매 스텝 바뀜(외부 참조 금지). 좀비를 외부에서 개별 참조할 일이 없으면 압축이 낫다.
 - 규모 목표 확정: 화면 내 동시 몇 마리를 60fps 로? 이 숫자가 LOD 거리·capacity·VAT 해상도를
   전부 결정한다.
+- **`PileField`(§3.4) 도입 시점.** 순간 밀도 `climb` 만으로 "산사태" 느낌이 이미 충분하면
+  YAGNI — 굳이 별도 그리드를 안 만든다. "카메라가 돌아왔을 때도 더미가 그대로" 가 실제로
+  눈에 띄게 필요해질 때 도입. 그리드 해상도(FlowField 와 같은 셀 vs 더 굵게)도 그때 실측.
+- **리스폰 팝(§4.5)이 눈에 띄면**: 출발점이 화면 밖/카메라 시야 밖이면(스폰 볼륨을 그렇게
+  두는 게 원칙, §8.1) 텔레포트가 안 보여서 문제없다. 그래도 근접 카메라에서 보이면 짧은
+  페이드인(스폰 직후 알파 0→1, `HordeInstance` 에 필드 하나 추가) 정도로 충분 — 리스폰
+  자체를 지연시키는(디스폰 애니 재생 후 몇 초 대기) 방식은 그만큼 `m_alive` 실효 밀도가
+  줄어들어 "쏟아짐" 이 약해지니 우선순위 낮음.
+- **스코어/킬 집계**: 리스폰이 있으면 "총 스폰 수"와 "동시 생존 수"가 달라진다 — 킬 카운트는
+  `state→Die` 전이 시점에 1회 증가(§2 데미지 계층, `defense-combat-design.md`)로 충분히 정확
+  하고 리스폰과 무관 — 이중 집계 위험 없음(같은 슬롯이 다시 죽으면 다시 카운트, 의도한 동작).
 
 ---
 
