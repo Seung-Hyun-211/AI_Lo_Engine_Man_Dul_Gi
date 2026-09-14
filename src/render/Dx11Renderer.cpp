@@ -159,10 +159,17 @@ namespace engine::render
 
                     if (!settings.verticalSync && settings.targetFramesPerSecond > 0)
                     {
-                        const auto frameDuration = std::chrono::duration<double>(
-                            1.0 / static_cast<double>(settings.targetFramesPerSecond));
-                        nextFrameDeadline = std::max(nextFrameDeadline, std::chrono::steady_clock::now())
-                            + std::chrono::duration_cast<std::chrono::steady_clock::duration>(frameDuration);
+                        // Advance from the previous scheduled deadline and only
+                        // resync to now() when behind (Render() took longer than
+                        // the budget) - do NOT re-add frameDuration on top of
+                        // now() in that case, or a workload that's merely as
+                        // slow as the cap ends up presenting at roughly half
+                        // the cap instead of at its own natural rate (same
+                        // fix as game/Application.cpp's main-loop limiter).
+                        nextFrameDeadline += std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                            std::chrono::duration<double>(1.0 / static_cast<double>(settings.targetFramesPerSecond)));
+                        const auto now = std::chrono::steady_clock::now();
+                        if (nextFrameDeadline < now) nextFrameDeadline = now;
                         std::this_thread::sleep_until(nextFrameDeadline);
                     }
                     else

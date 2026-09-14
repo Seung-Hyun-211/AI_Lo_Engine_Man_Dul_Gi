@@ -4,6 +4,7 @@
 #if defined(ENGINE_WITH_3D)
 #include "render/r3d/DebugDrawPass.h"
 #include "render/r3d/ModelMeshPass3D.h"
+#include "render/r3d/ParticlePass3D.h"
 #endif
 
 #include <Windows.h>
@@ -28,6 +29,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
             "assets/models/unitychan/unitychan.fbx"));
         // Dev line visualisation (colliders, rays, skeletons) - over 3D, under UI.
         renderer.AddRenderPass(std::make_unique<engine::render::DebugDrawPass>());
+        // Muzzle/explosion/gib VFX - after opaque geometry, before PostProcessPass
+        // (must draw into the scene colour target before it resolves/composites,
+        // docs/particle-system-research.md §5.5). AddRenderPass's default
+        // insertion point (before the trailing PostProcessPass/QuadPass2D) puts
+        // it exactly there.
+        renderer.AddRenderPass(std::make_unique<engine::render::ParticlePass3D>());
 #endif
         // Textured UI sprites + scissor clipping. Runs last (atEnd) so its
         // scissor rasterizer state does not leak into QuadPass2D.

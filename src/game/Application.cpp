@@ -5,6 +5,9 @@
 #include "game/SettingsScreen.h"
 #include "game/TitleScreen.h"
 
+#include <thread>
+#include <timeapi.h>
+
 namespace engine::game
 {
     namespace
@@ -19,6 +22,21 @@ namespace engine::game
         constexpr float kBlastPower = 16.0f;
         constexpr float kAutoBlastDelay = 5.0f;
 #endif
+
+        // Windows' default scheduler tick (~15.6ms) is coarser than the frame
+        // periods this app paces to (16.67ms @60fps, 8.33ms @120, 6.94ms @144)
+        // - without raising the OS timer resolution, `sleep_until` overshoots
+        // to the next ~15.6ms tick unpredictably, then the next frame's
+        // catch-up (Application::Run's nextFrameDeadline resync) fires with
+        // near-zero delay to compensate, producing a visibly noisy FPS
+        // counter (measured: bounced 60-117 with a 60fps cap). RAII'd around
+        // the whole run so it's released on every exit path, including an
+        // exception unwinding out of the frame loop.
+        struct HighResTimerScope
+        {
+            HighResTimerScope() { timeBeginPeriod(1); }
+            ~HighResTimerScope() { timeEndPeriod(1); }
+        };
     }
 
     Application::Application(HINSTANCE instance, render::IRenderer& renderer)
@@ -37,16 +55,31 @@ namespace engine::game
 
     int Application::Run()
     {
+        const HighResTimerScope highResTimer;   // see its declaration above
         m_window.SetEventSink(*this);
         m_renderer.Start(m_window.Handle(),
                          static_cast<std::uint32_t>(m_window.Width()),
                          static_cast<std::uint32_t>(m_window.Height()));
-        m_renderer.SetFrameSettings({ .targetFramesPerSecond = 60, .verticalSync = m_settings.vsync });
+        ApplyFrameSettings();
         m_window.Show();
 
         // The render thread borrows the window's HWND, so it must be stopped
         // before this function returns and the window is destroyed - including
         // when a job exception propagates out of the frame loop.
+        //
+        // Frame-rate cap, main-thread side: IRenderer::Submit is a non-
+        // blocking mailbox (rule 4 - the renderer never makes the caller
+        // wait), so without this the main loop spins as fast as the OS lets
+        // it regardless of the render thread's own cap (Dx11Renderer::
+        // RenderLoop's nextFrameDeadline, same pattern below) - the top-right
+        // FPS counter reads m_fpsSmoothed from THIS loop's delta, so it was
+        // reporting the uncapped sim/input rate, not the actually-presented
+        // one (game-settings.md - user report: counter exceeded the 60/120/
+        // 144 cap). Paces unconditionally, even with vsync on - vsync paces
+        // the render thread's Present to whatever the display's actual
+        // refresh rate is (unknown here), which does not by itself keep this
+        // loop, and therefore the counter, under the user's chosen cap.
+        auto nextFrameDeadline = std::chrono::steady_clock::now();
         try
         {
             while (true)
@@ -104,25 +137,34 @@ namespace engine::game
                         m_simulation.TriggerExplosion(kBlastCenter, kBlastRadius, kBlastPower);
                         m_audio.PlaySfx("assets/audio/blip.wav");
                     }
-                    // Rifle (docs/defense-combat-design.md §5): left click fires
-                    // at whatever UpdateCrowdQueries() last put in the look-ray.
-                    if (m_input.MousePressed(0))
+                    // Rifle (docs/defense-combat-design.md §5): full-auto, held
+                    // down like the flamethrower - Simulation's own fire-rate
+                    // cooldown paces the actual shots, so this just forwards
+                    // "trigger held" every frame and plays the SFX only on the
+                    // frames that really fired (FireWeapon's return value).
+                    if (m_input.MouseDown(0))
                     {
-                        m_simulation.FireWeapon(WeaponKind::Rifle);
-                        m_audio.PlaySfx("assets/audio/blip.wav");   // demo hook - no muzzle SFX yet
+                        if (m_simulation.FireWeapon(WeaponKind::Rifle))
+                            m_audio.PlaySfx("assets/audio/blip.wav");   // demo hook - no muzzle SFX yet
                     }
                     // Mortar/mine placement (docs/defense-combat-design.md §4):
                     // '1'/'2' are a demo stand-in for the real prep-phase UI
                     // (§0.4, not built yet) - both place at the current
                     // look-ray ground hit, same aim source as the rifle.
+                    // Same physical keys double as scene EffectsTest's VFX
+                    // preview triggers - both calls self-guard on the active
+                    // scene (no-op outside their own scene), so no ActiveScene()
+                    // check is needed here.
                     if (m_input.KeyPressed('1'))
                     {
                         m_simulation.PlaceOrdnance(OrdnanceKind::Mortar);
+                        m_simulation.PreviewVfxEffect(EffectPreview::MuzzleFlash);
                         m_audio.PlaySfx("assets/audio/blip.wav");
                     }
                     if (m_input.KeyPressed('2'))
                     {
                         m_simulation.PlaceOrdnance(OrdnanceKind::Mine);
+                        m_simulation.PreviewVfxEffect(EffectPreview::Explosion);
                         m_audio.PlaySfx("assets/audio/blip.wav");
                     }
                     // Barbed wire (docs/defense-combat-design.md §6): '3', same
@@ -130,6 +172,7 @@ namespace engine::game
                     if (m_input.KeyPressed('3'))
                     {
                         m_simulation.PlaceSlowZone();
+                        m_simulation.PreviewVfxEffect(EffectPreview::GibBurst);
                         m_audio.PlaySfx("assets/audio/blip.wav");
                     }
                     // Flamethrower (docs/defense-combat-design.md §7): right
@@ -156,10 +199,22 @@ namespace engine::game
                     }
 
 #if defined(ENGINE_WITH_3D)
-                    // Crowd colliders + look-ray + overlap tint: once per frame,
-                    // after the step loop, on the final positions. O(crowd), so
-                    // running it per sub-step spiralled a slow frame.
-                    m_simulation.UpdateCrowdQueries();
+                    // Loss condition (docs/defense-combat-design.md §0): no
+                    // results screen yet (§0.3 is still design-only), so this
+                    // is the bare-minimum connection - drop straight back to
+                    // the title screen the instant the objective dies.
+                    if (m_simulation.IsMatchLost())
+                    {
+                        EnterTitle();
+                    }
+                    else
+                    {
+                        // Crowd colliders + look-ray + overlap tint: once per
+                        // frame, after the step loop, on the final positions.
+                        // O(crowd), so running it per sub-step spiralled a
+                        // slow frame.
+                        m_simulation.UpdateCrowdQueries();
+                    }
 #endif
                 }
 
@@ -168,6 +223,36 @@ namespace engine::game
                 m_renderer.Submit(m_snapshotBuilder.Build(m_frameNumber++, m_simulation, m_ui,
                                                           m_window.Width(), m_window.Height(),
                                                           &m_uiAtlas, m_fpsSmoothed));
+
+                // Paced regardless of vsync: vsync only paces the render
+                // thread's Present to the display's actual refresh rate (which
+                // this loop has no way to know), it does not stop the main
+                // loop from spinning past the user's chosen 60/120/144 cap
+                // (user report - the top-right counter still exceeded the cap
+                // with vsync on). Capping here directly bounds what the
+                // counter can show, independent of vsync/display refresh.
+                //
+                // Advance from the PREVIOUS scheduled deadline, not from
+                // now() - `nextFrameDeadline = max(nextFrameDeadline, now())
+                // + frameDuration` looks equivalent but isn't: once real
+                // per-frame work (sim step + snapshot build) takes close to
+                // or longer than frameDuration, "now()" is already past the
+                // old deadline every iteration, so that formula stacks a
+                // *full extra* frameDuration on top of the overrun each time
+                // - period becomes (work time + frameDuration) instead of
+                // just frameDuration, which is roughly 2x too slow right at
+                // the point work time ~= frameDuration (user report: counter
+                // reads ~half the selected cap). Resyncing to now() only when
+                // behind (and not re-adding frameDuration in that case) makes
+                // this a true upper bound: never slower than the uncapped
+                // rate, never faster than the cap.
+                const std::uint32_t targetFps =
+                    core::kFrameRatePresets[static_cast<std::size_t>(m_settings.frameRateIndex)];
+                nextFrameDeadline += std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                    std::chrono::duration<double>(1.0 / static_cast<double>(targetFps)));
+                const auto now = std::chrono::steady_clock::now();
+                if (nextFrameDeadline < now) nextFrameDeadline = now;
+                std::this_thread::sleep_until(nextFrameDeadline);
             }
         }
         catch (...)
@@ -187,10 +272,25 @@ namespace engine::game
         m_audio.StopMusic();
         m_ui.ClearOverlay();
         m_ui.SetScreen(BuildTitleScreen(
-            [this] { EnterInGame(); },
+            [this] { EnterSceneSelect(); },
             [this] { EnterItems(); },
             [this] { OpenSettings(); },
             [this] { m_window.RequestClose(); }));
+    }
+
+    void Application::EnterSceneSelect()
+    {
+        m_state = GameState::Title;   // still a menu context: no simulation step
+        m_window.SetPointerLocked(false);
+        m_ui.ClearOverlay();
+#if defined(ENGINE_WITH_3D)
+        m_ui.SetScreen(BuildSceneSelectScreen(
+            [this] { EnterInGame(DemoScene::DefenseCombat); },
+            [this] { EnterInGame(DemoScene::CharacterDemo); },
+            [this] { EnterInGame(DemoScene::ShadowShowcase); },
+            [this] { EnterInGame(DemoScene::EffectsTest); },
+            [this] { EnterTitle(); }));
+#endif
     }
 
     void Application::EnterItems()
@@ -201,11 +301,21 @@ namespace engine::game
         m_ui.SetScreen(BuildInventoryScreen([this] { EnterTitle(); }));
     }
 
-    void Application::EnterInGame()
+    void Application::EnterInGame(DemoScene scene)
     {
         m_state = GameState::InGame;
         m_inGameElapsed = 0.0f;
         m_autoExplodeFired = false;
+#if defined(ENGINE_WITH_3D)
+        // The only entry point into InGame - whether it's a fresh pick from
+        // the scene-select menu or (DefenseCombat only) a restart after a
+        // loss. Simulation::EnterScene rebuilds the actor list for `scene`
+        // and, for DefenseCombat, runs ResetMatch() so it always starts at
+        // wave 1 (docs/defense-combat-design.md §0).
+        m_simulation.EnterScene(scene);
+#else
+        (void)scene;
+#endif
         m_ui.ClearOverlay();
         m_ui.SetScreen(BuildInGameHud([this] { OpenSettings(); }));
         m_window.SetPointerLocked(true);   // mouse-look / centre-locked cursor
@@ -220,9 +330,11 @@ namespace engine::game
         m_window.SetPointerLocked(false);   // give the cursor back for the menu
         m_ui.SetOverlay(BuildSettingsScreen(m_settings, SettingsScreenActions{
             .onVolumeChanged = [this] { ApplyVolumes(); },
-            .onVsyncToggled = [this] { ApplyVsync(); },
+            .onVsyncToggled = [this] { ApplyFrameSettings(); },
             .onResolutionChanged = [this] { ApplyResolution(); },
+            .onFrameRateChanged = [this] { ApplyFrameSettings(); },
             .onClose = [this] { CloseSettings(); },
+            .onExitToTitle = [this] { m_settings.Save(core::kSettingsFilePath); EnterTitle(); },
         }));
     }
 
@@ -240,9 +352,11 @@ namespace engine::game
         m_audio.SetSfxVolume(m_settings.sfxVolume);
     }
 
-    void Application::ApplyVsync()
+    void Application::ApplyFrameSettings()
     {
-        m_renderer.SetFrameSettings({ .targetFramesPerSecond = 60, .verticalSync = m_settings.vsync });
+        const std::uint32_t targetFps =
+            core::kFrameRatePresets[static_cast<std::size_t>(m_settings.frameRateIndex)];
+        m_renderer.SetFrameSettings({ .targetFramesPerSecond = targetFps, .verticalSync = m_settings.vsync });
     }
 
     void Application::ApplyResolution()

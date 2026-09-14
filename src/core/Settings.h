@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <string>
 
 // User-configurable options: one value struct, loaded once at startup and
@@ -25,6 +26,17 @@ namespace engine::core
         { 1920, 1080 },
     } };
 
+    // Frame rate cap candidates - same fixed-list-not-slider reasoning as
+    // kResolutionPresets. The render thread's own pacing (Dx11Renderer) only
+    // applies this when !verticalSync (see FrameSettings) - vsync already
+    // paces its Present to the display. Application::Run's main-loop pacing
+    // applies it unconditionally though (docs/game-settings.md "카운터가 캡을
+    // 넘던 문제"), so the counter/input-sim rate stays under this cap either
+    // way. Stored/cycled independently of the vsync checkbox so the choice
+    // sticks once vsync is toggled off. Settings::frameRateIndex indexes this
+    // array.
+    inline constexpr std::array<std::uint32_t, 3> kFrameRatePresets{ 60, 120, 144 };
+
     inline constexpr const char* kSettingsFilePath = "settings.cfg";
 
     struct Settings
@@ -40,13 +52,18 @@ namespace engine::core
         float mouseSensitivity{ 1.0f };
         bool invertMouseY{ false };
 
-        // Applied immediately: Application::ApplyVsync -> IRenderer::SetFrameSettings.
+        // Applied immediately: Application::ApplyFrameSettings -> IRenderer::SetFrameSettings.
         bool vsync{ true };
 
         // Applied immediately: Application::ApplyResolution -> Win32Window::RequestResize.
         // Index into kResolutionPresets; out-of-range values from a stale/hand-
         // edited file are clamped back in LoadOrDefault.
         int resolutionIndex{ 1 };
+
+        // Applied immediately: Application::ApplyFrameSettings -> IRenderer::
+        // SetFrameSettings (alongside vsync above - same call). Index into
+        // kFrameRatePresets; out-of-range values clamped back in LoadOrDefault.
+        int frameRateIndex{ 0 };   // 60fps by default
 
         // Reads kSettingsFilePath-shaped `key=value` lines; a missing file or a
         // field that fails to parse just keeps that field's default. Never

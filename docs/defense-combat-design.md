@@ -1,7 +1,12 @@
 # 디펜스 전투 설계 — 무한 웨이브(전투 60초 + 정비 60초) + 무기 5종
 
-**상태: 설계만. 미구현.** "좀비가 60초 동안 쏟아지고, 무기로 막고, 60초 정비하고, 다시 쏟아지고
-— 무한 반복"을 이 엔진에 있는 것 위주로 설계한다. 새 아키텍처(컴퓨트·GPU 시뮬 등)는 안 끌어옴 —
+**상태: §0(핵심 상태기계 + 패배 처리)/§0.1(자원)/§1/§2(공통 데미지 계층)/§3~§7(무기 5종) 구현 완료.**
+**§0.3(정산 화면)/§0.5(에스컬레이션)/§0.6(미니맵)와 모든 UI는 설계만.**
+**패배는 결과 화면 없이 즉시 타이틀로** — §0.3이 없어서 "패배" 표시 없이 바로 `EnterTitle()`만
+호출(`Application::Run()`, `m_simulation.IsMatchLost()`). 최고 웨이브 기록도 아직 없음(§0.3에서
+같이 할 일).
+"좀비가 60초 동안 쏟아지고, 무기로 막고, 60초 정비하고, 다시 쏟아지고 — 무한 반복"을 이
+엔진에 있는 것 위주로 설계한다. 새 아키텍처(컴퓨트·GPU 시뮬 등)는 안 끌어옴 —
 `docs/particle-system-research.md`/`docs/horde-design.md`가 이미 확인한 원칙 그대로: CPU +
 `JobSystem::ParallelFor` + 값 기반 스냅샷으로 충분한 규모.
 
@@ -17,16 +22,16 @@
 
 ---
 
-## 0. 게임 루프 — 전투 → 정산 → 정비, 무한 반복 (핵심 상태기계 구현 완료, §0.1/§0.3/§0.5는 아직 설계만)
+## 0. 게임 루프 — 전투 → 정산 → 정비, 무한 반복 (핵심 상태기계 + 패배 처리 구현 완료, §0.1은 구현·§0.3/§0.5는 아직 설계만)
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
 │                                                                      │
 ▼                                                                      │
 Combat(60s)  ──타이머 만료──▶  전멸 처리(§0.2)  ──▶  WaveResults(§0.3) │
-  waveActive=true                                    (전체화면, sim 정지)│
+  waveActive=true                                    (아직 없음 — 미구현)│
   좀비 무한 리스폰(horde §4.5)                              │           │
-  목표HP 0 되면──▶ GameOver(패배, 루프 밖)                  │ "다음으로" │
+  목표HP 0 되면──▶ EnterTitle() (구현됨, 결과화면 없이 즉시)  │ "다음으로" │
                                                               ▼           │
                                                      Prep(60s)(§0.4) ─────┘
                                                        waveActive=false
@@ -36,8 +41,9 @@ Combat(60s)  ──타이머 만료──▶  전멸 처리(§0.2)  ──▶  W
 (`waveActive` 는 `horde-design.md` §4.5 의 파라미터 이름 그대로 — 이 문서의 `MatchPhase::Combat`
 과 같은 뜻이다. `Horde::Step` 호출부에서 `waveActive = (m_phase == MatchPhase::Combat)` 로 넘김.)
 
-- **무대**: 지금 씬 2(`Simulation::kDemoScene==2`, 절벽 위 플레이어 + 아래 필드의 `SimAgent`
-  크라우드)를 그대로 쓴다 — 이미 다수 개체·인스턴싱·레이캐스트가 다 있다.
+- **무대**: 지금 씬 2(`m_demoScene == DemoScene::DefenseCombat`, 언덕 위 1인칭 플레이어 + 아래
+  필드의 `SimAgent` 크라우드)를 그대로 쓴다 — 이미 다수 개체·인스턴싱·레이캐스트가 다 있다.
+  (원래는 절벽이었으나 1인칭 전환과 함께 10m/20° 언덕으로 교체 — §1 "구현노트".)
 - **상태 소유 분리(SRP)**: `Application`/`GameState` 는 "화면이 몇 개고 언제 바뀌는지"만
   안다(`InGame`(전투+정비 둘 다) / `WaveResults`) — [scene-flow-design.md](scene-flow-design.md)
   §1 이 이미 이 자리를 비워뒀다. **전투냐 정비냐**는 `Simulation`(또는 그 안의 `WaveDirector`)
@@ -64,9 +70,36 @@ Combat(60s)  ──타이머 만료──▶  전멸 처리(§0.2)  ──▶  W
   똑같이 취급 — 목표 HP 감소 + 즉시 §4.5 리스폰(킬 크레딧 없이). 별도 despawn 경로를 안 만들고
   §2/§4.5 의 죽음-리스폰 파이프라인에 "도달"이라는 세 번째 트리거만 추가하면 된다(사망 원인이
   `Weapon`이냐 `ReachedGoal`이냐만 다름 — `DamageEvent` 처럼 원인 태그 하나로 분기).
-- **승패**: 목표 HP 0 = 즉시 패배(웨이브 진행 중 언제든) → 결과 화면(§0.3)에 "패배" 표시 후
-  `EnterTitle()`. 그 외엔 무한 반복(승리 조건 없음 — 엔드리스 웨이브 디펜스, `synopsis.md` 장르
-  그대로). 최고 웨이브 도달 수가 스코어.
+- **승패**: 목표 HP 0 = 즉시 패배(웨이브 진행 중 언제든) → `EnterTitle()`. 그 외엔 무한 반복
+  (승리 조건 없음 — 엔드리스 웨이브 디펜스, `synopsis.md` 장르 그대로). 최고 웨이브 도달 수가
+  스코어(아직 기록 안 함 — §0.3에서 할 일).
+
+  **구현노트**: 결과 화면(§0.3, "패배" 표시 + "타이틀로" 버튼)이 아직 없어서 최소 연결만 함 —
+  `Application::Run()`의 프레임 루프가 스텝 직후 `m_simulation.IsMatchLost()`
+  (`m_objectiveHealth <= 0.0f`)를 보고 참이면 그 프레임에 바로 `EnterTitle()`. 확인 화면·
+  "다음으로/타이틀로" 버튼 분기 없이 한 프레임 만에 타이틀로 끊긴다. 재시작은 `EnterInGame()`이
+  매번 `Simulation::ResetMatch()`를 불러 처리 — 이게 유일한 InGame 진입점이라 첫 "시작하기"든
+  패배 후 재시작이든 똑같이 웨이브 1/목표 HP 풀로 깨끗하게 시작한다(에이전트·기브·오드넌스
+  풀·슬로우존 전부 초기화 후 `SpawnSimAgents()`). 검증: `kObjectiveDamagePerBreach`를
+  일시적으로 1500까지 올려(1000 HP 기준 한 번의 도달로 즉사) 패배→재시작 루프를 강제로 반복시켜
+  25초 동안 10회 이상 사이클을 돌렸고 크래시·누수 징후 없음 확인.
+
+  **밸런스 스톱갭(`kObjectiveMaxHealth = 40000`)**: 원래 1000이었으나, 실플레이(가만히 걸어만
+  다녀도)에서 웨이브 시작 후 약 6~7초 만에 패배하는 문제가 보고됨 — 좀비가 목표에 "도달"하면
+  안 죽고 스폰 지점으로 순간이동 후 다시 오는 무한 리스폰(§4.5) 때문에, 목표 근처에 스폰된
+  개체들이 왕복 몇 초마다 계속 브리치를 내서 타이머(60~120초)가 끝나기 한참 전에 목표 HP가
+  먼저 바닥남. 진짜 해법은 §0.5 웨이브 에스컬레이션(난이도 곡선 — 낮은 웨이브는 소수/느린
+  적)인데 아직 스코프 밖이라, 임시로 HP 풀만 키워 "방치해도 대략 1분은 버틴다"를 목표로 실측
+  교정: `kObjectiveMaxHealth`를 일시적으로 매우 크게(100만) 두고 무플레이 상태로 관찰한 결과,
+  브리치 데미지 누적이 초반 램프업 이후 **초당 약 750(steady-state)**로 수렴 — 60초 시점 누적
+  약 39100. 여기에 소폭 여유를 둬 40000으로 설정(그래도 방치 시 60초를 살짝 넘겨서 죽음, 실제
+  플레이어가 쏘면 그보다 더 오래감). **난이도 곡선이 아니라 고정 버퍼일 뿐**이므로 §0.5 작업
+  시 이 값도 같이 재검토 필요.
+  **부수 버그 발견·수정**: 이 계측 도중 언덕(§1 "구현노트") 도입으로 생긴 회귀를 하나 찾음 —
+  `kCrowdGoal`이 `y=0`으로 고정돼 있었는데, 좀비가 경사면을 오르며 `y`가 최대 `kHillHeight`
+  (10)까지 올라가므로 목표까지의 3D 거리(`Length(kCrowdGoal - a.pos)`)가 고도차 때문에 절대
+  좁혀지지 않아 **아무도 목표에 도달할 수 없게 됨**(70초 방치해도 브리치 0회로 확인). `kCrowdGoal`
+  의 `y`를 `kHillHeight`로 맞춰서 해결.
 
 ### 0.1 자원 경제 — 정비 구매용 화폐 (구현 완료 — 획득/소비, 상점 UI는 없음)
 
@@ -152,7 +185,18 @@ void Simulation::EndCombatPhase()
   `StepSimAgents`의 기존 "풀 비면 즉시 반환" 그대로 작동) → Prep 만료 즉시 `liveAgents=16384`
   복귀 + `wave` 1→2→3 증가. 전부 원복 후 재검증.
 
-### 0.3 정산 화면 (`GameState::WaveResults`)
+### 0.3 정산 화면 (`GameState::WaveResults`) — 화면 자체는 미구현, 대신 상시 텍스트 HUD 구현됨
+
+**구현노트**: `GameState::WaveResults`/`BuildWaveResultsScreen`(아래 스케치)는 안 만들었다.
+대신 `SnapshotBuilder::Build`가 FPS 카운터와 같은 방식(`ui::DrawRect`+`ui::DrawText`, 화면
+상단, 매 프레임 재계산)으로 웨이브/페이즈/남은 시간/목표 HP/자원/킬 수를 상시 표시한다
+(`simulation.ActiveScene() == DemoScene::DefenseCombat`일 때만, [SnapshotBuilder.cpp](../src/game/SnapshotBuilder.cpp) FPS 블록
+바로 위). 우상단엔 같은 방식으로 무기 5종의 키매핑 목록(WEAPONS: LMB 라이플/RMB
+화염방사기/1 박격포/2 지뢰/3 철조망)을 고정 표시 — 상점 UI(§0.4)가 없는 동안의 임시 참고용,
+정산 화면이 생기면 같이 정리할 대상. "다음으로/타이틀로" 버튼이나 웨이브 종료 시점의 별도 화면 전환은 없음 — 그냥 매
+프레임 최신 값이 계속 갈아치워진다. FPS 카운터와 마찬가지로 타이틀 화면 위에도 그려짐(게이팅
+안 함) — 개발용 상시 리드아웃이라는 성격상 지금은 문제로 안 봄. 진짜 정산 화면(웨이브 종료
+때 잠깐 멈추고 "다음으로" 확인)은 아래 스케치 그대로 여전히 미구현.
 
 `scene-flow-design.md`가 이미 예비해 둔 `GameState` 값 — Title/InGame과 똑같이 `SetScreen`
 (전체화면 교체), `Simulation::Step` 은 Title 처럼 건너뜀(오버레이 아니라 상태 전환이므로
@@ -226,7 +270,7 @@ director.SetSchedule({
 
 ---
 
-## 1. 전제 — 좀비가 플레이어를 향해 쏟아지게
+## 1. 전제 — 좀비가 플레이어를 향해 쏟아지게 (구현 완료)
 
 **지금 `SimAgent`는 목표가 없다.** `Simulation::StepSimAgents`(`Simulation.cpp`)는 헤딩을
 사인파로 흔들며 걷고 필드 경계에서 반사할 뿐 — 순수 배회다. "쏟아진다"를 만들려면 최소한의
@@ -249,9 +293,18 @@ a.heading = TurnToward(a.heading, std::atan2(toGoal.x, toGoal.z), kSeekTurnRate 
 - 뭉치는 느낌(밀도 climb, 벽 앞 군집)도 `FlowField` 없이는 안 나온다 — 열린 벌판 러시로
   시작하고, 필요해지면 그 문서로 승격.
 
+**구현 노트** (`Simulation.h/.cpp`):
+- `goalPos`가 플레이어 위치가 아니라 **고정 좌표**(`kCrowdGoal`, 메사 아래 한 점)다 — "방어선"
+  개념을 플레이어가 서 있는 언덕 위가 아니라 필드 안쪽 고정 지점으로 단순화(§12에서 이미
+  이렇게 해결됨). 플레이어를 실제로 쫓아오게 하려면 나중에 `kCrowdGoal`을
+  `CharacterPosition()`으로 바꾸면 되지만, 지금은 목표가 고정이라 매 스텝 갱신이 필요 없어
+  더 싸다.
+- 필드 경계 반사 로직은 "제거"됐다(§12에서 이미 정리) — 옛 사인파 드리프트 코드 자체를
+  들어냈다. 남은 건 `a.pos.x`의 루즈 클램프(측면 이탈 방지)뿐.
+
 ---
 
-## 2. 공통 데미지 계층 — HP + `DamageEvent`
+## 2. 공통 데미지 계층 — HP + `DamageEvent` (구현 완료 — 실제로는 `DamageEvent` 큐 없이 직접 처리)
 
 지금 엔진엔 HP/데미지 개념이 전혀 없다(확인됨, grep 0건). 5개 무기가 전부 이 계층에 꽂힌다.
 
@@ -285,9 +338,24 @@ std::vector<DamageEvent> m_pendingDamage;   // 매 스텝 시작에 clear, 무�
   거리 선형 감쇠(`falloff`)를 이미 계산해 넉백에 쓴다. `amount = falloff * kExplosionDamage` 로
   같은 루프에서 `DamageEvent`도 push하면 끝 — 새 로직 아님, 기존 함수에 한 줄.
 
+**구현 노트** (`Simulation.h/.cpp`):
+- **`DamageEvent`/`m_pendingDamage` 큐는 안 만들었다.** 실제로 데미지를 넣는 세 경로
+  (`DamageAgent`=총, `TriggerExplosion`=폭발, `ApplyFlameCone`이 세팅한 `burnDps`를
+  `StepSimAgents`가 소비)가 전부 이미 "메인 스레드·`ParallelFor` 시작 전" 또는 "워커 안이지만
+  자기 슬롯만"이라는 안전 조건을 만족해서, 큐에 모았다가 스텝 끝에 일괄 적용할 이유가
+  없었다(YAGNI) — 매번 즉시 `health -=`.
+- **`std::uint8_t state{Alive,Dying,Dead}` 열거형도 안 만들었다.** `health <= 0.0f`를 그
+  자체로 "죽음" 판정으로 쓴다 — 문서가 제안한 3상태 열거형보다 한 단계 더 단순화. `Dying`
+  전이(사망 애니메이션 재생 중)에 해당하는 상태는 없음 — §3 판단대로 래그돌/사망 애니 자체를
+  스코프 밖으로 뒀으니 자연히 필요 없어졌다.
+
 ---
 
 ## 3. 요청 1 — 사망 시 파츠 분해 (구현 완료)
+
+**피 스프레이 파티클로 보강됨**: 강체 큐브 조각(아래)에 더해, 터지는 순간의 붉은 스프레이도
+[particle-system-research.md](particle-system-research.md) §7.3 `kGibBloodSpray`/
+`vfx::SpawnGibBurst` — **구현 완료**, `SpawnGibs`가 기존 큐브 조각 산개 루프 바로 앞에서 호출.
 
 **진짜 메시 절단은 하지 않는다.** 이유는 mushroom 문서 검토 때와 같다 — 이 엔진엔 런타임 메시
 분해/컴퓨트가 없고, 인스턴싱된 좀비(수천 개 잠재)마다 서브메시 분리를 하면 그 자체가 새
@@ -367,8 +435,9 @@ struct PlacedOrdnance
   x 크라우드 수 스캔이 지금 규모엔 충분히 싸다 — 많아지면 §6 철조망 절과 같은 그리드 승격 후보.
 - `PlacedOrdnance`도 `GibPiece`와 같은 이유로 `selfIndex`/`selfGeneration`을 들고 자기
   `Release`를 스스로 한다.
-- 폭발 VFX(`particle-system-research.md` §7.2)는 파티클 시스템 자체가 아직 설계만이라 보류 —
-  기존 `TriggerExplosion`(F키 데모)도 VFX 없이 동작하던 것과 동일한 공백.
+- 폭발 VFX(`particle-system-research.md` §7.2 `vfx::SpawnExplosion` + `Simulation::SpawnFireChunks`
+  의 3D 코어)는 **구현 완료** — `TriggerExplosion` 안에서 반경 0 가드 직후 호출, F키 데모 블라스트
+  포함 모든 폭발 경로가 공유.
 - **배치 UI(조준 프리뷰)·`WeaponIntent`(§8)는 아직 없음** — v1은 총(§5)과 같은 최소 연결:
   `Simulation::PlaceOrdnance(kind)`를 `Application`이 키 입력(데모용 '1'=박격포/'2'=지뢰,
   실제 정비 페이즈 UI는 §0.4)에서 바로 호출, 조준점은 `m_lookRay.point` 그대로. 여러 무기가
@@ -402,6 +471,24 @@ void Simulation::FireWeapon(WeaponKind kind)
 - **연사/쿨다운**: v1은 클릭당 1발 + 최소 간격(`kFireCooldown`)만 — 탄창/재장전은 스코프 밖.
 - **총구 소켓 트랜스폼**: `particle-system-research.md` §11 이 이미 열어둔 문제 그대로 — 캐릭터
   전방 고정 오프셋으로 근사(그 문서의 임시안 그대로 채용).
+
+**구현 노트** (`Application.cpp`, `Simulation.cpp`):
+- **연사로 전환됨** (원래는 엣지 트리거 클릭당 1발이었으나 이후 요청으로 전체자동으로 변경).
+  `m_input.MousePressed(0)` → `MouseDown(0)`(누르고 있는 동안 매 프레임 트리거)로 바꾸고,
+  실제 발사 페이스는 `Simulation::kRifleFireInterval`(0.1초 = 초당 10발) 쿨다운
+  (`m_rifleCooldown`, `Step()`에서 매 고정 스텝 감소)이 담당. `FireWeapon`이 `bool`을 반환해
+  "이번 호출이 실제로 쐈는지"를 알려주므로, `Application`은 그 값으로만 SFX(`blip.wav`)를
+  재생 — 매 프레임이 아니라 진짜 발사된 프레임에만. 빗나간 샷도 쿨다운은 정상 소모(실총과
+  동일). 탄창/재장전은 여전히 스코프 밖.
+  (§7 화염방사기는 발사 트리거 자체가 다르므로 이 무기와 무관.)
+  총구 소켓/머즐 플래시 VFX는 **구현 완료**(`particle-system-research.md` §7.1
+  `vfx::SpawnMuzzleFlash`) — `Simulation::MuzzleSocketPosition()`(눈 기준 우측·아래로 오프셋된
+  가상 총구, `particle-system-research.md` 구현 노트 "화염 이펙트가 카메라를 가림" 참고)에서
+  스폰. SFX는 여전히 기존 `blip.wav` 데모 훅 재사용(전용 머즐 SFX는 스코프 밖).
+- **조준 디버그 표시(임시)**: 현재 무기 + 이번 프레임 룩레이 결과(명중 슬롯/좌표/거리, 또는
+  "NO HIT")를 `SnapshotBuilder`가 화면 중앙 상단에 텍스트로 상시 출력
+  (`simulation.ActiveScene() == DemoScene::DefenseCombat`만) —
+  실제 크로스헤어·무기 선택 UI가 생기면 제거할 플레이테스트용 임시 표시.
 
 ---
 
@@ -461,9 +548,10 @@ void Simulation::ApplyFlameCone(math::Vec3 origin, math::Vec3 dir, float range, 
   즉 도트는 워커 안에서 자기 `health -= burnDps*dt` 직접 처리 가능(규칙 6이 금지하는 건 "겹치는
   범위/공유 카운터"이고, `health`는 자기 슬롯 필드라 안전) — `DamageEvent` 큐는 총/폭발처럼
   **스텝 시작 전에 결정된, 외부에서 들어오는** 피해에만 쓰면 된다. 두 경로가 공존해도 문제없음.
-- **파티클**: 화염 콘 자체(연속 가산 블렌드 스프라이트) — `particle-system-research.md`의
-  `ParticleEffectDef` 관행으로 `kFlamethrowerJet` 하나 추가, 연속 이미터(§6.1의 "레이트" 확장,
-  그 문서가 이미 "필요해지면 얹는다"고 열어둔 자리).
+- **파티클**: 화염 콘 자체(연속 가산 블렌드 스프라이트) — **구현 완료**. `ParticleEffects.h`의
+  `kFlameJet`, `FireWeapon`이 `ApplyFlameCone` 직전에 매 프레임 `vfx::SpawnFlameJet` 호출(연속
+  이미터, §6.1의 "레이트" 확장 그대로). 데미지 로직만 있고 화면엔 아무것도 안 보이던 걸
+  플레이테스트로 발견해 뒤늦게 추가(`particle-system-research.md` 구현 노트 참고).
 
 **구현 노트** (`Simulation.h/.cpp`, `SnapshotBuilder.cpp`):
 - 도트로 인한 사망은 워커 안에서 일어나므로 `m_killCount`(공유 카운터)를 그 자리에서
@@ -557,7 +645,7 @@ struct WeaponIntent
 | 무기별 데미지·쿨다운·반경 | 각 무기 상수(§4~7 코드 스니펫의 `k*`) — 늘어나면 `WeaponDef` 테이블로 승격 |
 | 전투/정비 페이즈 길이 | `m_phaseTimeLeft` 초기값(§0) — 둘 다 60초로 시작, 따로 조정 가능 |
 | 웨이브 에스컬레이션 곡선 | `WaveDirector::SetSchedule` 을 부르는 §0.5 의 함수(웨이브 번호 → 레이트/타입) |
-| 킬당 자원 획득량 | `kSupplyPerKill(typeId)`(§0.1) |
+| 킬당 자원 획득량 | `kSupplyPerKill`(§0.1, 지금은 고정값 — 타입별 테이블 아님) |
 | 기브 개수/속도/수명 | `game/GibConfig.h` `kZombieGibs` |
 | 슬로우존 배율 | `SlowZone::speedMul` (배치 시점 파라미터) |
 
@@ -587,32 +675,36 @@ m_jobs.ParallelFor(0, n, c, [&](b,e){ for(...) m_pendingDamage.push_back(...); }
 
 ## 12. 판단 필요 / 열린 질문
 
-- **필드 경계 반사를 유지할지**: §1 에서 목표 추적을 넣으면 기존 "벽에서 반사" 로직과 충돌할
-  수 있음(목표가 필드 밖이면 계속 반사만 함) — 목표를 필드 안쪽(플레이어가 서 있는 절벽 아래
-  경계선)으로 두거나, 목표 근접 시 반사 로직을 끄는 분기 필요.
-- **좀비가 목표에 "도달"의 정의**: 플레이어 콜라이더에 닿음 vs 특정 z 라인을 넘음. 후자가
-  구현 간단(스칼라 비교) — 넘은 좀비는 목표 HP 감소 후 §0/§4.5 리스폰 파이프라인으로(진짜
-  `Release` 아님 — 전투 페이즈 내내 슬롯이 순환한다는 원칙과 일치).
-- **동시 다수 사망 시 기브 폭증**: 웨이브 막판 화염방사기로 수십 마리가 한 스텝에 죽으면 기브
-  256개 풀이 순식간에 찰 수 있음 — 꽉 찼을 때 `Acquire` 실패는 무시(파티클 시스템과 같은 관행)
-  로 시작, 눈에 띄면 개체당 기브 수를 줄이거나 오래된 기브 강제 회수.
-- **화염방사기 원뿔 후보 좁히기 방식**: `CollisionWorld3D`에 "이 위치 반경 R 안의 전부" 질의가
-  지금 있는지 확인 필요(`Contacts()`는 등록된 콜라이더 간 겹침이라 임시 쿼리 콜라이더를 매
-  스텝 추가/제거해야 할 수 있음, `RaycastClosest`류는 선/점 대상) — 없으면 `collider-design.md`
-  에 반경 질의(`OverlapSphere` 류) 추가가 선행 작업.
-- **철조망 데미지 확장 여부**: 지금은 순수 슬로우. 나중에 도트를 추가하면 §7 의
-  `burnDps`/`burnTimeLeft` 필드를 이름을 범용화(`dotDps`/`dotTimeLeft`)해 화염/철조망이 같은
-  경로를 쓰게 — 지금은 화염 하나뿐이라 전용 이름으로 시작(YAGNI, 두 번째 사례가 생기면 일반화).
-- **전멸 타이밍**: "60초 되면" 정확히 그 프레임에 전부 죽이는 것 vs 60초부터 스폰만 멈추고
-  이미 나와 있는 개체는 자연 소탕까지 기다리는 것. 전자가 요청("1분 지나면 바로 모든 좀비가
-  쓰러지고")과 일치 — §0.2 는 그 해석으로 설계됨. 후자로 바꾸려면 `EndCombatPhase` 의 강제
-  `state=Die` 루프만 빼면 된다(스폰만 멈추는 건 이미 `m_phase` 전환 자체가 함).
-- **정비 페이즈 UI 형태**: 배치는 3인칭 그대로(조준 레이) 인데, "구매"는 화면 어딘가 상점
-  패널이 필요 — `ui::UIWindow`/`Button` 조합으로 `InGameHud` 옆에 얹는 정도로 충분해 보이나
-  실제 레이아웃은 `ui-architecture.md` 관행으로 착수 시 결정.
-- **웨이브 에스컬레이션이 무한히 가능한가**: `SimAgent`/인스턴싱 쪽 capacity(§0.5, 지금
-  `kActiveCrowd`)가 상한 — 그 이상은 스폰 실패로 조용히 캡핑되므로 안전하지만, "동시에 몇
-  마리까지 보여줄 것인가"는 `instanced-rendering.md`/`horde-design.md` 규모 목표와 같은 질문.
+**해결됨** (구현하면서 결정 — 아래는 그 결과만 기록, 코드가 근거):
+- **필드 경계 반사 vs 목표 추적**: 충돌 안 남. `StepSimAgents`가 옛 사인파 드리프트+반사를
+  통째로 목표-추적 스티어링으로 교체했다 — 반사 로직 자체가 크라우드 경로엔 더 이상 없음
+  (남은 건 `a.pos.x` 루즈 클램프뿐, 바운스 아님). "반사" 로직은 여전히 `StepOneActor`(씬 1
+  전용 캔드 액터)에만 있고 크라우드와는 무관.
+- **목표 "도달"의 정의**: 후자(반경 스칼라 비교, `kCrowdGoalRadius`)로 결정 — 콜라이더 접촉이
+  아니라 거리 비교. 도달 시 진짜 `Release` 아니라 `RespawnAgentInPlace`(§4.5 원칙과 일치).
+- **동시 다수 사망 시 기브 폭증**: 문서가 제안한 그대로 — `Acquire` 실패는 조용히 무시
+  (`if (!g) continue;`). 통합 검증에서 실제로 256개 풀이 꽉 차는 것까지 관찰했고 크래시 없음.
+- **전멸 타이밍**: 전자(타이머 만료 즉시 전부)로 결정 — `EndCombatPhase`가 그 프레임에
+  `m_agentHandles` 전부 `Release`. 원 요청("1분 지나면 바로 모든 좀비가 쓰러지고")과 일치.
+
+**결정했지만 문서 제안과 다른 경로**:
+- **화염방사기 원뿔 후보 좁히기**: `CollisionWorld3D` 반경 질의를 새로 추가하지 않고, §4의
+  `TriggerExplosion`/`StepOrdnance`와 같은 **직접 선형 스캔**(거리+각도)을 재사용했다 — 이미
+  검증된 패턴이라 새 질의 API보다 단순. §11 "하지 말 것"이 "수천 마리면 브로드페이즈로
+  좁히라"고 적어둔 것과 문자상 어긋나지만, `StepSimAgents` 자체가 매 스텝 크라우드 전체를
+  어차피 순회하므로 지금 규모(16384)에서 추가 O(N) 스캔 하나가 실측으로 문제될 때까지는
+  보류 — 측정 게이트, 지금은 안 잼.
+
+**아직 열림** (스코프 밖으로 명시적으로 미룸):
+- **철조망 데미지 확장**: 지금은 순수 슬로우. 화염 도트 필드(`burnDps`/`burnTimeLeft`)를
+  범용화(`dotDps`/`dotTimeLeft`)해 재사용할 수 있다는 방향만 기록, 두 번째 도트 무기가
+  실제로 필요해질 때까지 보류(YAGNI).
+- **정비 페이즈 UI(상점 패널)**: §0.1 자원 획득/소비 로직은 이미 구현됐지만(배치 함수 자체가
+  자금 게이트) 그걸 보여주는 화면은 없음 — `InGameHud` 갱신 방식(§11 "사용 방법" 참고) 결정
+  후 착수.
+- **웨이브 에스컬레이션**: `WaveDirector`가 아직 없어 스코프 밖. 나중에 좀비 종류/스펙
+  (`typeId`) 확장과 함께 다룰 예정 — 지금은 웨이브마다 항상 같은 `kActiveCrowd.count`로
+  리스폰(난이도 곡선 없음).
 
 ---
 

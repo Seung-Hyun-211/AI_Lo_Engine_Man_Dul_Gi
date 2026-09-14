@@ -21,10 +21,13 @@ namespace engine::render
         float viewProj[16];
         // Camera view alone (world -> view space), row-major, no transpose needed
         // (same convention as viewProj). Lets a pixel shader rotate a world-space
-        // normal into view space (docs/post-process-gbuffer-research.md §3.3) or
-        // pull the camera's world-space right/up axes from rows 0/1 for billboard
-        // construction (docs/particle-system-research.md §3) without either
-        // feature needing its own cbuffer field.
+        // normal into view space via `mul(vector, view)` (docs/post-process-
+        // gbuffer-research.md §3.3) or pull the camera's world-space right/up
+        // axes from COLUMNS 0/1 (not rows - math::LookAtLH packs one component
+        // of each axis per row, so a row mixes right/up/forward together; the
+        // column is the full axis) for billboard construction (docs/particle-
+        // system-research.md §3/§12) without either feature needing its own
+        // cbuffer field.
         float view[16];
         float cascadeViewProj[kShadowCascadeCount][16]; // world -> shadow map clip space, one per cascade
         float keyDirection[4];   // xyz = normalised travel direction, w = intensity

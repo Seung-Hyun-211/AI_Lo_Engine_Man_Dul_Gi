@@ -32,10 +32,12 @@ CharacterAnimationState (game/)
   · Update(dt, Locomotion) : 상태가 바뀌면 해당 클립으로 스냅 + clipTime=0, 아니면 clipTime += dt
                              Locomotion→클립 매핑은 render/r3d/CharacterAnimationClips.h 의 kUnityChan{Wait,Walk,Run,Jump}Clip
 SnapshotBuilder (game/)
-  · BuildCamera  : focus = CharacterPosition + (0,1.3,0);  forward = f(camYaw,camPitch);  eye = focus - forward*orbitDistance
-                   (orbitDistance: 씬 1=3.6, 씬 2=6.0, 씬 3=5.5 — `Simulation::kDemoScene` 분기, `docs/shadows.md` "씬 3")
-  · BuildScene3D : model.world = RotationY(CharacterFacingYaw + kModelYawOffset) * Translation(CharacterPosition)
-                   model.animClipIndex/Time = Simulation 의 값 (렌더 스레드가 §5.2a 로 CPU 스킨)
+  · BuildCamera  : 씬 1/3 = 3인칭 오빗, eye = focus - forward*orbitDistance(씬1=3.6, 씬3=5.5).
+                   **씬 2는 1인칭**(총구 이펙트 플레이테스트 후 전환, particle-system-research.md
+                   §12) — eye = focus 그대로(뒤로 안 뺌), forward 방향을 바로 봄.
+                   focus = CharacterPosition + (0,1.3,0), forward = f(camYaw,camPitch) 공통.
+  · BuildScene3D : 씬 1/3만 플레이어 모델을 그림(model.world = RotationY(...) * Translation(...)).
+                   **씬 2는 1인칭이라 자기 모델을 안 그림** — 총구 파티클을 가리던 문제 해결.
 ```
 
 스레드 경계는 여전히 값 기반 `RenderSnapshot` 하나뿐 — 카메라도 캐릭터도 `Mat4`/`Vec3`/`int`/`float` 로만 넘어간다.
@@ -70,21 +72,27 @@ SnapshotBuilder (game/)
   `ModelDraw`/`MeshDraw`/`CameraView` 값으로만 방출 (OCP, [engine-overview.md](engine-overview.md) DIP 절).
 - 마우스 잠금은 `Win32Window::SetPointerLocked` 로만. 패스나 UI 에서 `ClipCursor`/`ShowCursor` 직접 호출 금지.
 
-## 데모 씬 2 — 절벽 위 조망 + 시뮬레이션 군중
+## 데모 씬 2 — 언덕 위 조망 + 시뮬레이션 군중
 
-`Simulation::kDemoScene` (`static constexpr int`, **지금 기본값 `3`** — 그래픽 작업용) 로
-고른다. `1` = 위에서 설명한 로컬 배속 액터 3인 + 작은 슬랩. `2` =
-**같은 플레이어**가 메사(mesa) 위에 서서 앞쪽 넓은 평지를 내려다보고, 그 아래에서 다수의
-경량 개체(`SimAgent`)가 배회한다. 대규모 디펜스 장르([synopsis.md](synopsis.md))의
-"다수 오브젝트" 파이프라인 씨앗. `3` = 크라우드 없는 그림자/조명 쇼케이스 — 정적 씬이라
-이 문서보다 [shadows.md](shadows.md) "씬 3" 이 계약.
+`Simulation::DemoScene`(런타임 열거형, **아래 "사용 방법" — 타이틀의 SELECT SCENE 메뉴로
+고른다, 리빌드 불필요**) 로 고른다. `CharacterDemo`(1) = 위에서 설명한 로컬 배속 액터 3인 +
+작은 슬랩. `DefenseCombat`(2) = **같은 플레이어**가 완만한 언덕(10m 높이, 20도 경사로 아래
+평지까지 이어짐 — 원래는 수직 절벽/메사였으나 사격 시야 확보를 위해 경사로로 교체) 위에 서서
+앞쪽 넓은 평지를 내려다보고, 그 아래에서 다수의 경량 개체(`SimAgent`)가 언덕을 올라오며
+배회한다. 대규모 디펜스 장르([synopsis.md](synopsis.md))의 "다수 오브젝트" 파이프라인 씨앗 —
+[defense-combat-design.md](defense-combat-design.md) §0~§7의 무기 5종/무한 웨이브/패배·재시작이
+전부 이 씬 위에서 동작. `ShadowShowcase`(3) = 크라우드 없는 그림자/조명 쇼케이스 — 정적 씬이라
+이 문서보다 [shadows.md](shadows.md) "씬 3" 이 계약. `EffectsTest`(4) = 파티클 이펙트만
+독립적으로 미리보는 빈 사격장 — 아래 "데모 씬 EffectsTest" 참고.
 
 ```text
 Simulation (game/)
-  · SpawnActors        : kDemoScene==2 → 플레이어 1명만. pos.y = kCliffTop,
-                         groundY = kCliffTop (그 높이에 착지), halfRange = kPlateauHalf(5.0,
-                         원점 대칭 클램프). 메사 앞면은 kPlateauHalf+1.0 → 플레이어가 절벽
-                         가장자리 1m 앞까지 걸어감. m_cameraPitch = -0.5.
+  · SpawnActors        : ActiveScene()==DefenseCombat → 플레이어 1명만. pos.y = kHillHeight(10.0),
+                         groundY = kHillHeight (그 높이에 착지), halfRange = kPlateauHalf(5.0,
+                         원점 대칭 클램프) — 플레이어는 언덕 꼭대기 평지 안에서만 움직이고
+                         경사로 자체는 걸어 내려가지 않는다(카메라 시야만 바뀜). 평지 끝
+                         (kPlateauHalf+1.0 = kHillTopZ)부터 경사로가 시작, kHillSlopeDeg(20도)로
+                         kHillHeight(10m) 만큼 내려가 평지(높이 0)와 만난다. m_cameraPitch = -0.5.
   · SpawnSimAgents     : m_agents(core::ObjectPool<SimAgent>).Init(kActiveCrowd.capacity) →
                          kActiveCrowd.count 번 Acquire + SeedAgent(결정적, RNG 없음).
                          핸들은 m_agentHandles 에 보관(churn 용). 수·모델은 game/CrowdConfig.h.
@@ -103,10 +111,10 @@ Simulation (game/)
                         로 m_agentTouch[slot] 채움. 시뮬 상태 안 건드림(렌더 전용).
   · Actor.groundY/halfRange : 액터별 바닥 높이·이동 반경. 씬 1 은 기본값(0 / 7.5)이라 동작 불변.
 SnapshotBuilder (game/)
-  · BuildCamera   : kDemoScene==2 면 orbit 거리 3.6→6.0 (필드·군중이 프레임에 들어오게).
+  · BuildCamera   : ActiveScene()==DefenseCombat 면 1인칭(위 §데모씬2 참고), 아니면 3인칭 오빗.
   · BuildLighting : 씬 2 는 셰도우 ortho 를 넓히고(22→64) 중심을 +Z 로 밀어 군중을 덮는다.
-  · BuildScene3D  : kDemoScene==2 → BuildCliffScene (넓은 평지 Plane + 메사 Cube +
-                    기둥 마커 + **크라우드 = 인스턴스드**: 메시/높이/피벗은 kActiveCrowd
+  · BuildScene3D  : ActiveScene()==DefenseCombat → BuildCliffScene (넓은 평지 Plane + 플레이어 평지 Cube +
+                    경사 램프 Plane(RotationX) + 기둥 마커 + **크라우드 = 인스턴스드**: 메시/높이/피벗은 kActiveCrowd
                     (Cube→MeshId::Cube 중심피벗, Model→MeshId::CrowdModel 발피벗).
                     m_agents.ActiveIndices() 순회, 프러스텀·최대거리 컬 + 거리 LOD 2단계
                     (d2 <= kAgentShadowDist² → 근 lod0, 아니면 원 lod2)로 lodBucket 나눠 배치
@@ -133,25 +141,44 @@ SnapshotBuilder (game/)
 
 ### 사용 방법 (How to use)
 
-- **씬 전환**: `src/game/Simulation.h` 의 `Simulation::kDemoScene` 를 `1`/`2`/`3` 으로. 리빌드.
-  (런타임 토글이 필요해지면 생성자 인자로 승격 — 지금은 YAGNI.) 지금 커밋된 기본값은 `3`
-  (그림자/조명 쇼케이스, [shadows.md](shadows.md) "씬 3") — 크라우드·폭발 데모를 보려면 `2` 로.
+- **씬 전환은 런타임** (리빌드 불필요) — 타이틀 화면 "START" → "SELECT SCENE" 메뉴
+  (`TitleScreen.h/.cpp` `BuildSceneSelectScreen`, 버튼 4개: DEFENSE COMBAT/CHARACTER DEMO/
+  SHADOW SHOWCASE/EFFECTS TEST) → 고른 씬으로 `Application::EnterInGame(DemoScene)`. 게임
+  중엔 ESC → 설정 화면 맨 아래 **"EXIT TO TITLE"** 로 언제든 타이틀/씬 선택으로 돌아가 다른
+  씬을 고를 수 있다. `Simulation::kDemoScene`(예전 `static constexpr int`)는 이제 `enum class
+  DemoScene {CharacterDemo=1, DefenseCombat=2, ShadowShowcase=3, EffectsTest=4}` 런타임
+  멤버(`m_demoScene`,
+  `ActiveScene()`로 읽음) — `Simulation::EnterScene(DemoScene)`이 액터 목록을 지우고 새로
+  짓는다(크라우드/기브/오드넌스 풀도 씬이 뭐든 매번 정리 — DefenseCombat 이 아닌 씬에 남은
+  크라우드가 계속 `ParallelFor`로 스텝되는 낭비를 막으려고). `SpawnActors`/`SnapshotBuilder`의
+  `BuildCamera`/`BuildLighting`/`BuildScene3D` 전부 `if constexpr (kDemoScene==N)` 대신
+  `if (simulation.ActiveScene() == DemoScene::N)` 런타임 분기로 바뀜 — 씬마다 다른 코드를
+  컴파일해 없애는 이점은 사라졌지만(전부 항상 컴파일됨), 게임 도중 씬을 자유롭게 오갈 수
+  있다. `m_demoScene`의 멤버 초기값(`DefenseCombat`)은 오직 `Simulation` 생성 직후(즉 앱을
+  막 띄운 순간)에만 의미가 있고, "SELECT SCENE"에서 뭘 누르든 `EnterScene`이 그 값을 덮어써서
+  실제로 뭐가 뜨는지는 항상 사용자가 고른 씬이다.
 - **군중 설정 = `game/CrowdConfig.h` 의 `kActiveCrowd`** (한 줄). 프리셋: `kCrowdBoxes`(600 큐브,
-  원래 데모) / `kCrowdZombies`(16384/16384, `Zombie1.FBX` + VAT + **`CrowdShading::Toon` 기본**,
-  규모 실험치 — 실측 미검증).
+  원래 데모) / `kCrowdZombies`(500/500, `Zombie1.FBX` + VAT + **`CrowdShading::Toon` 기본**,
+  실제 플레이 시 체감 끊김 신고를 받고 16384→500 으로 낮춤 — 아래 "풀 churn 버그" 참고).
   `CrowdConfig{count, capacity, mesh, shading, height, colliderRadius}` — `Simulation`(스폰·풀·
   콜라이더)·`SnapshotBuilder`(메시·셰이더·높이·피벗)가 전부 이걸 읽는다. `capacity >= count` 는
   `static_assert` 로 강제. `shading`(`Smooth`=`mesh_instanced.hlsl` / `Toon`=`mesh_instanced_toon.hlsl`,
   엔진 셀 룩)이 배치 셰이더를 고른다(§9.7). 모델 파일은 `MeshPass3D.cpp` 의 `kCrowdModelFbx`.
   상세 [instanced-rendering.md](instanced-rendering.md) §9.5·§9.7.
-  렌더는 배치 1~2개 = `DrawIndexedInstanced`, 상한 `MeshPass3D::kMaxInstances`(32768, count 의
-  2배 여유). 좀비 ~4.8k tris → 16384 ≈ 79M tris/프레임(실 GPU 기준 미실측 — WARP 는 슬라이드쇼,
-  **우상단 FPS 로 확인**).
+  렌더는 배치 1~2개 = `DrawIndexedInstanced`, 상한 `MeshPass3D::kMaxInstances`(32768, 여유 폭 —
+  count 를 500 으로 낮춘 지금은 훨씬 더 여유).
+- **풀 churn 버그(발견·수정됨)**: `SpawnSimAgents()`가 매 웨이브 전환마다(60초 Combat→Prep,
+  또 60초 Prep→Combat) `m_agents.Init(capacity)`를 다시 불러 풀 전체를 파괴·재구성하고 있었다 —
+  실기기(RTX 5070 Ti)에서 "평균 90fps인데 걸어다니기만 해도 일정 간격으로 뚝뚝 끊긴다"는 신고로
+  발견. `EndCombatPhase()`가 이미 모든 핸들을 `Release`해 풀을 완전히 비워두므로 재-`Init`은
+  불필요한 반복 작업이었다. `if (m_agents.Capacity() == 0)`로 감싸 최초 1회만 `Init`하게 고침
+  ([Simulation.cpp:148](../src/game/Simulation.cpp:148)). 웨이브 3회 순환 동안 스텝 루프
+  실행시간이 2ms를 넘는 프레임이 하나도 없는 것으로 확인.
 - **폭발 넉백 데모(씬 2 전용)**: `Application` 이 InGame 진입 5초 뒤 자동 1회, 이후 `F` 키로
   재발파 — `Simulation::TriggerExplosion(center, radius, power)` 가 반경 내 `SimAgent` 에게
   바깥+위 임펄스(거리 선형 감쇠)를 줘 포물선으로 튕겨나가게 한다(`SimAgent::vel/airborne`,
   `StepSimAgents` 가 낙하 적분). 좌표·반경·세기는 `Application.cpp` 익명 네임스페이스의
-  `kBlastCenter/Radius/Power/kAutoBlastDelay`. `kDemoScene != 2` 면 `TriggerExplosion` 자체가
+  `kBlastCenter/Radius/Power/kAutoBlastDelay`. `ActiveScene() != DefenseCombat` 면 `TriggerExplosion` 자체가
   no-op. 실제 게임에서는 타이머/키 대신 게임플레이 이벤트(투사체 충돌, 타워 AoE)가 불러야 한다.
 - **FPS 표시**: `Application` 이 `1/delta` EMA(`m_fpsSmoothed`) → `SnapshotBuilder::Build(fps)` →
   `ui::DrawRect`+`DrawText` 우상단(모든 화면 위). 끄려면 `Build` 호출에서 `fps` 를 0 으로.
@@ -161,9 +188,12 @@ SnapshotBuilder (game/)
   [instanced-rendering.md](instanced-rendering.md) §9.6.
 - **풀 churn 속도**: `kAgentChurnIntervalSteps`(현재 12스텝마다 1마리 재활용 — 데모용 검증 churn).
   키우면 재활용이 덜 눈에 띈다. 웨이브 스폰/디스폰이 생기면 이 churn 은 제거.
-- **필드·메사 치수**: `kCliffTop`(메사 높이), `kPlateauHalf`(플레이어 이동 반경), `kFieldHalf`
-  (평지 반경), 크라우드 z 범위 `kFieldAgentZLo/Hi`(Simulation.cpp 익명). `SnapshotBuilder.cpp` 의
-  `BuildCliffScene` 가 이 값으로 프롭을 배치하므로 숫자만 바꾸면 메사·평지가 따라온다.
+- **필드·언덕 치수**: `kHillHeight`(언덕 높이), `kHillSlopeDeg`(경사각), `kPlateauHalf`(플레이어
+  이동 반경), `kFieldHalf`(평지 반경), 크라우드 z 범위 `kFieldAgentZLo/Hi`(Simulation.cpp 익명).
+  경사로 시작/끝 z(`kHillTopZ`/`kHillBottomZ`)와 크라우드 개체의 실시간 높이(`HillHeightAtZ`)는
+  `Simulation.cpp` 익명 네임스페이스에서 파생 — `SnapshotBuilder.cpp` 의 `BuildCliffScene` 이
+  같은 공식을 램프 메시 배치에 재사용(주석 참고). 숫자만 바꾸면 언덕·평지·크라우드 높이가
+  전부 따라온다.
 - **크라우드 컬·LOD**: `BuildCliffScene` 의 `kAgentCullDist`(100, 이 거리 밖 스킵),
   `kAgentShadowDist`(34, 이 거리 밖은 그림자 안 캐스트). 프러스텀 스피어 반경 = `height*0.6`.
 - **군중 거동**: `Simulation::StepSimAgents` 의 heading 드리프트 계수·`speed` 범위·bob 진폭,
@@ -189,6 +219,37 @@ SnapshotBuilder (game/)
   `Simulation::Step` 안에서 직접 질의해 시뮬 상태에 반영.
 - `Contacts()` 만 필요하면서 `RaycastClosest` 는 필요 없을 때도 `Step()` 은 불러야 한다(레이캐스트
   질의는 `Step()` 없이 돌지만 `Contacts()` 는 `Step()` 이 채운다).
+
+## 데모 씬 EffectsTest — VFX 검증 사격장
+
+좀비/무기/웨이브 루프 없이 파티클 이펙트 3종(머즐 플래시, 폭발, 기브 피 스프레이 —
+[particle-system-research.md](particle-system-research.md))만 즉시 미리보기하는 빈 씬. 타이틀
+"START" → "SELECT SCENE" → "EFFECTS TEST".
+
+```text
+Simulation::SpawnActors (EffectsTest 분기)
+  플레이어 1명, pos=(0, 1.6, 0), facingYaw=0 — 그 외 액터 없음.
+SnapshotBuilder
+  · BuildCamera : DefenseCombat 과 함께 1인칭 취급(원점 그대로, 뒤로 안 뺌).
+  · BuildScene3D: 플레이어 모델 자기 자신은 안 그림(1인칭) + BuildEffectsTestScene —
+                  20m 오프셋 평지 Plane + 5/10/20/40m 마다 노란 기둥 + 바닥 타깃 플레이트.
+  · HUD 텍스트  : "1: MUZZLE FLASH  2: EXPLOSION  3: GIB BLOOD SPRAY" 상단 고정 표시.
+Application (프레임 루프, InGame && !overlay)
+  · KeyPressed('1'/'2'/'3') → Simulation::PreviewVfxEffect(MuzzleFlash/Explosion/GibBurst)
+    (DefenseCombat 의 박격포/지뢰/철조망 키와 물리적으로 같은 키 — 서로 다른 씬이라 충돌 없음,
+    양쪽 다 자기 씬이 아니면 내부에서 조용히 no-op).
+Simulation::PreviewVfxEffect
+  · m_lookRay.origin/dir 를 따라 스폰 — UpdateCrowdQueries()가 EffectsTest에서도 돌아
+    (크라우드 콜라이더는 0개라 레이는 항상 빗나가지만 origin/dir 자체는 정상 계산됨) 마우스로
+    보는 방향에 맞춰 미리보기가 나온다. MuzzleFlash 는 눈 바로 앞(kMuzzleForwardOffset),
+    Explosion/GibBurst 는 kEffectsPreviewDistance(8m) 앞.
+```
+
+- **씬을 나가도 안전**: `IsMatchLost()`가 `ActiveScene()==DefenseCombat`도 같이 확인하도록
+  고쳐뒀다 — 안 그러면 DefenseCombat 에서 패배(목표 HP 0)한 직후 EffectsTest 로 넘어와도
+  `m_objectiveHealth` 가 여전히 0이라 매 프레임 타이틀로 튕기는 버그가 났다.
+- **사용 방법**: 마우스로 조준하고 1/2/3 눌러서 원하는 이펙트를 원하는 거리 마커 근처에서
+  관찰. 크기·색·수명 튜닝은 `game/vfx/ParticleEffects.h`.
 
 ## 알려진 한계
 

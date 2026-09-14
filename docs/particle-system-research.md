@@ -1,11 +1,17 @@
-# 파티클 시스템 연구 — 총구 이펙트 + 폭발 버섯구름
+# 파티클 시스템 — 총구 이펙트 + 폭발 버섯구름 + 좀비 파편(블러드 스프레이)
 
-**상태: 연구 + 설계만. 미구현.** 코드 변경 없음(요청: "문서로만 남겨"). 목표 두 가지를 기준으로
-이 엔진 구조(스레드 경계·2D/3D 분리·스냅샷·셰이더 파이프라인)에 맞는 파티클 아키텍처를 조사하고
-설계한다:
+**상태: 구현 완료 (텍스처 없는 v1 — 절차적 원형 글로우).** `game/vfx/{Particle,ParticleEffectDef,
+ParticleEffects,ParticleSystem,VfxHooks}.*` + `render/r3d/ParticlePass3D.*` +
+`assets/shaders/particle.hlsl`. 실제 구현이 아래 설계와 갈라진 지점은 문서 끝
+"구현 노트"에 정리. 이 엔진 구조
+(스레드 경계·2D/3D 분리·스냅샷·셰이더 파이프라인)에 맞춰 파티클 아키텍처를 완결된 설계로
+정리했다 — §9 구현 순서를 그대로 따라가면 바로 착수 가능한 수준. 목표 세 가지:
 
-1. **총기 격발** — 총구 화염(머즐 플래시) + 화약연기
-2. **폭탄 폭발** — 섬광 + 화구 + 버섯구름(줄기+갓) + 잔해/불티
+1. **총기 격발** — 총구 화염(머즐 플래시) + 화약연기 (`docs/defense-combat-design.md` §5 라이플)
+2. **폭탄 폭발** — 섬광 + 화구 + 버섯구름(줄기+갓) + 잔해/불티 (`defense-combat-design.md` §4
+   박격포/지뢰)
+3. **좀비 파편화** — 피 스프레이 파티클(§7.3, 신규) + 이미 구현된 기브 강체 조각
+   (`defense-combat-design.md` §3 `Simulation::SpawnGibs`)의 조합
 
 관련: [instanced-rendering.md](instanced-rendering.md)(이 문서가 가장 많이 재사용하는 패턴 —
 인스턴스 배열+배치+DrawIndexedInstanced), [horde-design.md](horde-design.md)(SoA+풀+새 렌더 패스
@@ -466,6 +472,43 @@ if def == kExplosionSmokeStem and phase == Rising:
   중력 적분 + (옵션) `CollisionWorld3D` 레이캐스트로 착지 판정(탐지만, 규칙 8 — 응답은 이
   파편 스텝 코드 안에서).
 
+### 7.3 좀비 파편화 — 피 스프레이 (기브와 조합)
+
+기브(`GibPiece`, **이미 구현됨** —
+[defense-combat-design.md](defense-combat-design.md) §3 `Simulation::SpawnGibs`, 큐브 파츠 +
+탄도 낙하)는 "덩어리가 튕겨 날아간다"만 담당한다. "터지는 순간의 붉은 스프레이"는 물리 특성이
+전혀 달라(강체 낙하 vs 흩날리는 반투명 스프라이트) 파티클 몫이다 — §2.2 폭발이 강체 파편과
+불티/연기를 분리한 것과 같은 판단.
+
+```cpp
+inline constexpr ParticleEffectDef kGibBloodSpray{
+    .blend = BlendMode::AlphaBlend, .spriteName = "vfx_blood", .frameCount = 1,
+    .gravityScale = 1.0f, .dragPerSec = 0.2f,
+    .lifeMin = 0.25f, .lifeMax = 0.45f, .speedMin = 1.5f, .speedMax = 4.0f,
+    .spreadDeg = 40.0f, .burstMin = 6, .burstMax = 10 };
+
+void SpawnGibBurst(ParticleSystem& vfx, math::Vec3 deathPos)
+{
+    vfx.SpawnBurst(kGibBloodSpray, deathPos, { 0.0f, 1.0f, 0.0f });
+}
+```
+
+- **호출 지점**: `Simulation::SpawnGibs(pos)` 안, 실제 `GibPiece` 스폰과 같은 자리 — 죽음
+  이벤트 하나가 강체 조각(기존) + 피 파티클(신규)을 함께 트리거한다. `SpawnGibs`가
+  `ParticleSystem&`을 추가로 받도록 시그니처를 넓히거나, `Simulation`이 `ParticleSystem` 멤버를
+  갖고 내부에서 같이 호출하거나는 §6.1의 소유권 판단(`Simulation` 멤버 vs `Application`이 갖고
+  콜백으로 넘김)을 따른다 — 이 문서가 새로 결정할 건 없음.
+- **색은 스프라이트가 담당**: `kGibBloodSpray`의 붉은 색은 텍스처 자체에 있고
+  `colorStart/End`(§4.1)는 알파 페이드만 맡는다. 좀비 타입마다 피 색이 달라질 일이 생기면
+  그때 `colorStart`를 타입별로 바꾸는 정도로 확장(YAGNI — 지금은 좀비 하나뿐,
+  `defense-combat-design.md`의 난이도/적 종류 확장과 같이 미룬 항목).
+- **기브 메시 자체의 업그레이드**(큐브 → 저폴리 팔/다리/머리)는 **이 문서 범위 밖** —
+  `defense-combat-design.md` §3이 이미 "1차: 임시 큐브, 실제 팔/다리/머리 저폴리 메시로 후속
+  교체"로 남겨둔 별도 작업(새 FBX 임포트 + `GibDef::mesh` 배열화만 있으면 됨, 파티클 시스템과
+  무관).
+- **파츠 착지 시 흙먼지**(§2.2의 폭발 파편과 같은 확장 여지)는 파츠별 착지 판정(§7.2의 파편
+  착지 판정과 동일한 문제)이 먼저 필요해 v1 범위 밖 — §11에 열린 질문으로 추가.
+
 ---
 
 ## 8. 스레드 / 불변 규칙 매핑
@@ -524,6 +567,9 @@ vfx::SpawnMuzzleFlash(m_particles, muzzleWorldPos, muzzleForward);
 
 // 폭발
 vfx::SpawnExplosion(m_particles, impactPos);
+
+// 좀비 사망 (Simulation::SpawnGibs 와 같은 자리에서 함께)
+vfx::SpawnGibBurst(m_particles, deathPos);
 ```
 
 `Simulation::Step` 안, 이벤트가 발생한 그 스텝에서 호출(다른 스텝 부수효과와 같은 타이밍 규칙,
@@ -583,6 +629,10 @@ jobs.ParallelFor(0, n, c, [&](b,e){ for(...) pool.Release(h); });   // 금지 �
 - **파티클 수 상한과 우선순위**: 풀이 꽉 찼을 때 새 버스트가 밀려나야 하는지(오래된 것 강제
   회수) 아니면 스폰 실패를 무시할지 — 크라우드의 `Acquire` 실패 시 무효 핸들 반환 관행과
   동일하게 "무시"로 시작, 눈에 띄게 파티클이 씹히면 강제 회수(가장 나이 많은 것부터) 추가.
+- **기브 파츠 착지 흙먼지**: §7.3의 `kGibBloodSpray`는 사망 위치에서 한 번 터지는 것만 다룬다.
+  낙하한 파츠 각각이 착지하는 순간의 흙먼지 퍼프는 파츠별 착지 판정이 먼저 필요(§7.2 폭발
+  파편의 "탐지만" 착지 판정과 동일한 미해결 지점) — 그게 생기면 `kGibDustPuff` 같은 정의
+  하나만 추가하면 됨(새 인프라 불필요).
 - **폭발 순간 실제 씬 조명(포인트 라이트 플래시)**: §2.2 의 섬광 파티클은 자체발광일 뿐 주변
   지오메트리를 밝히지 않는다. 폭심에 반경 큰 포인트 라이트를 순간 배치해 빠르게 페이드하면
   주변 벽/캐릭터가 실제로 밝아지는 연출이 가능 — 다만 포인트 라이트 자체가 아직 없다
@@ -592,8 +642,137 @@ jobs.ParallelFor(0, n, c, [&](b,e){ for(...) pool.Release(h); });   // 금지 �
 
 ---
 
-## 12. 관련 문서
+## 12. 구현 노트 — 실제 vs 위 설계
 
+실제 착수 시(§9 순서를 대체로 따라가되 텍스처 관련 항목은 전부 건너뜀) 위 설계와 갈라진 지점:
+
+- **텍스처/아틀라스 전부 없음** — §3/§4.2/§5.4가 가정한 `spriteName`/`atlasId`/플립북은
+  구현 안 함(사용자 판단: "일단 텍스처 없이"). `particle.hlsl`의 PS가 UV 중심으로부터의 거리로
+  `smoothstep` 감쇠를 계산해 절차적 원형 글로우를 그린다 — 셰이프가 전부 수학, 스프라이트
+  텍스처 샘플 자체가 없다. `ParticleInstance`도 그래서 `uvRect` 필드가 없어 28B가 아니라
+  **24B**(`pos@0, size@12, rotation@16, colorRgba@20`).
+- **`effectId` 인덱스 테이블 없음** — §4.1이 제안한 "Particle은 effectId만 들고 물리 파라미터는
+  공유 테이블에서 조회"를 안 하고, `gravityScale`/`dragPerSec`/`blend`/`kind`를 스폰 시점에
+  `ParticleEffectDef`에서 **파티클 자신에게 직접 복사**했다 — 이펙트 종류가 지금 7개뿐이라
+  테이블 조회 계층을 둘 이유가 없었다(YAGNI, 파티클당 몇 바이트 더 쓰는 대신 코드가 단순해짐).
+  이펙트 수가 많이 늘면(수십 종) 그때 §4.1 원안대로 되돌리는 게 맞음.
+- **자기 릴리즈는 GibPiece/PlacedOrdnance 패턴 그대로** — §6.2가 "핸들-of-i"를 뭉뚱그려
+  적었던 부분을 `Particle::selfIndex/selfGeneration` 필드로 구체화(디펜스 전투 설계 §3/§4의
+  "자기 참조 불완전 타입" 문제와 동일한 이유).
+- **색 lerp은 `ParticleSystem::Step`이 아니라 `SnapshotBuilder`에서** — §6.2가 물리 스텝에
+  색까지 같이 굴리는 것처럼 읽히지만, 실제로는 `Particle`이 `colorStart/End`(패킹된 RGBA)만
+  들고 있고 나이 기반 lerp은 렌더 변환 시점(`SnapshotBuilder::BuildVfxParticles`, 메인 스레드,
+  프레임당 1회)에서 한다 — 시뮬 스텝은 순수 물리만(SRP).
+- **알파 배치 정렬 기준**: §4.3이 예고한 대로 `AlphaBlend`만 카메라 거리 내림차순 정렬,
+  `Additive`는 정렬 안 함(교환법칙) — `BuildVfxParticles`에 그대로 구현.
+- **"평면이 움직이는 것처럼 보인다" 개선(플레이테스트 피드백)**: 완전 대칭 원은 회전을 줘도
+  티가 안 나고, 노이즈가 전혀 없어 여러 개가 같이 움직이면 "동일한 스티커 여러 장이 밀려나는"
+  것처럼 보였다. 텍스처 없이 세 가지로 대응:
+  1. **절차적 블롭 노이즈**(`particle.hlsl` PS) — 각도를 8개 버킷으로 나눠 인스턴스별 시드로
+     해시하고 인접 버킷끼리 보간, 그 값으로 가장자리 반지름을 흔든다(0.78~1.13배) — 완벽한
+     원 대신 불규칙한 뭉게구름 모양. 시드는 VS에서 `ipos`를 해시해 만듦(파티클마다 다른
+     무늬).
+  2. **파티클별 회전/스핀** — 이전엔 `Particle`에 없던 `rotation`/`angularVel`을 추가,
+     `SpawnBurst`에서 랜덤 초기 각도 + `ParticleEffectDef::angularVelMax`(이펙트별) 안에서
+     랜덤 회전 속도 부여, `Step`이 매 스텝 적분. 대칭 원일 땐 회전이 안 보였지만 노이즈
+     블롭이 생기면서 의미 있어짐.
+  3. **속도 방향 모션 스트레치** — `SnapshotBuilder::BuildVfxParticles`가 파티클 속도를
+     카메라 축(view 행렬 0/1행, §3과 동일)에 투영해 화면상 진행 방향을 구하고, 그 방향으로
+     `rotation`을 덮어쓰며 `stretch`(1.0~2.5배, 속도 1.5~8m/s 구간에서 램프)로 로컬 X축을
+     늘림 — 빠른 불티/화구 파편이 "미끄러지는 스티커"가 아니라 "회전하며 튀는 덩어리"로
+     보이게 함. 느린 파티클(연기 등)은 스트레치 없이 시뮬레이션된 회전만 씀.
+  `ParticleInstance`에 `stretch` 필드 추가로 24B→28B(예산 여유 있음, §4.3). 20초간 반복
+  발사(36회) 스트레스 테스트로 파티클 수 안정(29~30개 유지), 크래시 없음 확인.
+
+  **재확인 결과: 여전히 평면으로 보임** — 위 셋 다 "카메라를 향한 평면 카드 자체"를 손보는
+  것이라 빌보드의 근본 한계(정의상 항상 카메라 정면이라 각도가 바뀌어도 실루엣이 안 바뀜)를
+  못 넘었다. 진짜 입체감은 실제 3D 지오메트리로만 됨 — 아래 "폭발 3D 코어" 참고.
+
+- **폭발 3D 코어(`FireChunk`)** — 빌보드가 아니라 **진짜 오퍼크 `MeshDraw`(Cube)** 를 폭발 중심에
+  5~8개 추가로 스폰. `MeshPass3D`가 일반 조명·오클루전을 그대로 적용하기 때문에 각도가
+  바뀌면 실루엣도 실제로 바뀜 — 빌보드로는 원천적으로 안 되던 부분. `Simulation::FireChunk`
+  (자기 릴리즈 필드는 GibPiece와 동일 패턴) + `core::ObjectPool<FireChunk>`(용량 64) +
+  `SpawnFireChunks`/`StepFireChunks` — `TriggerExplosion`과 `PreviewVfxEffect`의 Explosion
+  분기 양쪽에서 `vfx::SpawnExplosion` 바로 옆에 호출(씬 게이트는 호출자 쪽에서만, 함수
+  자체는 씬 무관). 회전은 `spin` 각도 하나로 `RotationX(spin*0.7) * RotationY(spin)` 두 축을
+  동시에 굴려 값싸게 "구르는" 느낌만 냄. `MeshPass3D`는 불투명이라 알파 페이드가 안 되므로,
+  `life/maxLife` 비율로 **크기를 줄여서** 사라지는 것처럼 보이게 하고, 같은 비율로 밝은
+  노란색→어두운 빨간색으로 "식는" 색 그라데이션을 줌(색은 `FireChunk`에 안 담고
+  `SnapshotBuilder::BuildFireChunks`가 그때그때 계산 — GibPiece가 색 필드를 안 가진 것과
+  같은 이유). 15초간 explosion 반복 발사(~19회) 스트레스 테스트로 청크 수 5~8개 유지(누적
+  안 됨), 파티클과 별개 풀이라 서로 안 건드림, 크래시 없음 확인.
+
+  **재재확인: 청크는 보이는데 뒤 연기가 여전히 평면·카메라 각도에 따라 이상함** — 원인은
+  §12 "3D로 보이기" 3번(속도 방향 모션 스트레치) 자체였다. `kExplosionSmokeStem`도
+  speedMin/Max(3~5m/s)가 스트레치 임계값(1.5m/s)을 넘어서 **크고 부드러워야 할 연기가
+  길쭉한 판자 모양으로 늘어나고 있었다** — 늘어난 평면은 원형보다 훨씬 더 "이거 사실 평평한
+  카드다"가 티가 나서, 카메라가 움직이면 실루엣이 눈에 띄게 이상해 보였다(스트레치 자체는
+  방향을 매 프레임 다시 계산하므로 여전히 카메라를 향하긴 하지만, 넓적하게 늘어난 모양이라
+  그 "회전"이 훨씬 두드러져 보임). 고침: `BuildVfxParticles`에서
+  `ParticleKind::ExplosionSmokeStem`은 스트레치 대상에서 제외(시뮬레이션된 회전만 사용,
+  작은 빠른 파편에만 스트레치 유지). 겸사겸사 `kExplosionSmokeStem` 버스트를 8~12→16~22로
+  늘리고 크기를 1.0~2.5m→0.5~1.4m로 줄여서, 몇 개의 큰 원반 대신 여러 개의 작은 원이
+  겹쳐 뭉게구름처럼 보이게 함(연기가 낱개로 안 보이게 하는 것도 "평면 티" 완화에 도움).
+
+  **진짜 원인(세 번째 신고): "시작 기준 45/135/225/315도에서 카메라를 안 향해 얇아 보임"** —
+  스트레치 제외로도 안 고쳐졌고, 이 각도 4개가 정확히 쿼드 로컬 코너(±1,±1)의 각도와 일치한다는
+  게 단서였다. 실제 원인은 카메라 축 추출 버그: `particle.hlsl`이
+  `camRight = (view._11, view._12, view._13)`(뷰 행렬의 **행**)로 읽고 있었는데,
+  `math::LookAtLH`(`src/math/Math3D.h`)는 xAxis/yAxis/zAxis 를 **행 하나에 한 성분씩** 채운다
+  (`m[0..2] = (xAxis.x, yAxis.x, zAxis.x)`) — 즉 축 전체는 행이 아니라 **열**
+  (`m[0],m[4],m[8]` = xAxis)에 있다. 행을 읽으면 세 축의 성분이 섞인, 카메라 요(yaw)에 따라
+  **길이가 늘었다 줄었다 하는** 가짜 벡터가 나오고, 특정 각도에서 그 길이가 확 줄어들면서
+  빌보드가 얇아 보인 것 — `WorldToViewNormal`(`common3d.hlsli`)처럼 `mul(vector, view)`로
+  행렬 전체를 곱하는 코드는 이 버그와 무관(정상 동작), **수동으로 행/열을 직접 뽑아 쓴 이
+  파일에서만** 생긴 문제. `SnapshotBuilder::BuildVfxParticles`의 스트레치 방향 계산도 같은
+  실수를 CPU 쪽에서 반복하고 있어서 같이 고침. `FrameConstants.h`/
+  `post-process-gbuffer-research.md`§3.3 에 있던 "행이 카메라 축" 이라는 잘못된 설명도 정정.
+  **교훈**: 뷰 행렬에서 카메라 축을 직접 뽑아 쓰는 코드가 또 생기면, 열(column 0/1/2 =
+  right/up/forward)인지 행인지부터 `math::LookAtLH`의 실제 채움 순서로 확인할 것 — "정규직교라
+  행이든 열이든 축"이라는 직관은 틀렸다(정규직교는 행렬이 회전만 한다는 뜻이지, 축이 행에
+  있다는 뜻이 아니다).
+- **전용 검증 씬**: 좀비/무기/웨이브 없이 세 이펙트만 즉시 미리보기하는
+  `Simulation::DemoScene::EffectsTest`(타이틀 "SELECT SCENE"의 "EFFECTS TEST") 추가 —
+  5/10/20/40m 거리 마커가 있는 빈 사격장, 1인칭, 키 1/2/3이 각각 머즐 플래시/폭발/기브 피
+  스프레이를 `Simulation::PreviewVfxEffect`로 현재 조준 방향에 스폰(`docs/demo-scene.md`
+  "EffectsTest"). 폭발/기브는 `kEffectsPreviewDistance`(8m) 앞에, 머즐은 눈 바로 앞에.
+- **런타임 검증**: 헤드리스 스모크 테스트로 (1) `particle.hlsl` VS/PS 컴파일 성공 확인,
+  (2) 폭발 트리거 시 34개 파티클(섬광1+화구10~16+연기줄기8~12+불티6~10 범위와 일치) 스폰 →
+  물리 스텝 → 나이 소진에 따라 t=5.0s~7.0s 사이 정상적으로 0까지 감소 확인. 크래시 없음.
+- **미구현으로 남긴 것**: 소프트 파티클, 파편/기브 착지 흙먼지, 폭발 순간 포인트 라이트 —
+  전부 §11에 이미 열린 질문으로 남아있던 것 그대로.
+- **플레이테스트 피드백으로 추가 수정**: (1) 총구 이펙트가 3인칭 오빗 카메라에서 캐릭터
+  옆에 뜬 평평한 2D 스프라이트처럼 보이고 캐릭터 몸에 가려지는 문제 — 씬 2를
+  **1인칭으로 전환**(`SnapshotBuilder::BuildCamera`가 `DemoScene::DefenseCombat`일 때 카메라를
+  시야 원점에 그대로 두고 뒤로 안 뺌, `BuildScene3D`도 그 씬에서 플레이어 자신의 모델을 안 그림 —
+  1인칭이라 자기 몸이 안 보이는 게 정상이므로. 이후 추가된 `EffectsTest`도 같은 1인칭 분기에
+  묶임 — §12 참고). 씬 1/3(`CharacterDemo`/`ShadowShowcase`)은 기존 3인칭 오빗 그대로.
+  머즐 파티클도 눈 위치에서 `kMuzzleForwardOffset`(0.4m) 만큼 앞으로 스폰해 니어클립에
+  안 걸리게 함. (2) 폭발 이펙트가 안 보인다는 신고 — 원래 크기(반경 0.4~1.4m)가 전장
+  스케일(수십 m 밖에서 봄)에 비해 너무 작았을 가능성이 커서 섬광/화구/연기 크기를 2~3배
+  키움(`ParticleEffects.h`). 실기기 재확인 대기 중 — 그래도 안 보이면 크기 문제가 아니라
+  렌더 경로 자체의 버그로 봐야 함.
+- **화염방사기 이펙트 추가** (`kFlameJet`, `ParticleEffects.h`) — 화염방사기는 데미지 로직
+  (`Simulation::ApplyFlameCone`)만 있고 시각 이펙트가 없어서 맞아도 화면에 아무것도 안 보이던
+  것을 발견해 추가. 머즐 플래시처럼 한 번에 큰 버스트를 터뜨리는 게 아니라, `FireWeapon`이
+  트리거 홀드 중 매 프레임(~60/s) 작은 버스트(2~3개)를 스폰 — 짧은 수명(0.18~0.3s) 입자가
+  겹치며 "연속된 불줄기"처럼 보이게 함. `speed*lifeMax`가 대략 `kFlameRange`(Simulation.h,
+  8m)에 맞춰져 있어 눈에 보이는 화염 길이가 실제 데미지 사거리와 얼추 일치.
+- **화염 이펙트가 카메라를 가림** — 위 `kFlameJet`이 `m_lookRay.origin`(눈 위치) 바로 앞
+  `kMuzzleForwardOffset`(0.4m)에서 시야축 정중앙으로 뿜어져, 연속 가산 블렌드 입자가 화면을
+  거의 다 덮어버림. `Simulation::MuzzleSocketPosition()`을 추가해 가상 총구 소켓을
+  눈에서 오른쪽(`kMuzzleRightOffset` 0.28m)+아래(`kMuzzleDownOffset` 0.32m)로 옮김(실제
+  FPS 뷰모델 메시는 없으므로 VFX 전용 가상 소켓 — 본/어태치먼트 트랜스폼 아님). 라이플
+  머즐 플래시도 같은 소켓을 공유하도록 같이 옮김(일관성). `right` 벡터는 `math::LookAtLH`의
+  `xAxis`(§12)와 같은 공식(`cross(up, forward)`) — 피치 성분이 상쇄돼 요(yaw)만으로 계산.
+
+---
+
+## 13. 관련 문서
+
+- [defense-combat-design.md](defense-combat-design.md) — §3(기브, 이 문서 §7.3이 피 스프레이로
+  보완) · §4(박격포/지뢰, 이 문서 §7.2 폭발) · §5(라이플, 이 문서 §7.1 총구) 가 이 파티클
+  시스템의 실제 트리거 지점
 - [instanced-rendering.md](instanced-rendering.md) — 인스턴스 배열+배치+`DrawIndexedInstanced` 패턴의 원본, `MeshInstance` 예산 규약(28B)을 그대로 따름
 - [horde-design.md](horde-design.md) — "정점 포맷이 다르면 새 패스" 판단 선례, SoA+풀+`ParallelFor` 계약
 - [texture-atlas-and-sprite-pass.md](texture-atlas-and-sprite-pass.md) — `vfx/` 아틀라스 그룹으로 재사용, UV resolve는 메인 스레드 원칙

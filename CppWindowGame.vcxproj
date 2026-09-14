@@ -41,7 +41,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>d3d11.lib;dxgi.lib;d3dcompiler.lib;xaudio2.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>d3d11.lib;dxgi.lib;d3dcompiler.lib;xaudio2.lib;winmm.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -60,6 +60,7 @@
     <ClCompile Include="src\game\Simulation.cpp" />
     <ClCompile Include="src\game\SnapshotBuilder.cpp" />
     <ClCompile Include="src\game\TitleScreen.cpp" />
+    <ClCompile Include="src\game\vfx\ParticleSystem.cpp" />
     <ClCompile Include="src\import\CreaseLines.cpp" />
     <ClCompile Include="src\import\ImageData.cpp" />
     <ClCompile Include="src\import\ImageFile.cpp" />
@@ -75,6 +76,7 @@
     <ClCompile Include="src\render\r3d\DebugDrawPass.cpp" />
     <ClCompile Include="src\render\r3d\MeshPass3D.cpp" />
     <ClCompile Include="src\render\r3d\ModelMeshPass3D.cpp" />
+    <ClCompile Include="src\render\r3d\ParticlePass3D.cpp" />
     <ClCompile Include="src\render\shader\ShaderLibrary.cpp" />
     <ClCompile Include="src\ui\ScrollList.cpp" />
     <ClCompile Include="src\ui\UI.cpp" />
@@ -106,6 +108,11 @@
     <ClInclude Include="src\game\Simulation.h" />
     <ClInclude Include="src\game\SnapshotBuilder.h" />
     <ClInclude Include="src\game\TitleScreen.h" />
+    <ClInclude Include="src\game\vfx\Particle.h" />
+    <ClInclude Include="src\game\vfx\ParticleEffectDef.h" />
+    <ClInclude Include="src\game\vfx\ParticleEffects.h" />
+    <ClInclude Include="src\game\vfx\ParticleSystem.h" />
+    <ClInclude Include="src\game\vfx\VfxHooks.h" />
     <ClInclude Include="src\import\CreaseLines.h" />
     <ClInclude Include="src\import\ImageData.h" />
     <ClInclude Include="src\import\ImageFile.h" />
@@ -136,6 +143,7 @@
     <ClInclude Include="src\render\r3d\DebugDrawPass.h" />
     <ClInclude Include="src\render\r3d\MeshPass3D.h" />
     <ClInclude Include="src\render\r3d\ModelMeshPass3D.h" />
+    <ClInclude Include="src\render\r3d\ParticlePass3D.h" />
     <ClInclude Include="src\render\r3d\Scene3D.h" />
     <ClInclude Include="src\render\shader\ShaderLibrary.h" />
     <ClInclude Include="src\ui\ScrollList.h" />
@@ -153,6 +161,7 @@
     <None Include="assets\shaders\mesh.hlsl" />
     <None Include="assets\shaders\mesh_instanced.hlsl" />
     <None Include="assets\shaders\mesh_instanced_toon.hlsl" />
+    <None Include="assets\shaders\particle.hlsl" />
     <None Include="assets\shaders\shadow_instanced.hlsl" />
     <None Include="assets\shaders\model.hlsl" />
     <None Include="assets\shaders\outline.hlsl" />

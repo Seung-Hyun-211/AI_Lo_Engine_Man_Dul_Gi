@@ -76,7 +76,10 @@ namespace engine::game
 
         // Scene transitions: swap the UIContext's screen and update m_state.
         void EnterTitle();
-        void EnterInGame();
+        // Title's "START" leads here - a menu screen (not gameplay) listing
+        // the runtime-selectable Simulation::DemoScene values.
+        void EnterSceneSelect();
+        void EnterInGame(DemoScene scene);
         // Menu-side screen (not gameplay): the ScrollList item demo.
         void EnterItems();
         // Settings overlay: layered on top of whichever screen is active.
@@ -84,7 +87,10 @@ namespace engine::game
         void CloseSettings();
         // The two Settings fields with an effect outside the Settings struct
         // itself; everything else SettingsScreen mutates directly (see there).
-        void ApplyVsync();
+        // Pushes both vsync and the frame-rate cap together - they're one
+        // IRenderer::SetFrameSettings call (targetFramesPerSecond only takes
+        // effect when !verticalSync).
+        void ApplyFrameSettings();
         void ApplyResolution();
         void ApplyVolumes();   // push master/music/sfx from m_settings to m_audio
 

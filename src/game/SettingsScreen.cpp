@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <utility>
 
 namespace engine::game
@@ -23,6 +24,11 @@ namespace engine::game
         [[nodiscard]] std::string FormatResolution(core::Resolution r)
         {
             return std::to_string(r.width) + "X" + std::to_string(r.height);
+        }
+
+        [[nodiscard]] std::string FormatFrameRate(std::uint32_t fps)
+        {
+            return std::to_string(fps) + " FPS";
         }
 
         // One "label ... value" line with a Slider underneath it. Wires the
@@ -64,7 +70,7 @@ namespace engine::game
         // well before Application itself is. Do not call this with a Settings
         // that might not outlive the returned widgets.
         auto panel = std::make_unique<ui::UIWindow>();
-        panel->SetBounds({ 360, 90, 560, 540 });
+        panel->SetBounds({ 360, 90, 560, 674 });
 
         auto title = std::make_unique<ui::TextLine>("SETTINGS");
         title->SetBounds({ 16, 16, 0, 0 });
@@ -137,10 +143,51 @@ namespace engine::game
         panel->AddChild(std::move(next));
         y += 50.0f;
 
+        auto frameRateLabel = std::make_unique<ui::TextLine>("FRAME RATE");
+        frameRateLabel->SetBounds({ 16, y, 0, 0 });
+        frameRateLabel->pixelScale = 2.0f;
+        panel->AddChild(std::move(frameRateLabel));
+
+        auto frameRateValue = std::make_unique<ui::TextLine>(FormatFrameRate(
+            core::kFrameRatePresets[static_cast<std::size_t>(settings.frameRateIndex)]));
+        frameRateValue->SetBounds({ 260, y, 0, 0 });
+        frameRateValue->pixelScale = 2.0f;
+        ui::TextLine* frameRateValueLabel = frameRateValue.get();
+        panel->AddChild(std::move(frameRateValue));
+        y += 24.0f;
+
+        auto cycleFrameRate = [&settings, frameRateValueLabel, onFrameRateChanged = actions.onFrameRateChanged](int step)
+        {
+            const int count = static_cast<int>(core::kFrameRatePresets.size());
+            settings.frameRateIndex = ((settings.frameRateIndex + step) % count + count) % count;
+            frameRateValueLabel->SetText(FormatFrameRate(
+                core::kFrameRatePresets[static_cast<std::size_t>(settings.frameRateIndex)]));
+            if (onFrameRateChanged) onFrameRateChanged();
+        };
+
+        auto frPrev = std::make_unique<ui::Button>("PREV");
+        frPrev->SetBounds({ 16, y, 100, 36 });
+        frPrev->onClick = [cycleFrameRate] { cycleFrameRate(-1); };
+        panel->AddChild(std::move(frPrev));
+
+        auto frNext = std::make_unique<ui::Button>("NEXT");
+        frNext->SetBounds({ 444, y, 100, 36 });
+        frNext->onClick = [cycleFrameRate] { cycleFrameRate(1); };
+        panel->AddChild(std::move(frNext));
+        y += 50.0f;
+
         auto close = std::make_unique<ui::Button>("CLOSE");
         close->SetBounds({ 16, y, 528, 44 });
         close->onClick = std::move(actions.onClose);
         panel->AddChild(std::move(close));
+        y += 54.0f;
+
+        // Move between test scenes (docs/demo-scene.md "씬 선택") without
+        // quitting the app - drops back to the title's scene-select screen.
+        auto exitToTitle = std::make_unique<ui::Button>("EXIT TO TITLE");
+        exitToTitle->SetBounds({ 16, y, 528, 44 });
+        exitToTitle->onClick = std::move(actions.onExitToTitle);
+        panel->AddChild(std::move(exitToTitle));
 
         return panel;
     }

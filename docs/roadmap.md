@@ -191,9 +191,7 @@ if (auto hit = world.RaycastClosest(down)) { actor.pos.y = hit->point.y; actor.g
 
 착수 순서 제안: **1·2·3 완료 → (4 결정) → 5**.
 
-**현재 위치 (2026-09 기준)**: D1 ✅ · D2 ✅ · D3 ✅(3D `Step()` 그리드) · D4 ✅(인스턴싱 + 컬 + LOD 2단계 + FBX 정적 크라우드 메시, 설정은 `game/CrowdConfig.h`). **핵심 인프라 4개 완료.** 데모 씬 2 = 절벽 위 플레이어 + `kActiveCrowd`(현재 16384 좀비, 규모 실험치)
-조망 + 폭발 넉백 데모. 지금 커밋된 `kDemoScene` 기본값은 그래픽 작업용 씬 3(크라우드 없는 그림자/
-조명 쇼케이스, `shadows.md` "씬 3") — 씬 2 를 보려면 값을 바꿔야 함. 남은 갈래:
+**현재 위치 (2026-09 기준)**: D1 ✅ · D2 ✅ · D3 ✅(3D `Step()` 그리드) · D4 ✅(인스턴싱 + 컬 + LOD 2단계 + FBX 정적 크라우드 메시, 설정은 `game/CrowdConfig.h`). **핵심 인프라 4개 완료.** 씬 선택은 이제 런타임(`Simulation::DemoScene`, 타이틀 "START"→"SELECT SCENE" 메뉴, 리빌드 불필요 — `docs/demo-scene.md`) — 4개 중 `DefenseCombat`(디폴트, `m_demoScene` 초기값)이 D5 의 실제 플레이 씬: 언덕 위 1인칭 플레이어 + `kActiveCrowd`(현재 500 좀비 — 실기기 체감 끊김으로 16384에서 낮춤, `docs/demo-scene.md` "풀 churn 버그") 조망. 나머지 3개(`CharacterDemo`/`ShadowShowcase`/`EffectsTest`)는 그래픽·VFX 확인용. 남은 갈래:
 - **D5 — 웨이브/스폰 + HP/데미지 + 목표 지점·패배 판정 + 무기 5종**: 게임 루프 본체. 여기부터
   "게임 사이클". 설계 완료(`defense-combat-design.md`) → 구현 순서는 그 문서 §10.
 - **D4 잔여 — VAT 확장(법선·셰도우 실루엣·다중 클립·fp16) / 빌보드·중간 LOD(§5.3)**. (디퓨즈 §9.6-A·1클립 VAT §9.6-B 는 ✅)

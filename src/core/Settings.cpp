@@ -34,6 +34,7 @@ namespace engine::core
                 else if (key == "invertMouseY") settings.invertMouseY = ParseBool(value);
                 else if (key == "vsync") settings.vsync = ParseBool(value);
                 else if (key == "resolutionIndex") settings.resolutionIndex = std::stoi(value);
+                else if (key == "frameRateIndex") settings.frameRateIndex = std::stoi(value);
             }
             catch (const std::exception&)
             {
@@ -44,6 +45,8 @@ namespace engine::core
 
         if (settings.resolutionIndex < 0 || settings.resolutionIndex >= static_cast<int>(kResolutionPresets.size()))
             settings.resolutionIndex = 1;
+        if (settings.frameRateIndex < 0 || settings.frameRateIndex >= static_cast<int>(kFrameRatePresets.size()))
+            settings.frameRateIndex = 0;
 
         return settings;
     }
@@ -59,6 +62,7 @@ namespace engine::core
              << "mouseSensitivity=" << mouseSensitivity << '\n'
              << "invertMouseY=" << (invertMouseY ? 1 : 0) << '\n'
              << "vsync=" << (vsync ? 1 : 0) << '\n'
-             << "resolutionIndex=" << resolutionIndex << '\n';
+             << "resolutionIndex=" << resolutionIndex << '\n'
+             << "frameRateIndex=" << frameRateIndex << '\n';
     }
 }

@@ -96,8 +96,10 @@ QuadPass2D }`이고, `AddRenderPass`의 기본 삽입 지점이 "마지막 2개(
 
 이 필드 하나가 두 가지를 동시에 커버한다: 뷰공간 노멀 변환(`common3d.hlsli::WorldToViewNormal`,
 아래)과 [particle-system-research.md](particle-system-research.md)가 필요로 하는 카메라
-world-space right/up(뷰 행렬이 정규직교라 `view`의 0행/1행이 곧 그 축) — 파티클 시스템을
-실제로 구현할 때 `Frame` cbuffer를 또 확장할 필요가 없다.
+world-space right/up — 뷰 행렬이 정규직교인 건 맞지만, `math::LookAtLH`가 각 축을 "행" 하나에
+한 성분씩 흩뿌려 담기 때문에(0행 = (xAxis.x, yAxis.x, zAxis.x)) **행이 아니라 열**이 축 전체다
+(0열 = right, 1열 = up — 파티클 구현 때 행으로 읽어서 "카메라 각도에 따라 얇아 보이는" 버그로
+발견됨, §12 참고). `Frame` cbuffer를 또 확장할 필요는 여전히 없다.
 
 ```hlsl
 // common3d.hlsli

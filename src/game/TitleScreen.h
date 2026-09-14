@@ -19,4 +19,16 @@ namespace engine::game
         std::function<void()> onOpenItems,
         std::function<void()> onOpenSettings,
         std::function<void()> onQuit);
+
+    // "START" on the title screen leads here instead of straight into a fixed
+    // scene - one button per runtime-selectable Simulation::DemoScene (docs/
+    // demo-scene.md "씬 선택"), plus a way back to the title without picking
+    // one. Kept as its own screen (not a 4th title button) so growing the
+    // scene list later doesn't crowd the title panel.
+    [[nodiscard]] std::unique_ptr<ui::Widget> BuildSceneSelectScreen(
+        std::function<void()> onDefenseCombat,
+        std::function<void()> onCharacterDemo,
+        std::function<void()> onShadowShowcase,
+        std::function<void()> onEffectsTest,
+        std::function<void()> onBack);
 }

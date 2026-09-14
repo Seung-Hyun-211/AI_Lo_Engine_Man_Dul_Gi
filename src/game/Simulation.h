@@ -17,6 +17,7 @@
 #include "game/GibConfig.h"
 #include "game/Ordnance.h"
 #include "game/SlowZone.h"
+#include "game/vfx/ParticleSystem.h"
 #include "physics/p3d/CollisionWorld3D.h"
 #endif
 
@@ -40,6 +41,23 @@ namespace engine::game
     };
 
 #if defined(ENGINE_WITH_3D)
+    // Which 3D demo/test scene is active - runtime-selectable from the title
+    // screen's scene-select menu (docs/demo-scene.md), not a rebuild-time
+    // constant anymore. Values match the old Simulation::kDemoScene numbering
+    // so existing docs/comments referencing "씬 1/2/3" still line up.
+    enum class DemoScene : int
+    {
+        CharacterDemo = 1,   // local-time-scale actors + a small slab
+        DefenseCombat = 2,   // hill overlook + SimAgent crowd + weapons/wave loop
+        ShadowShowcase = 3,  // no crowd - staircase/pillars for graphics work
+        EffectsTest = 4,     // flat range + distance markers - on-demand VFX preview, no crowd/weapons/wave loop
+    };
+
+    // Which VFX burst Simulation::PreviewVfxEffect spawns - the EffectsTest
+    // scene's whole purpose, decoupled from the rifle/explosion/gib call
+    // sites that normally trigger these (docs/particle-system-research.md).
+    enum class EffectPreview : std::uint8_t { MuzzleFlash, Explosion, GibBurst };
+
     // Which weapon Simulation::FireWeapon fires (docs/defense-combat-design.md
     // §8). Declared with all five up front so it does not need to grow again
     // as each is wired - only Rifle is implemented so far (§10 implementation
@@ -135,6 +153,30 @@ namespace engine::game
         void Reset() { *this = GibPiece{}; }
     };
 
+    // A handful of real 3D cubes at an explosion's core, alongside the vfx::
+    // Particle billboards (docs/particle-system-research.md §12 구현 노트
+    // "3D로 보이기" - billboards always face the camera, so no amount of
+    // rotation/noise on them alone reads as a genuine 3D volume; a few actual
+    // opaque cubes tumbling through the same space do, since MeshPass3D
+    // shades and occludes them correctly from any angle). Same self-Release
+    // pattern as GibPiece. Not scene-gated itself - callers (TriggerExplosion,
+    // Simulation::PreviewVfxEffect) each gate on their own active scene.
+    struct FireChunk
+    {
+        math::Vec3 pos{}, vel{};
+        float life{ 0.0f };
+        float maxLife{ 0.0f };        // life / maxLife drives the shrink-to-nothing "fade" (MeshPass3D is opaque, no alpha)
+        float scale{ 0.3f };
+        float spin{ 0.0f };           // accumulated tumble angle (drives both RotationX and RotationY, cheap 2-axis tumble)
+        float angularVel{ 0.0f };
+        // No stored colour - SnapshotBuilder derives a "cooling" yellow->red
+        // gradient from life/maxLife instead (same reasoning as GibPiece
+        // having no colour field: that is a render concern, not sim state).
+        std::uint32_t selfIndex{ 0 }, selfGeneration{ 0 };
+
+        void Reset() { *this = FireChunk{}; }
+    };
+
     // Result of the demo "what is the player looking at" raycast against the
     // crowd (CollisionWorld3D). Render-only - it does not feed the simulation.
     // SnapshotBuilder draws the ray + a marker + highlights the hit agent.
@@ -174,14 +216,9 @@ namespace engine::game
         static constexpr float kCamPitchMin = -1.15f;   // look down
         static constexpr float kCamPitchMax = 0.35f;    // look up
 
-        // Demo scene selector (docs/demo-scene.md). 1 = local-time-scale actors
-        // on a small slab. 2 = player on a clifftop overlooking a large field
-        // with a wandering simulation crowd below. 3 = shadow/lighting showcase
-        // (docs/shadows.md "씬 3") - staircase + back wall + pillars spanning
-        // both shadow cascades, no crowd. Active for graphics work on main.
-        static constexpr int   kDemoScene = 3;
-        static constexpr float kCliffTop = 6.0f;         // scene 2: plateau (player) height
-        static constexpr float kPlateauHalf = 5.0f;      // scene 2: player's walkable plateau half-size (to the cliff edge)
+        static constexpr float kHillHeight = 10.0f;      // scene 2: plateau (player) height above the field
+        static constexpr float kHillSlopeDeg = 20.0f;    // scene 2: slope angle of the ramp down to the field (from horizontal)
+        static constexpr float kPlateauHalf = 5.0f;      // scene 2: player's walkable plateau half-size (flat top, before the slope)
         static constexpr float kFieldHalf = 30.0f;       // scene 2: lower field half-size
         static constexpr float kLookRayRange = 80.0f;    // scene 2: player look-ray max distance
         // Crowd size / mesh / collider come from game/CrowdConfig.h (kActiveCrowd)
@@ -191,15 +228,45 @@ namespace engine::game
         // is open (no obstacles), so the crowd seeks straight at a fixed
         // objective point near the base of the mesa instead of a flow field
         // (YAGNI - see that doc's §1 "판단").
-        static constexpr math::Vec3 kCrowdGoal{ 0.0f, 0.0f, 4.0f };
+        // y = kHillHeight, not 0: the goal sits on the flat hilltop (z=4 is
+        // inside the z <= kHillTopZ flat region, docs/demo-scene.md "언덕"), and
+        // a climbing agent's own y already tracks the hill height (Simulation.cpp
+        // HillHeightAtZ) - the goal must match that or the 3D distance check
+        // below can never close while the agent is still partway up the slope.
+        static constexpr math::Vec3 kCrowdGoal{ 0.0f, kHillHeight, 4.0f };
         static constexpr float kCrowdGoalRadius = 1.5f;      // "reached the objective" distance
         static constexpr float kAgentSeekTurnRate = 2.5f;    // rad/s toward the goal (gentler than the player's kCharTurnRate)
         static constexpr float kAgentMaxHealth = 100.0f;
-        static constexpr float kObjectiveMaxHealth = 1000.0f;
+        // ~40000 = about 1 minute of unattended breach pressure at the crowd's
+        // measured organic steady-state rate (~750 HP/s once the swarm
+        // saturates - docs/defense-combat-design.md §0 구현노트). A rough
+        // stopgap, not real balance (§0.5 escalation is still deferred) -
+        // real player weapon use only makes a wave last longer than this.
+        static constexpr float kObjectiveMaxHealth = 40000.0f;
         static constexpr float kObjectiveDamagePerBreach = 20.0f;   // objective HP lost per agent that reaches kCrowdGoal
         static constexpr float kExplosionDamage = 60.0f;             // scaled by TriggerExplosion's existing falloff
         static constexpr float kRifleDamage = 34.0f;                  // 3 hits to kill (kAgentMaxHealth / 34 ~= 3)
+        static constexpr float kRifleFireInterval = 0.1f;             // seconds between shots when held (10 rounds/s)
+        static constexpr float kMuzzleForwardOffset = 0.4f;           // metres in front of the eye - keeps the flash off the near clip plane in first person
+        // Lateral/vertical offset for the virtual muzzle socket (no FPS view-
+        // model mesh exists, so this is VFX-only, not a bone attachment) -
+        // held off-centre like a real FPS weapon instead of dead-centre on the
+        // view axis, where continuous VFX (flamethrower jet) filled the whole
+        // screen (playtest report). See MuzzleSocketPosition().
+        static constexpr float kMuzzleRightOffset = 0.28f;
+        static constexpr float kMuzzleDownOffset = 0.32f;
+        static constexpr float kEffectsPreviewDistance = 8.0f;        // scene EffectsTest: metres ahead of the look-ray for Explosion/GibBurst previews
         static constexpr std::size_t kGibPoolCapacity = 256;          // a few dozen simultaneous deaths x a few pieces each
+
+        // Explosion "3D core" chunks (real cubes, not billboards - see
+        // FireChunk's comment). A handful per blast is enough to read as
+        // volume; this is a look-and-feel accent, not a gameplay pool.
+        static constexpr std::size_t kFireChunkPoolCapacity = 64;
+        static constexpr int kFireChunkCountMin = 5, kFireChunkCountMax = 8;
+        static constexpr float kFireChunkLifeMin = 0.35f, kFireChunkLifeMax = 0.6f;
+        static constexpr float kFireChunkSpeedMin = 2.0f, kFireChunkSpeedMax = 5.0f;
+        static constexpr float kFireChunkScaleMin = 0.25f, kFireChunkScaleMax = 0.55f;
+        static constexpr float kFireChunkAngularVelMax = 10.0f;   // rad/s, tumble rate
 
         // Mortar/mine (docs/defense-combat-design.md §4) - both just wrap
         // TriggerExplosion with their own radius/power/damage (§4's PlacedOrdnance).
@@ -226,7 +293,7 @@ namespace engine::game
         // Wave loop (docs/defense-combat-design.md §0) - core state machine
         // only (§0.1 resource economy, §0.3 results screen, §0.5 escalation
         // are separate, not-yet-built follow-ups; see that doc's own §10).
-        static constexpr float kCombatDuration = 60.0f;
+        static constexpr float kCombatDuration = 120.0f;
         static constexpr float kPrepDuration = 60.0f;
 
         // Resource economy (docs/defense-combat-design.md §0.1) - v1 is a
@@ -291,10 +358,20 @@ namespace engine::game
         // Fires `kind` using this frame's aim state (m_lookRay for hitscan
         // weapons - one frame latent, same as everything else that reads it;
         // see LookRayResult). Main-thread, called from Application before
-        // Step() (docs/defense-combat-design.md §8). Only WeaponKind::Rifle is
-        // wired yet - the rest are no-ops until their own implementation step
-        // (§10) so this call site does not change when they are added.
-        void FireWeapon(WeaponKind kind);
+        // Step() (docs/defense-combat-design.md §8). Returns true iff a shot/
+        // effect actually happened this call (false when gated out - e.g. the
+        // Rifle's fire-rate cooldown hasn't elapsed yet) so the caller can gate
+        // one-shot feedback like SFX on the real fire event, not the input edge.
+        bool FireWeapon(WeaponKind kind);
+
+        // Scene EffectsTest only (no-op elsewhere): spawns `effect` along the
+        // current look-ray, independent of any weapon/crowd/wave-loop state -
+        // the whole point of that scene is inspecting VFX in isolation
+        // (docs/particle-system-research.md). MuzzleFlash spawns right at the
+        // eye (kMuzzleForwardOffset ahead, same as the real rifle); Explosion/
+        // GibBurst spawn kEffectsPreviewDistance ahead so scale/visibility at
+        // a real combat-ish distance can be judged, not just up close.
+        void PreviewVfxEffect(EffectPreview effect);
 
         // Places a mortar (starts its landing-delay fuse) or a mine (arms,
         // waits for proximity) at the current look-ray's ground hit point
@@ -311,11 +388,41 @@ namespace engine::game
         void PlaceSlowZone();
 
         [[nodiscard]] float ObjectiveHealth() const { return m_objectiveHealth; }
+        // Scene-gated: m_objectiveHealth can be left at 0 from a previous
+        // DefenseCombat loss after switching to a different scene (EnterScene
+        // does not reset it - only ResetMatch, entering DefenseCombat, does).
+        // Without this check Application::Run() would see IsMatchLost() still
+        // true and bounce straight back to the title every frame in whatever
+        // scene came next.
+        [[nodiscard]] bool IsMatchLost() const
+        {
+            return m_demoScene == DemoScene::DefenseCombat && m_objectiveHealth <= 0.0f;
+        }
         [[nodiscard]] int KillCount() const { return m_killCount; }
         [[nodiscard]] MatchPhase Phase() const { return m_phase; }
         [[nodiscard]] float PhaseTimeLeft() const { return m_phaseTimeLeft; }
         [[nodiscard]] int WaveNumber() const { return m_waveNumber; }
         [[nodiscard]] int Supplies() const { return m_supplies; }
+
+        // Loss handling (docs/defense-combat-design.md §0, "승패"): the caller
+        // (Application, on IsMatchLost()) drops back to the title screen and
+        // calls this before the next EnterInGame() so a fresh match starts at
+        // wave 1 / full objective HP rather than resuming a lost one. Releases
+        // all agents/gibs/ordnance/slow zones and re-spawns wave 1.
+        void ResetMatch();
+
+        // Switches the active 3D demo/test scene at runtime (docs/demo-scene.md
+        // "씬 선택") - the title screen's scene-select menu calls this before
+        // entering InGame, and it is safe to call again later to jump to a
+        // different scene without restarting the app. Clears the actor list
+        // and rebuilds it for `scene`; DefenseCombat additionally goes through
+        // ResetMatch() so re-entering it always starts at wave 1. Any crowd/
+        // gib/ordnance/particle state left over from a previous DefenseCombat
+        // visit is harmless if left behind when leaving it - every function
+        // that steps or renders that state is itself gated on the scene being
+        // active, so it simply goes untouched until DefenseCombat is re-entered
+        // (which resets it fully via ResetMatch() anyway).
+        void EnterScene(DemoScene scene);
 #endif
 
         // --- reads for the snapshot builder ---
@@ -332,6 +439,7 @@ namespace engine::game
         [[nodiscard]] float CharacterFacingYaw() const { return m_actors[0].facingYaw; }
         [[nodiscard]] float CameraYaw() const { return m_cameraYaw; }
         [[nodiscard]] float CameraPitch() const { return m_cameraPitch; }
+        [[nodiscard]] DemoScene ActiveScene() const { return m_demoScene; }
         [[nodiscard]] AnimPose HeroAnimPose() const { return m_actors[0].anim.Pose(); }
         [[nodiscard]] const std::vector<Actor>& Actors() const { return m_actors; }
         [[nodiscard]] const core::ObjectPool<SimAgent>& SimAgents() const { return m_agents; }
@@ -340,8 +448,11 @@ namespace engine::game
         // (CollisionWorld3D broadphase). Indexed by slot; sized to the pool.
         [[nodiscard]] const std::vector<std::uint8_t>& AgentTouching() const { return m_agentTouch; }
         [[nodiscard]] const core::ObjectPool<GibPiece>& Gibs() const { return m_gibs; }
+        [[nodiscard]] const core::ObjectPool<FireChunk>& FireChunks() const { return m_fireChunks; }
         [[nodiscard]] const core::ObjectPool<PlacedOrdnance>& Ordnance() const { return m_ordnance; }
         [[nodiscard]] const std::vector<SlowZone>& SlowZones() const { return m_slowZones; }
+        // Muzzle flash/smoke, explosion, gib blood spray - docs/particle-system-research.md.
+        [[nodiscard]] const core::ObjectPool<vfx::Particle>& VfxParticles() const { return m_vfx.Pool(); }
 #endif
 
     private:
@@ -377,6 +488,11 @@ namespace engine::game
         // Falls/lands/expires every live gib (serial - the pool is small, no
         // ParallelFor needed). Released once `life` runs out.
         void StepGibs(float fixedDelta);
+        // Explosion 3D core cubes (FireChunk) - not scene-gated itself, see
+        // that struct's comment. Called from TriggerExplosion and
+        // PreviewVfxEffect's Explosion case, alongside vfx::SpawnExplosion.
+        void SpawnFireChunks(math::Vec3 pos);
+        void StepFireChunks(float fixedDelta);
         // Ticks every placed mortar's fuse / checks every mine's proximity
         // radius against the crowd (linear scan, same as TriggerExplosion's
         // own falloff scan - fine at "dozens of ordnance", see §4; a grid
@@ -389,6 +505,12 @@ namespace engine::game
         // is held (unlike the other weapons' single-shot FireWeapon calls) -
         // linear scan, same reasoning as TriggerExplosion/StepOrdnance's own.
         void ApplyFlameCone(math::Vec3 origin, math::Vec3 dir, float range, float halfAngleCos);
+        // Virtual first-person weapon socket for muzzle VFX (rifle flash,
+        // flamethrower jet) - offset from the eye/look-ray origin by
+        // kMuzzleForwardOffset/RightOffset/DownOffset so effects read as
+        // coming from a held weapon instead of erupting dead-centre on the
+        // view axis. No FPS view-model mesh exists, so this is VFX-only.
+        [[nodiscard]] math::Vec3 MuzzleSocketPosition() const;
         // Ticks the Combat/Prep timer and transitions phases (docs/defense-
         // combat-design.md §0). Runs last in Step() so this frame's other
         // systems still saw the OLD phase - a transition takes effect next
@@ -425,14 +547,18 @@ namespace engine::game
         std::size_t m_agentChurnCursor{ 0 };       // round-robin index into m_agentHandles
         physics::CollisionWorld3D m_collision3d;   // scene 2: crowd colliders, rebuilt each step (raycast + broadphase)
         LookRayResult m_lookRay;                   // scene 2: last player look-ray result (render-only)
+        float m_rifleCooldown{ 0.0f };              // seconds left before the rifle can fire again (§5, full-auto)
         std::vector<std::uint8_t> m_agentTouch;    // scene 2: per pool slot, 1 = overlapped another this step
+        DemoScene m_demoScene{ DemoScene::DefenseCombat };   // runtime-selectable (EnterScene) - default is the constructor's first scene
         float m_cameraYaw{ 0.0f };                 // radians; orbit angle around the player
         float m_cameraPitch{ -0.28f };            // radians; negative looks down at the player
         float m_objectiveHealth{ kObjectiveMaxHealth };   // base combat layer (docs/defense-combat-design.md §0)
         int   m_killCount{ 0 };
         core::ObjectPool<GibPiece> m_gibs{ kGibPoolCapacity };   // death VFX pieces (§3); fixed capacity, no per-scene Init needed
+        core::ObjectPool<FireChunk> m_fireChunks{ kFireChunkPoolCapacity };   // explosion 3D core cubes, fixed capacity
         core::ObjectPool<PlacedOrdnance> m_ordnance{ kOrdnancePoolCapacity };   // mortars/mines (§4)
         std::vector<SlowZone> m_slowZones;   // barbed wire (§6); never shrinks mid-match, capped at kMaxSlowZones
+        vfx::ParticleSystem m_vfx;   // muzzle/explosion/gib particles, distinct from the unrelated m_particles 2D benchmark stub above
 
         MatchPhase m_phase{ MatchPhase::Combat };   // wave loop (§0)
         float m_phaseTimeLeft{ kCombatDuration };

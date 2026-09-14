@@ -59,7 +59,8 @@ Dx11Renderer::Render():
 
 ## 씬 3: 그림자/조명 쇼케이스
 
-`Simulation::kDemoScene = 3`(지금 활성값), `SnapshotBuilder::BuildShadowShowcaseScene` — 크라우드·와글거리는 데모 액터 없이, 그래픽 확인만을 위해 배치한 정적 씬:
+`DemoScene::ShadowShowcase`(타이틀 "SELECT SCENE"에서 런타임 선택, `docs/demo-scene.md` — 기본
+진입 씬은 `DefenseCombat`), `SnapshotBuilder::BuildShadowShowcaseScene` — 크라우드·와글거리는 데모 액터 없이, 그래픽 확인만을 위해 배치한 정적 씬:
 
 - 밝은 중립색 바닥(그림자 대비가 잘 보이도록) + 낮은 각도 그림자를 받는 뒷벽(acne/peter-panning이 큰 평면에서 한눈에 보임).
 - 높이가 0.5m씩 올라가는 계단형 플린스 5개 — 경사면을 따라 그림자 길이/그라데이션이 어떻게 변하는지.
@@ -80,7 +81,7 @@ Dx11Renderer::Render():
 
 ## 사용 방법 (How to use)
 
-**그림자 범위/방향 조정**: `SnapshotBuilder::BuildLighting` 의 `FitShadowOrtho(dir, center, span, depth, eyeDist)` 호출부 — 캐스케이드 0은 항상 플레이어 중심(모든 씬 공통, 건드릴 일 거의 없음), 캐스케이드 1은 `if constexpr (kDemoScene == ...)` 분기로 씬별 값. 새 씬을 추가하면 여기에 그 씬의 캐스케이드 1 분기를 추가한다. 텍셀 밀도(= span / `kShadowMapSize`)가 너무 떨어지면 "왜 캐스케이드인가" 절처럼 그라데이션이 계단져 보인다 — 넓히기 전에 정말 그 범위가 다 필요한지부터 확인, 그래도 필요하면 3번째 캐스케이드를 고려한다.
+**그림자 범위/방향 조정**: `SnapshotBuilder::BuildLighting` 의 `FitShadowOrtho(dir, center, span, depth, eyeDist)` 호출부 — 캐스케이드 0은 항상 플레이어 중심(모든 씬 공통, 건드릴 일 거의 없음), 캐스케이드 1은 `if (simulation.ActiveScene() == DemoScene::N)` 런타임 분기(씬 선택이 리빌드 없는 런타임 전환이 되면서 `if constexpr`에서 바뀜, `docs/demo-scene.md`)로 씬별 값. 새 씬을 추가하면 여기에 그 씬의 캐스케이드 1 분기를 추가한다. 텍셀 밀도(= span / `kShadowMapSize`)가 너무 떨어지면 "왜 캐스케이드인가" 절처럼 그라데이션이 계단져 보인다 — 넓히기 전에 정말 그 범위가 다 필요한지부터 확인, 그래도 필요하면 3번째 캐스케이드를 고려한다.
 
 **바이어스 튜닝**: 표면에 줄무늬(acne) → `m_shadowRaster` 의 `DepthBias`/`SlopeScaledDepthBias` ↑ 또는 `common3d.hlsli` `SampleShadowCascade` 의 `shadowParams.y`(`FrameConstants.h` 에서 세팅) ↑. 그림자가 물체에서 떠 보이면(peter-panning) ↓. 지금은 두 캐스케이드가 값을 공유 — 한쪽만 문제면 `shadowParams`에 캐스케이드별 필드를 추가해야 한다.
 
@@ -88,7 +89,7 @@ Dx11Renderer::Render():
 
 **그림자를 받기만**: `common3d.hlsli` 를 쓰는 패스면 자동. VS 에서 `output.worldPos = worldPos.xyz`(TEXCOORD1), PS 에서 `SampleShadow(input.worldPos)` 를 `ApplyLighting`/`ApplyCelLighting` 에 전달 — 캐스케이드 선택은 함수 내부에서 처리되므로 호출부는 캐스케이드를 몰라도 된다.
 
-**새 씬 추가**: `Simulation.h`의 `kDemoScene`에 값 추가 + `Simulation::SpawnActors`/`SnapshotBuilder::BuildCamera`/`BuildLighting`/`BuildScene3D`에 `if constexpr (kDemoScene == N)` 분기(씬 3처럼) — 캐스케이드 0은 그대로 두고 캐스케이드 1만 그 씬에 맞게.
+**새 씬 추가**: `Simulation.h`의 `enum class DemoScene`에 값 추가(`docs/demo-scene.md` — 타이틀 "SELECT SCENE"에 버튼도 하나 추가해야 실제로 진입 가능) + `Simulation::SpawnActors`/`SnapshotBuilder::BuildCamera`/`BuildLighting`/`BuildScene3D`에 `if (simulation.ActiveScene() == DemoScene::N)` 분기(`ShadowShowcase`처럼) — 캐스케이드 0은 그대로 두고 캐스케이드 1만 그 씬에 맞게.
 
 **끄기**: `BuildLighting` 에서 `lighting.shadowsEnabled = false`.
 

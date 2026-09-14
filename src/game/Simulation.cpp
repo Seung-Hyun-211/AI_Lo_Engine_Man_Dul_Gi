@@ -1,5 +1,9 @@
 #include "game/Simulation.h"
 
+#if defined(ENGINE_WITH_3D)
+#include "game/vfx/VfxHooks.h"
+#endif
+
 #include <algorithm>
 #include <cmath>
 #include <optional>
@@ -30,6 +34,25 @@ namespace engine::game
         // Collision layer for the demo-scene-2 crowd colliders. The player
         // look-ray masks to exactly this.
         constexpr physics::CollisionLayer kLayerCrowd3D = 1u;
+
+        // Hill terrain (docs/demo-scene.md "씬 2"): the flat plateau the player
+        // stands on (z <= kHillTopZ, height kHillHeight) ramps down at
+        // kHillSlopeDeg to the flat field (z >= kHillBottomZ, height 0). Shared
+        // by SeedAgent/StepSimAgents (crowd Y follows the slope as it climbs)
+        // and SnapshotBuilder (the ramp mesh). std::tan isn't constexpr, so
+        // the derived distances are plain consts, computed once at startup.
+        constexpr float kHillTopZ = Simulation::kPlateauHalf + 1.0f;
+        const float kHillSlopeRad = Simulation::kHillSlopeDeg * (kPi / 180.0f);
+        const float kHillRun = Simulation::kHillHeight / std::tan(kHillSlopeRad);   // horizontal length of the slope
+        const float kHillBottomZ = kHillTopZ + kHillRun;
+
+        // Ground height at world Z: flat top, linear ramp, flat field.
+        float HillHeightAtZ(float z)
+        {
+            if (z <= kHillTopZ) return Simulation::kHillHeight;
+            if (z >= kHillBottomZ) return 0.0f;
+            return Simulation::kHillHeight * (1.0f - (z - kHillTopZ) / kHillRun);
+        }
 #endif
     }
 
@@ -54,26 +77,37 @@ namespace engine::game
         Actor player;
         player.playerControlled = true;
 
-        if constexpr (kDemoScene == 2)
+        if (m_demoScene == DemoScene::DefenseCombat)
         {
             // Stand on top of the mesa facing out over the field (+Z). The
             // x/z clamp is symmetric about the origin (halfRange), so the mesa
-            // prop is centred there too. The orbit camera sits behind + above,
-            // so the default view looks down the drop at the crowd.
-            player.pos = { 0.0f, kCliffTop, -2.0f };
+            // prop is centred there too. First-person (SnapshotBuilder::
+            // BuildCamera), so the default view looks straight down the drop
+            // at the crowd.
+            player.pos = { 0.0f, kHillHeight, -2.0f };
             player.facingYaw = 0.0f;
-            player.groundY = kCliffTop;
+            player.groundY = kHillHeight;
             player.halfRange = kPlateauHalf;
             m_actors.push_back(std::move(player));
 
             m_cameraPitch = -0.5f;   // steeper default tilt for the overlook
-            SpawnSimAgents();
+            ResetMatch();   // fresh wave 1 / full objective HP every (re)entry, not just the first
         }
-        else if constexpr (kDemoScene == 3)
+        else if (m_demoScene == DemoScene::ShadowShowcase)
         {
             // Just the player, centred - no wandering extras to clutter the
             // shadow/lighting showcase (SnapshotBuilder::BuildShadowShowcaseScene).
             player.pos = { 0.0f, 0.0f, 0.0f };
+            player.facingYaw = 0.0f;
+            m_actors.push_back(std::move(player));
+        }
+        else if (m_demoScene == DemoScene::EffectsTest)
+        {
+            // Centred on the range, facing the distance markers (+Z) that
+            // SnapshotBuilder::BuildEffectsTestScene lays out at 5/10/20/40m -
+            // look-ray previews land among them so scale/visibility at a real
+            // distance can be judged, not just right next to the camera.
+            player.pos = { 0.0f, 1.6f, 0.0f };
             player.facingYaw = 0.0f;
             m_actors.push_back(std::move(player));
         }
@@ -100,12 +134,36 @@ namespace engine::game
         }
     }
 
+    void Simulation::EnterScene(DemoScene scene)
+    {
+        m_demoScene = scene;
+        m_actors.clear();
+        m_cameraYaw = 0.0f;
+        m_cameraPitch = -0.28f;   // SpawnActors overrides this for DefenseCombat's steeper overlook
+
+        // Release the crowd/gib/ordnance pools unconditionally, whatever the
+        // previous scene was - a scene switch away from DefenseCombat must
+        // not leave a live crowd behind still being ParallelFor-stepped every
+        // frame in a scene that never renders it (same class of wasted-work
+        // bug as the pool-reinit stutter fixed earlier this session). No-op
+        // if they were already empty.
+        for (const auto& handle : m_agentHandles) m_agents.Release(handle);
+        m_agentHandles.clear();
+        m_agentChurnCursor = 0;
+        m_gibs.Init(kGibPoolCapacity);
+        m_ordnance.Init(kOrdnancePoolCapacity);
+        m_slowZones.clear();
+
+        SpawnActors();   // DefenseCombat's branch repopulates the crowd via ResetMatch()
+    }
+
     void Simulation::SeedAgent(SimAgent& agent, float seed)
     {
-        // Deterministic (no RNG) scatter across the field in front of the mesa.
+        // Deterministic (no RNG) scatter across the field in front of the hill.
+        const float z = kFieldAgentZLo + std::fmod(seed * 3.7f, kFieldAgentZHi - kFieldAgentZLo);
         agent.pos = { std::fmod(seed * 7.13f, 2.0f * kFieldHalf) - kFieldHalf,
-                      0.2f,
-                      kFieldAgentZLo + std::fmod(seed * 3.7f, kFieldAgentZHi - kFieldAgentZLo) };
+                      HillHeightAtZ(z) + 0.2f,
+                      z };
         agent.heading = std::fmod(seed * 2.399963f, 2.0f * kPi) - kPi;   // spread out
         agent.speed = 0.8f + std::fmod(seed, 5.0f) * 0.35f;              // 0.8 .. 2.2 m/s
         agent.phase = seed * 0.37f;
@@ -130,7 +188,7 @@ namespace engine::game
 
     void Simulation::DamageAgent(std::uint32_t slot, float amount)
     {
-        if constexpr (kDemoScene != 2) { return; }
+        if (m_demoScene != DemoScene::DefenseCombat) { return; }
         else
         {
             if (amount <= 0.0f || slot >= m_agents.Capacity()) return;
@@ -148,7 +206,14 @@ namespace engine::game
 
     void Simulation::SpawnSimAgents()
     {
-        m_agents.Init(static_cast<std::size_t>(kActiveCrowd.capacity));
+        // Init() destroys and reconstructs every slot - only needed once, on
+        // the very first call. Every wave-transition call after that finds
+        // the pool already fully free (EndCombatPhase released every handle),
+        // so re-Init'ing here was a full pool rebuild every ~60s for nothing
+        // (observed as a periodic stutter even while just walking, unrelated
+        // to combat load).
+        if (m_agents.Capacity() == 0)
+            m_agents.Init(static_cast<std::size_t>(kActiveCrowd.capacity));
         m_agentHandles.clear();
         m_agentHandles.reserve(static_cast<std::size_t>(kActiveCrowd.count));
         m_agentChurnCursor = 0;
@@ -236,10 +301,13 @@ namespace engine::game
 
         StepCollision2D();
 #if defined(ENGINE_WITH_3D)
+        m_rifleCooldown = std::max(0.0f, m_rifleCooldown - fixedDelta);   // §5, full-auto fire-rate gate
         StepActors(fixedDelta, /*globalPaused=*/false, intent);
         StepOrdnance(fixedDelta);   // before StepSimAgents so a trigger this step still affects this step's crowd integration
         StepSimAgents(fixedDelta);
         StepGibs(fixedDelta);
+        StepFireChunks(fixedDelta);
+        m_vfx.Step(m_jobs, fixedDelta);
         StepMatchPhase(fixedDelta);
         // Crowd colliders + look-ray + overlap tint run ONCE per frame from
         // Application::UpdateCrowdQueries(), not here - they are O(crowd) and
@@ -528,8 +596,8 @@ namespace engine::game
 
                     const math::Vec3 dir{ std::sin(a.heading), 0.0f, std::cos(a.heading) };
                     a.pos = a.pos + dir * (a.speed * speedMul * fixedDelta);
-                    a.pos.y = 0.2f + 0.15f * std::sin(a.phase);   // small bob above the field
                     a.pos.x = math::Clamp(a.pos.x, -kFieldHalf, kFieldHalf);   // loose side rail only
+                    a.pos.y = HillHeightAtZ(a.pos.z) + 0.2f + 0.15f * std::sin(a.phase);   // climb the slope + small bob
                 }
             }).Wait();
 
@@ -576,9 +644,11 @@ namespace engine::game
 
     void Simulation::SpawnGibs(math::Vec3 pos)
     {
-        if constexpr (kDemoScene != 2) { return; }
+        if (m_demoScene != DemoScene::DefenseCombat) { return; }
         else
         {
+            vfx::SpawnGibBurst(m_vfx, pos);   // blood spray alongside the strong gib pieces below (particle-system-research.md §7.3)
+
             // Deterministic scatter (no <random>, same fmod-hash convention as
             // SeedAgent), seeded off the running kill count so consecutive
             // deaths don't reuse the same directions/count.
@@ -605,7 +675,7 @@ namespace engine::game
 
     void Simulation::StepGibs(float fixedDelta)
     {
-        if constexpr (kDemoScene != 2) { return; }
+        if (m_demoScene != DemoScene::DefenseCombat) { return; }
         else
         {
             GibPiece* slots = m_gibs.Slots();
@@ -627,6 +697,54 @@ namespace engine::game
         }
     }
 
+    void Simulation::SpawnFireChunks(math::Vec3 pos)
+    {
+        // Deterministic scatter (no <random>), seeded off the running pool
+        // size so consecutive explosions don't reuse the same pattern -
+        // there's no kill counter to hook here the way SpawnGibs does, and
+        // this needs to work in scene EffectsTest too, where nothing is dying.
+        const float seed = static_cast<float>(m_fireChunks.Size()) * 7.919f
+                          + static_cast<float>(m_elapsed) * 3.1f + 1.0f;
+        const int spread = kFireChunkCountMax - kFireChunkCountMin + 1;
+        const int count = kFireChunkCountMin + static_cast<int>(std::fmod(seed, static_cast<float>(spread)));
+        for (int i = 0; i < count; ++i)
+        {
+            const float s = seed + static_cast<float>(i) * 13.7f;
+            const auto handle = m_fireChunks.Acquire();
+            FireChunk* c = m_fireChunks.Get(handle);
+            if (!c) continue;   // pool full - drop this chunk, not fatal (visual only)
+
+            const float yaw = std::fmod(s * 2.399963f, 2.0f * kPi);
+            const float pitch = std::fmod(s * 1.618f, kPi * 0.5f);   // 0..pi/2, mostly-outward-and-up
+            const float speed = kFireChunkSpeedMin + std::fmod(s, 1.0f) * (kFireChunkSpeedMax - kFireChunkSpeedMin);
+            const float ch = std::cos(pitch);
+            c->pos = pos;
+            c->vel = { std::sin(yaw) * ch * speed, std::sin(pitch) * speed, std::cos(yaw) * ch * speed };
+            c->life = kFireChunkLifeMin + std::fmod(s * 1.53f, 1.0f) * (kFireChunkLifeMax - kFireChunkLifeMin);
+            c->maxLife = c->life;
+            c->scale = kFireChunkScaleMin + std::fmod(s * 0.71f, 1.0f) * (kFireChunkScaleMax - kFireChunkScaleMin);
+            c->spin = std::fmod(s * 4.3f, 2.0f * kPi);
+            c->angularVel = (std::fmod(s * 2.71f, 2.0f) - 1.0f) * kFireChunkAngularVelMax;
+            c->selfIndex = handle.index;
+            c->selfGeneration = handle.generation;
+        }
+    }
+
+    void Simulation::StepFireChunks(float fixedDelta)
+    {
+        FireChunk* slots = m_fireChunks.Slots();
+        const std::vector<std::uint32_t> active = m_fireChunks.ActiveIndices();   // copy: Release() below swap-removes
+        for (const std::uint32_t idx : active)
+        {
+            FireChunk& c = slots[idx];
+            c.vel = c.vel * std::max(0.0f, 1.0f - 4.0f * fixedDelta);   // heavy drag - a burst, not a projectile
+            c.pos = c.pos + c.vel * fixedDelta;
+            c.spin += c.angularVel * fixedDelta;
+            c.life -= fixedDelta;
+            if (c.life <= 0.0f) m_fireChunks.Release({ c.selfIndex, c.selfGeneration });
+        }
+    }
+
     void Simulation::AwardKill()
     {
         ++m_killCount;
@@ -635,7 +753,7 @@ namespace engine::game
 
     void Simulation::EndCombatPhase()
     {
-        if constexpr (kDemoScene != 2) { return; }
+        if (m_demoScene != DemoScene::DefenseCombat) { return; }
         else
         {
             for (const auto& handle : m_agentHandles) m_agents.Release(handle);
@@ -644,9 +762,30 @@ namespace engine::game
         }
     }
 
+    void Simulation::ResetMatch()
+    {
+        if (m_demoScene != DemoScene::DefenseCombat) { return; }
+        else
+        {
+            EndCombatPhase();   // releases m_agentHandles, resets churn cursor
+            m_gibs.Init(kGibPoolCapacity);
+            m_ordnance.Init(kOrdnancePoolCapacity);
+            m_slowZones.clear();
+
+            m_objectiveHealth = kObjectiveMaxHealth;
+            m_killCount = 0;
+            m_supplies = 0;
+            m_phase = MatchPhase::Combat;
+            m_phaseTimeLeft = kCombatDuration;
+            m_waveNumber = 1;
+
+            SpawnSimAgents();
+        }
+    }
+
     void Simulation::StepMatchPhase(float fixedDelta)
     {
-        if constexpr (kDemoScene != 2) { return; }
+        if (m_demoScene != DemoScene::DefenseCombat) { return; }
         else
         {
             m_phaseTimeLeft -= fixedDelta;
@@ -670,10 +809,12 @@ namespace engine::game
 
     void Simulation::TriggerExplosion(math::Vec3 center, float radius, float power, float damage)
     {
-        if constexpr (kDemoScene != 2) { return; }
+        if (m_demoScene != DemoScene::DefenseCombat) { return; }
         else
         {
             if (radius <= 0.0f) return;
+            vfx::SpawnExplosion(m_vfx, center);
+            SpawnFireChunks(center);
             const float invR = 1.0f / radius;
             SimAgent* slots = m_agents.Slots();
             for (const std::uint32_t idx : m_agents.ActiveIndices())
@@ -707,36 +848,63 @@ namespace engine::game
         }
     }
 
-    void Simulation::FireWeapon(WeaponKind kind)
+    bool Simulation::FireWeapon(WeaponKind kind)
     {
-        if constexpr (kDemoScene != 2) { return; }
+        if (m_demoScene != DemoScene::DefenseCombat) { return false; }
         else
         {
             switch (kind)
             {
             case WeaponKind::Rifle:
+                // Full-auto (§5): Application holds the trigger down every
+                // frame, this cooldown is what actually paces the rounds.
                 // LookRayResult already IS the hitscan - UpdateCrowdQueries()
                 // built it against last frame's aim (docs/defense-combat-design.md
-                // §5). A miss (m_lookRay.hit == false) is simply a whiffed shot.
+                // §5). A miss (m_lookRay.hit == false) is simply a whiffed shot,
+                // but it still consumes the cooldown like a real shot would.
+                if (m_rifleCooldown > 0.0f) return false;
+                m_rifleCooldown = kRifleFireInterval;
+                vfx::SpawnMuzzleFlash(m_vfx, MuzzleSocketPosition(), m_lookRay.dir);
                 if (m_lookRay.hit) DamageAgent(m_lookRay.agentSlot, kRifleDamage);
-                break;
+                return true;
             case WeaponKind::Mortar:
             case WeaponKind::Mine:
-                break;   // placed via PlaceOrdnance instead (§4/§8 - not an instant fire-and-forget)
+                return false;   // placed via PlaceOrdnance instead (§4/§8 - not an instant fire-and-forget)
             case WeaponKind::WireFence:
-                break;   // placed via PlaceSlowZone instead (§6/§8, same reasoning as Mortar/Mine)
+                return false;   // placed via PlaceSlowZone instead (§6/§8, same reasoning as Mortar/Mine)
             case WeaponKind::Flamethrower:
                 // §7 - continuous: Application calls FireWeapon every frame
                 // the trigger is held, not just on the press edge like Rifle.
+                vfx::SpawnFlameJet(m_vfx, MuzzleSocketPosition(), m_lookRay.dir);
                 ApplyFlameCone(m_lookRay.origin, m_lookRay.dir, kFlameRange, kFlameHalfAngleCos);
-                break;
+                return true;
             }
+            return false;
+        }
+    }
+
+    void Simulation::PreviewVfxEffect(EffectPreview effect)
+    {
+        if (m_demoScene != DemoScene::EffectsTest) return;
+
+        switch (effect)
+        {
+        case EffectPreview::MuzzleFlash:
+            vfx::SpawnMuzzleFlash(m_vfx, m_lookRay.origin + m_lookRay.dir * kMuzzleForwardOffset, m_lookRay.dir);
+            break;
+        case EffectPreview::Explosion:
+            vfx::SpawnExplosion(m_vfx, m_lookRay.origin + m_lookRay.dir * kEffectsPreviewDistance);
+            SpawnFireChunks(m_lookRay.origin + m_lookRay.dir * kEffectsPreviewDistance);
+            break;
+        case EffectPreview::GibBurst:
+            vfx::SpawnGibBurst(m_vfx, m_lookRay.origin + m_lookRay.dir * kEffectsPreviewDistance);
+            break;
         }
     }
 
     void Simulation::PlaceOrdnance(OrdnanceKind kind)
     {
-        if constexpr (kDemoScene != 2) { return; }
+        if (m_demoScene != DemoScene::DefenseCombat) { return; }
         else
         {
             if (!m_lookRay.hit) return;   // nothing to place on
@@ -771,7 +939,7 @@ namespace engine::game
 
     void Simulation::StepOrdnance(float fixedDelta)
     {
-        if constexpr (kDemoScene != 2) { return; }
+        if (m_demoScene != DemoScene::DefenseCombat) { return; }
         else
         {
             PlacedOrdnance* slots = m_ordnance.Slots();
@@ -808,7 +976,7 @@ namespace engine::game
 
     void Simulation::PlaceSlowZone()
     {
-        if constexpr (kDemoScene != 2) { return; }
+        if (m_demoScene != DemoScene::DefenseCombat) { return; }
         else
         {
             if (!m_lookRay.hit) return;                      // nothing to place on
@@ -819,9 +987,23 @@ namespace engine::game
         }
     }
 
+    math::Vec3 Simulation::MuzzleSocketPosition() const
+    {
+        // right = cross(up, forward), matching math::LookAtLH's xAxis (docs/
+        // particle-system-research.md §12's camera-axis note) - the pitch
+        // component of `forward` cancels out of this cross product, so plain
+        // yaw is enough for a horizontal right vector (no camera roll exists
+        // in this game).
+        const float cy = std::cos(m_cameraYaw), sy = std::sin(m_cameraYaw);
+        const math::Vec3 right{ cy, 0.0f, -sy };
+        return m_lookRay.origin + m_lookRay.dir * kMuzzleForwardOffset
+             + right * kMuzzleRightOffset
+             + math::Vec3{ 0.0f, -kMuzzleDownOffset, 0.0f };
+    }
+
     void Simulation::ApplyFlameCone(math::Vec3 origin, math::Vec3 dir, float range, float halfAngleCos)
     {
-        if constexpr (kDemoScene != 2) { return; }
+        if (m_demoScene != DemoScene::DefenseCombat) { return; }
         else
         {
             SimAgent* slots = m_agents.Slots();
@@ -841,7 +1023,10 @@ namespace engine::game
 
     void Simulation::UpdateCrowdQueries()
     {
-        if constexpr (kDemoScene != 2) { return; }
+        // Also runs for EffectsTest (no crowd there - the collider loop below
+        // just iterates zero and the raycast always misses) so m_lookRay.
+        // origin/dir are still populated for PreviewVfxEffect to aim with.
+        if (m_demoScene != DemoScene::DefenseCombat && m_demoScene != DemoScene::EffectsTest) { return; }
         else
         {
             const std::vector<std::uint32_t>& active = m_agents.ActiveIndices();

@@ -132,6 +132,36 @@ namespace engine::render
         math::Color fogColor{ 0.44f, 0.49f, 0.57f, 1.0f };   // matches the default clearColor
     };
 
+    // One billboard VFX particle (docs/particle-system-research.md §4.3). No
+    // texture/UV field - v1 is a procedural, noise-perturbed soft-blob shader
+    // (particle.hlsl), shape comes from math, not a sprite. `size` is the
+    // current (already age-lerped by SnapshotBuilder) billboard half-extent
+    // in world units. `rotation`/`stretch` fight the "looks like a flat
+    // sticker sliding" read a plain billboard has (§12 구현 노트 "3D로 보이기") -
+    // SnapshotBuilder sets `rotation` to either the particle's simulated spin
+    // or (fast movers) the screen-space direction of travel, and `stretch`
+    // elongates the quad along that direction so it reads as a tumbling/
+    // streaking chunk instead of a translating disc.
+    struct ParticleInstance
+    {
+        math::Vec3    pos{};        // world                        (offset 0)
+        float         size{ 0.1f }; // billboard half-extent        (offset 12)
+        float         rotation{ 0.0f };  // screen-plane roll, rad  (offset 16)
+        std::uint32_t colorRgba{ 0xffffffffu };  // 8:8:8:8, already age-lerped (offset 20)
+        float         stretch{ 1.0f };   // local-X elongation, 1 = circular (offset 24)
+    };                              // 28 bytes
+
+    enum class ParticleBlend : std::uint8_t { Additive, AlphaBlend };
+
+    // A contiguous run of Scene3D::particleInstances sharing a blend mode.
+    // No atlas id (no texture, §"텍스처 없이" in particle-system-research.md).
+    struct ParticleBatch
+    {
+        ParticleBlend blend{ ParticleBlend::AlphaBlend };
+        std::uint32_t first{ 0 };
+        std::uint32_t count{ 0 };
+    };
+
     // The 3D half of a RenderSnapshot.
     struct Scene3D
     {
@@ -146,6 +176,11 @@ namespace engine::render
         // meshInstances; instanceBatches slices it. docs/instanced-rendering.md.
         std::vector<MeshInstance> meshInstances;
         std::vector<InstanceBatch> instanceBatches;
+
+        // VFX particles (docs/particle-system-research.md §4.3) - same
+        // contiguous-run-per-batch pattern as the crowd above.
+        std::vector<ParticleInstance> particleInstances;
+        std::vector<ParticleBatch> particleBatches;
     };
 
     // --- debug-line builders (header-only; call from wherever fills a Scene3D) ---
