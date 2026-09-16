@@ -488,6 +488,13 @@ namespace engine::game
         {
             return math::Clamp(m_muzzleFlashTimer / kMuzzleFlashDarkenTime, 0.0f, 1.0f);
         }
+        // 0 (resting) .. 1 (at kRifleSpreadMax) - normalized so SnapshotBuilder's
+        // crosshair UI doesn't need to know the radian constants, same reasoning
+        // as MuzzleFlashDarken() being pre-normalized.
+        [[nodiscard]] float RifleSpreadFraction() const
+        {
+            return kRifleSpreadMax > 0.0f ? math::Clamp(m_rifleSpread / kRifleSpreadMax, 0.0f, 1.0f) : 0.0f;
+        }
         [[nodiscard]] const core::ObjectPool<GibPiece>& Gibs() const { return m_gibs; }
         [[nodiscard]] const core::ObjectPool<FireChunk>& FireChunks() const { return m_fireChunks; }
         [[nodiscard]] const core::ObjectPool<PlacedOrdnance>& Ordnance() const { return m_ordnance; }

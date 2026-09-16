@@ -517,6 +517,12 @@ void Simulation::FireWeapon(WeaponKind kind)
   퍼뜨린 방향으로 **자체 레이캐스트**를 새로 쏴서 데미지·트레이서 끝점을 결정한다(`vfx::
   ParticleSystem::SpawnBurst`와 같은 phi/theta 원뿔 스캐터 수식을 별도로 복제 — SRP, 셋 다
   서로 내부를 몰라도 됨).
+- **크로스헤어 UI**: `Simulation::RifleSpreadFraction()`(0..1, `kRifleSpreadMax` 기준 정규화 —
+  `MuzzleFlashDarken()`과 같은 이유로 라디안 상수를 `SnapshotBuilder`에 노출 안 함)를
+  `SnapshotBuilder`가 읽어 화면 중앙 "+"자 4획 사이 간격을 6~40px로 벌린다. 진짜 FOV
+  기반 각도→픽셀 투영이 아니라 정규화값을 그냥 픽셀 범위에 선형 매핑 — `RaycastTerrain`과
+  같은 "데모 등급이면 충분" 판단. `2D 오버레이(ui::DrawRect)`라 3D 씬 좌표와 무관, 뷰포트
+  중앙에 항상 고정.
 
 ### 5.2 지형 레이캐스트 — 크라우드를 안 보고 있어도 조준 가능 (구현 완료)
 

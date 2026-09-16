@@ -883,7 +883,8 @@ namespace engine::game
             // TEMP debug text (user-requested playtesting aid): current weapon
             // + a numeric readout of this frame's look-ray, to go with the
             // existing 3D debug ray/hit-sphere drawn above in BuildCliffScene.
-            // Remove once real weapon-select UI / crosshair exist.
+            // Remove once real weapon-select UI exists (the crosshair below
+            // already replaces that part of this comment's old TODO).
             char aimText[128];
             const LookRayResult& look = simulation.LookRay();
             if (look.hit)
@@ -906,6 +907,25 @@ namespace engine::game
                          { 0.0f, 0.0f, 0.0f, 0.45f });
             ui::DrawText(snapshot.uiQuads, aimText, { aimX, aimY }, aimScale,
                          look.hit ? math::Color{ 0.4f, 1.0f, 0.5f, 1.0f } : math::Color{ 0.7f, 0.7f, 0.75f, 1.0f });
+
+            // Crosshair (docs/defense-combat-design.md §5.1): a static "+" that
+            // widens with RifleSpreadFraction() so the recoil bloom (§5.1) is
+            // visible, not just felt through where shots land. Screen-space
+            // pixel gap, not a true FOV-accurate angular projection - same
+            // "demo-grade is enough" call as RaycastTerrain's march-and-bisect
+            // (Simulation.cpp).
+            {
+                const float cx = static_cast<float>(viewportWidth) * 0.5f;
+                const float cy = static_cast<float>(viewportHeight) * 0.5f;
+                constexpr float kGapMin = 6.0f, kGapMax = 40.0f;
+                constexpr float kTickLength = 10.0f, kThickness = 2.0f;
+                const float gap = kGapMin + (kGapMax - kGapMin) * simulation.RifleSpreadFraction();
+                const math::Color crosshairColor{ 1.0f, 1.0f, 1.0f, 0.85f };
+                ui::DrawRect(snapshot.uiQuads, { cx - kThickness * 0.5f, cy - gap - kTickLength, kThickness, kTickLength }, crosshairColor);
+                ui::DrawRect(snapshot.uiQuads, { cx - kThickness * 0.5f, cy + gap, kThickness, kTickLength }, crosshairColor);
+                ui::DrawRect(snapshot.uiQuads, { cx - gap - kTickLength, cy - kThickness * 0.5f, kTickLength, kThickness }, crosshairColor);
+                ui::DrawRect(snapshot.uiQuads, { cx + gap, cy - kThickness * 0.5f, kTickLength, kThickness }, crosshairColor);
+            }
 
             // Weapon key-mapping legend, upper-right (user-requested): a static
             // reference list so the 5 weapons' keys (defense-combat-design.md
