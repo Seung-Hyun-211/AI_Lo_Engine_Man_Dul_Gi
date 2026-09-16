@@ -1,7 +1,8 @@
 # 로컬라이제이션 / 문자열 테이블 설계 (Localization & String Table)
 
 UTF-8 문자열 테이블 + 언어 설정 + 언어별 텍스트 조회 구조.
-**상태: `core::StringTable` 구현(§10-1), 나머지(§10-2~7)는 설계만.**
+**상태: `core::StringTable`·`core::Localization` 구현(§10-1·2), 나머지(§10-3~7)는 설계만 —
+아직 아무도 호출하지 않고 `assets/loc/*.txt`도 없다(문자열 이관이 §10-4).**
 
 기존 선례를 그대로 따른다 — 파일 포맷은 `core::Settings`(`settings.cfg`)의 `key=value` 계열,
 언어 선택은 해상도/프레임레이트와 같은 **고정 후보 목록 + 인덱스** 방식(`kResolutionPresets` 패턴).
@@ -274,7 +275,13 @@ ui::DrawText(out, loc.Format("hud.wave.label", waveIndex), { 16, 16 }, 2.0f, kHu
    `LoadFromFile`(열기 실패 시에만 `false`, 깨진 줄은 건너뜀) + `Find(string_view) -> const std::string*`
    (`detail::StringViewHash` 투명 해시라 프레임마다 조회해도 문자열을 새로 만들지 않음) + `Size`/`Empty`.
    BOM 제거·CRLF·첫 `=` 분리·값 공백 보존·`\n`/`\\` 이스케이프·중복 후승을 모두 처리한다.
-2. `core/Localization.{h,cpp}` — 활성/기본 표 2개 보유, `Get`/`Format`, `Load(code)`, 미스 카운터.
+2. ~~`core/Localization.{h,cpp}` — 활성/기본 표 2개 보유, `Get`/`Format`, `Load(code)`, 미스 카운터~~ **✅ 구현**.
+   `Load(code)`는 기본 언어 표를 한 번만 읽어 폴백으로 보관하고, 요청 언어 파일을 못 읽으면 `false`를
+   돌려주되 **조회는 계속 기본 언어로 해결**된다. 활성 언어가 곧 기본 언어면 활성 표를 비워 두 번 읽지 않는다.
+   `Format`은 `std::format`이 아니라 자체 `{N}` 치환 — 패턴이 **데이터 파일에서 오므로** 번역자의 오타(`{5}`,
+   짝 없는 `{`)에 예외를 던지면 안 되고, 그런 조각은 **그대로 화면에 보이게** 남긴다. 언어 코드는
+   `[A-Za-z0-9_-]`만 허용(설정 파일이 손편집 가능한 경계라 경로 형태의 코드를 파일명으로 쓰지 않기 위함).
+   미스 키는 `MissedKeys()`에 distinct로 쌓이고 `Load` 시 초기화된다.
 3. `core::Settings`에 `languageIndex` + `language=` 줄(§4) + `kLanguagePresets`.
 4. `assets/loc/en.txt` 생성 — **지금 하드코딩된 UI 문자열을 전부 여기로 이관**(가장 품이 드는 단계).
    화면 빌더 시그니처에 `const core::Localization&` 추가.
