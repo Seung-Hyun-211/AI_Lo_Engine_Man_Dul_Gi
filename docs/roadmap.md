@@ -154,7 +154,8 @@ if (auto hit = world.RaycastClosest(down)) { actor.pos.y = hit->point.y; actor.g
 | 메시 LOD / 임포스터 | 디스턴스 스왑 없음 (인스턴스 크라우드 LOD 는 `instanced-rendering.md` §5, 메시 자체 LOD 는 별개) |
 | 스왑체인 `FLIP_DISCARD` | 레거시 `DISCARD` (`CLAUDE.md` 알려진 이슈) |
 | 결정성 리플레이(입력 로그 + 프레임 해시) | 회귀 테스트 (`time-design.md` 로드맵) |
-| 프리팹 / 직렬화 / 세이브 | 콘텐츠 저작·저장 |
+| 프리팹 / 직렬화 | 콘텐츠 저작 |
+| ~~세이브/로드 뼈대~~ → 설계 완료, 구현 남음 | 진행 상태 영속화 — [save-load-design.md](save-load-design.md)(4타입 SRP 분해 + 스텝 경계 캡처 + 원자적 교체 + 핸들 리맵) |
 
 ### 조사 필요 (설계 전에 결정부터)
 
