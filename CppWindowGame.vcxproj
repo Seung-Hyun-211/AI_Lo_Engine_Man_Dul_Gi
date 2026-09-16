@@ -52,6 +52,7 @@
     <ClCompile Include="src\core\EntityRegistry.cpp" />
     <ClCompile Include="src\core\JobSystem.cpp" />
     <ClCompile Include="src\core\Settings.cpp" />
+    <ClCompile Include="src\core\StringTable.cpp" />
     <ClCompile Include="src\game\Application.cpp" />
     <ClCompile Include="src\game\CharacterAnimationState.cpp" />
     <ClCompile Include="src\game\InGameHud.cpp" />
@@ -98,6 +99,7 @@
     <ClInclude Include="src\core\NonCopyable.h" />
     <ClInclude Include="src\core\ObjectPool.h" />
     <ClInclude Include="src\core\Settings.h" />
+    <ClInclude Include="src\core\StringTable.h" />
     <ClInclude Include="src\core\Time.h" />
     <ClInclude Include="src\game\Application.h" />
     <ClInclude Include="src\game\CharacterAnimationState.h" />

@@ -1,6 +1,7 @@
 # 로컬라이제이션 / 문자열 테이블 설계 (Localization & String Table)
 
-UTF-8 문자열 테이블 + 언어 설정 + 언어별 텍스트 조회 구조. **상태: 설계만(미구현).**
+UTF-8 문자열 테이블 + 언어 설정 + 언어별 텍스트 조회 구조.
+**상태: `core::StringTable` 구현(§10-1), 나머지(§10-2~7)는 설계만.**
 
 기존 선례를 그대로 따른다 — 파일 포맷은 `core::Settings`(`settings.cfg`)의 `key=value` 계열,
 언어 선택은 해상도/프레임레이트와 같은 **고정 후보 목록 + 인덱스** 방식(`kResolutionPresets` 패턴).
@@ -107,7 +108,7 @@ msg.save.failed=저장에 실패했습니다.\n디스크 공간을 확인하세�
 | 공백 | 키는 트림, **값은 트림하지 않는다**(의도적 공백 보존) |
 | 주석/빈 줄 | `#`로 시작하는 줄과 빈 줄은 무시 |
 | 이스케이프 | `\n`(줄바꿈), `\\`(역슬래시) 둘만. 그 외 `\x`는 그대로 둔다 |
-| 중복 키 | 나중 것이 이긴다 + 디버그 빌드에서 로그 |
+| 중복 키 | 나중 것이 이긴다(오버라이드 파일을 얹을 때 필요한 규칙). **로그는 없다** — `core`에 로깅 설비가 없어 `StringTable`이 Windows 헤더를 끌어오지 않게 두었다. 누락·중복 보고는 미스 카운터와 함께 `Localization`이 맡는다(§6) |
 | 파서 관점 | **바이트 단위**로 충분하다 — UTF-8은 ASCII와 충돌하지 않으므로 `=`·`\n`·`#` 판정이 멀티바이트 문자를 자르지 않는다. 디코딩은 렌더 단계(§8)의 일 |
 
 파일 경로는 ASCII(`assets/loc/ko.txt`)로 고정한다 — Windows narrow 파일 API의 코드페이지 문제(한글 경로)를
@@ -269,7 +270,10 @@ ui::DrawText(out, loc.Format("hud.wave.label", waveIndex), { 16, 16 }, 2.0f, kHu
 
 ## 10. 구현 순서
 
-1. `core/StringTable.{h,cpp}` — UTF-8 `key=value` 파서(BOM·주석·`\n` 이스케이프) + `Find`.
+1. ~~`core/StringTable.{h,cpp}` — UTF-8 `key=value` 파서(BOM·주석·`\n` 이스케이프) + `Find`~~ **✅ 구현**.
+   `LoadFromFile`(열기 실패 시에만 `false`, 깨진 줄은 건너뜀) + `Find(string_view) -> const std::string*`
+   (`detail::StringViewHash` 투명 해시라 프레임마다 조회해도 문자열을 새로 만들지 않음) + `Size`/`Empty`.
+   BOM 제거·CRLF·첫 `=` 분리·값 공백 보존·`\n`/`\\` 이스케이프·중복 후승을 모두 처리한다.
 2. `core/Localization.{h,cpp}` — 활성/기본 표 2개 보유, `Get`/`Format`, `Load(code)`, 미스 카운터.
 3. `core::Settings`에 `languageIndex` + `language=` 줄(§4) + `kLanguagePresets`.
 4. `assets/loc/en.txt` 생성 — **지금 하드코딩된 UI 문자열을 전부 여기로 이관**(가장 품이 드는 단계).
