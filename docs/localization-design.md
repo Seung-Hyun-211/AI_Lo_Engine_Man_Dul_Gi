@@ -160,7 +160,14 @@ struct Settings
 ```
 
 - vsync·해상도가 "즉시 적용"인 것과 같은 부류로 취급한다(`game-settings.md` "실제 부작용이 있는 필드").
-- **재빌드로 반영**하므로 위젯·`UIContext`에 새 기능이 필요 없다(§1).
+- **재빌드로 반영**하므로 위젯에 새 기능이 필요 없다(§1).
+
+> ⚠ **선행 조건 — `UIContext`의 지연 교체.** 언어 변경은 설정 화면의 PREV/NEXT **버튼 콜백 안에서**
+> 일어나는데, `SetScreen`/`SetOverlay`/`ClearOverlay`는 지연 큐 없이 **옛 트리를 그 자리에서 파괴**한다
+> (`ui-architecture.md` "화면 교체 시점"). 즉 재빌드를 그대로 넣으면 **실행 중인 버튼의 `onClick`
+> (`std::function`)을 그 안에서 파괴**하게 된다 — 지금 `CLOSE` 버튼이 이미 하고 있는 UB를 한 건 더
+> 늘리는 것이다. 그래서 §10-5에서 표 재로드만 넣고 **재빌드는 보류**했다.
+> 순서: `UIContext`에 `m_pendingScreen`/`m_pendingOverlay` 지연 슬롯을 먼저 넣고, 그다음 재빌드.
 - 인게임 HUD 텍스트(`SnapshotBuilder`가 `ui::DrawText`로 직접 그리는 웨이브/페이즈/FPS)는 매 프레임
   새로 만들어지므로 자동으로 다음 프레임부터 새 언어가 된다.
 
@@ -291,7 +298,8 @@ ui::DrawText(out, loc.Format("hud.wave.label", waveIndex), { 16, 16 }, 2.0f, kHu
 4. `assets/loc/en.txt` 생성 — **지금 하드코딩된 UI 문자열을 전부 여기로 이관**(가장 품이 드는 단계).
    화면 빌더 시그니처에 `const core::Localization&` 추가.
 5. **부분 ✅** — 언어 사이클 행 + `Application::ApplyLanguage`(표 재로드)까지 됨. **남은 것: 화면 재빌드**
-   (`SetScreen`/`SetOverlay`, §5) — 4번으로 라벨이 표에서 오게 된 다음에 의미가 생기므로 그때 같이 넣는다.
+   (`SetScreen`/`SetOverlay`, §5). 이유는 두 가지 — 4번으로 라벨이 표에서 와야 의미가 생기고, 그 전에
+   `UIContext` 지연 교체가 필요하다(§5의 ⚠ 박스). 순서: 지연 교체 → 문자열 이관 → 재빌드.
 6. `assets/loc/ko.txt` — 데이터만 준비(표시는 §8 이후).
 7. (§8) `GlyphAtlas` + `AddText` 코드포인트 순회 + `atlas_pack`의 loc 스캔 서브셋.
 

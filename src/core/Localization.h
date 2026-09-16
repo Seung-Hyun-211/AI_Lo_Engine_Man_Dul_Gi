@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/NonCopyable.h"
 #include "core/StringTable.h"
 
 #include <set>
@@ -31,9 +32,14 @@ namespace engine::core
         [[nodiscard]] std::string ToText(T value) { return std::to_string(value); }
     }
 
-    class Localization
+    // Non-copyable: a copy would duplicate both tables and hand out Get()
+    // views into the copy, which the original's next Load then has no say
+    // over. One owner (Application) is the whole intent.
+    class Localization final : private NonCopyable
     {
     public:
+        Localization() = default;
+
         // Loads assets/loc/<code>.txt as the active language and, once, the
         // default language as the fallback. Returns false when the requested
         // language cannot be read - lookups then resolve against the default

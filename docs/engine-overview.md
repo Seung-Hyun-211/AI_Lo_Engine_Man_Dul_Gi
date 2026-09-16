@@ -43,7 +43,7 @@ wWinMain (src/main.cpp)
 | 모듈 | 파일 | 유일한 변경 이유 |
 |---|---|---|
 | `engine::math` | `math/Math.h`(umbrella), `Math2D.h`, `Math3D.h` | 공용 기하 타입이 바뀔 때 |
-| `engine::core` | `core/JobSystem.*`, `core/Time.h`, `core/NonCopyable.h`, `core/AssetPaths.*` | 작업 스케줄링·시간·자산 경로 규칙이 바뀔 때 ([time-design.md](time-design.md)) |
+| `engine::core` | `core/JobSystem.*`, `core/Time.h`, `core/NonCopyable.h`, `core/AssetPaths.*`, `core/ObjectPool.h`, `core/EntityId.h`·`EntityRegistry.*`, `core/Settings.*`, `core/StringTable.*`·`Localization.*` | 작업 스케줄링·시간·자산 경로·엔티티 식별·설정·문자열 표 규칙이 바뀔 때 ([time-design.md](time-design.md), [game-settings.md](game-settings.md), [localization-design.md](localization-design.md)) |
 | `engine::platform` | `platform/Win32Window.*` | OS 창/메시지 처리 방식이 바뀔 때 |
 | `engine::input` | `input/InputState.h` | 입력 상태 표현·에지 판정이 바뀔 때 |
 | `engine::render` | `render/IRenderer.h`, `RenderPass.h`, `RenderSnapshot.h`, `Dx11Renderer.*` + `render/shader/*` + `render/r2d/*` + `render/r3d/*` | 렌더 백엔드/스냅샷 포맷/파이프라인 스테이지/셰이더 로딩이 바뀔 때 ([shader-pipeline.md](shader-pipeline.md)) |

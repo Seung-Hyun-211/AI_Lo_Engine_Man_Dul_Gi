@@ -16,7 +16,7 @@
 | 애니메이션 | CPU LBS 스키닝, 클립 리타깃, Locomotion→클립 스냅, 재생 모드(Once/PingPong), 크로스페이드(로컬 TRS lerp), 파라메트릭 점프 | 2D 프레임 애니(설계만) | **루트 모션, GPU 스키닝, IK, 블렌드 트리** |
 | 물리/충돌 | Box/Sphere 탐지, layer/mask, Contacts, 3D 균일 그리드 브로드페이즈, 레이캐스트 2D·3D(Closest/Any/All) + 데모 씬 2 `Simulation` 연동 | — | **레이캐스트 그리드 가속(D3b), 2D 브로드페이즈, 스윕/CCD, 캡슐, 트리거 enter/exit 이벤트, 재사용 캐릭터 컨트롤러** |
 | 에셋 | FBX+스키닝, 이미지 디코드 seam, atlas_pack v1(무압축) | — | BC7 압축, AssetRegistry, 비동기 로더, 핫리로드(아틀라스/모델), 글리프 아틀라스 |
-| 게임 프레임워크 | 씬 상태(Title/InGame/Settings), 고정 스텝 + time scale, EntityId 뼈대, `core::ObjectPool<T>`, **오디오 스트리밍(전용 스레드) + voice 풀링(XAudio2)** | ScrollList v1 | **오디오 3D 위치음(X3DAudio)·OGG, 세이브, 이벤트 버스, 프리팹/직렬화, 게임 루프(장르 미정)** |
+| 게임 프레임워크 | 씬 상태(Title/InGame/Settings), 고정 스텝 + time scale, EntityId 뼈대, `core::ObjectPool<T>`, **오디오 스트리밍(전용 스레드) + voice 풀링(XAudio2)**, 설정 저장 + **UTF-8 문자열 표·언어 설정**(`localization-design.md`) | ScrollList v1, 로컬라이제이션(표·설정은 됨, 문자열 이관 남음) | **오디오 3D 위치음(X3DAudio)·OGG, 세이브(설계만 — `save-load-design.md`), 이벤트 버스, 프리팹/직렬화, 게임 루프(장르 미정)** |
 | 입력 | 키보드/마우스/휠 | — | 게임패드(XInput), 리바인딩, 액션맵 레이어 |
 | 툴/디버그 | entity 메모리 벤치, atlas_pack | — | 프레임타임 HUD/프로파일러(FPS 표시만 됨), 인게임 콘솔, 엔티티 인스펙터, 리플레이 |
 

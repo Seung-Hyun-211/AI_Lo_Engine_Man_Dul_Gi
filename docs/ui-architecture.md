@@ -157,7 +157,43 @@ Win32 message → Input::BeginFrame
               → Graphics::Present
 ```
 
-`UIContext`는 현재 화면 하나만 활성화하고, 화면 전환 요청은 프레임 끝에 적용한다. 이벤트 처리 중 UI 트리를 즉시 파괴하지 않으므로 안전하다.
+### 화면 교체 시점 — **즉시 파괴다** (문서가 오래 틀려 있었음)
+
+`UIContext`는 현재 화면 하나만 활성화한다. 위 문장은 원래 "화면 전환 요청은 프레임 끝에 적용한다 —
+이벤트 처리 중 UI 트리를 즉시 파괴하지 않으므로 안전하다"였는데, **구현은 그렇지 않다**:
+
+```cpp
+void SetScreen(std::unique_ptr<Widget> screen) { m_screen = std::move(screen); }   // 옛 트리를 그 자리에서 파괴
+void ClearOverlay() { m_overlay.reset(); }
+```
+
+지연 큐가 없다. 그래서 위젯 콜백 안에서 화면을 바꾸면 **자기를 소유한 트리가 콜백 실행 중에 파괴된다**.
+`CLOSE` 버튼(`onClick` → `Application::CloseSettings` → `ClearOverlay`)이 지금 정확히 그 경로다.
+
+**그런데도 실제로 안 터지는 이유**(우연이 아니라 지켜야 할 불변식):
+
+```cpp
+bool Button::PointerUp(Vec2 position, Vec2 parentOrigin)
+{
+    const bool clicked = m_pressed && AbsoluteBounds(parentOrigin).Contains(position);
+    m_pressed = false;          // 콜백 "전"에 멤버 쓰기를 끝낸다
+    if (clicked && onClick) onClick();   // 여기서 this 가 파괴될 수 있다
+    return clicked;             // 멤버가 아니라 지역변수를 반환한다
+}
+```
+
+부모 순회도 같은 규칙을 지킨다 — 자식이 이벤트를 소비하면 `return true`로 **즉시 빠져나가** `m_children`을
+다시 만지지 않는다. 소비되지 않은 경우엔 콜백이 안 불렸으니 파괴도 없다.
+
+**남은 실제 결함**: 그래도 실행 중인 `std::function`(버튼의 `onClick`)이 그 안에서 파괴된다 —
+표준상 UB다. 지금은 반환 후 아무도 그 저장소를 읽지 않아 동작하지만, ASAN이면 잡힌다.
+
+**지켜야 할 것**
+- 위젯 콜백에서 화면·오버레이를 바꾸는 코드는 **콜백 이후 자기 멤버를 건드리지 않아야** 한다.
+- 새 위젯을 만들 때 `PointerUp`류에서 콜백 뒤에 멤버를 읽거나 쓰면 안 된다(지역변수로 반환).
+- 근본 해결은 `UIContext`에 지연 슬롯(`m_pendingScreen`/`m_pendingOverlay`)을 두고 프레임 경계에서
+  교체하는 것 — 원래 이 문서가 주장하던 그 방식이다. 로컬라이제이션의 언어 전환 재빌드(`localization-design.md`
+  §5)가 이 경로를 한 번 더 늘리므로, 그 전에 넣는 것이 좋다.
 
 ### 현재 구현의 입력 경로
 

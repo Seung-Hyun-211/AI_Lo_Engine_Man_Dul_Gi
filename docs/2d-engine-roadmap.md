@@ -102,7 +102,8 @@
 |---|---|
 | 2D 프레임 애니메이션(`anim::a2d::SpriteAnimator`) 구현 | `animation-design.md` §2 (설계 끝) |
 | `GlyphAtlas` + `AddText` 코드포인트 순회 재작성 | `texture-atlas-and-sprite-pass.md` §1.3, §7-7 — 서브셋 목록은 문자열 표가 공급(`localization-design.md` §8) |
-| 로컬라이제이션 문자열 표 + 언어 설정 | `localization-design.md`(설계 완료) — 폰트보다 **먼저** 해도 되고, 하면 폰트 서브셋 입력이 준비된다 |
+| ~~로컬라이제이션 문자열 표 + 언어 설정~~ **부분 ✅** — `core::StringTable`·`core::Localization`·`Settings::languageIndex`까지 구현. 남은 것: 문자열 이관(`assets/loc/*.txt` + 화면 빌더) → 그게 폰트 서브셋 입력이 된다 | `localization-design.md` §10 |
+| `UIContext` 지연 화면 교체(§4-M) | `ui-architecture.md` "화면 교체 시점" — 언어 전환 재빌드의 선행 조건 |
 | 아틀라스 BC7/BC4 압축 | `atlas-build-pipeline.md` §5 |
 | **타일 지형 질의 API + `CharacterController2D`(move-and-slide)** | 신규. §4-K·§4-L — 타일을 콜라이더로 넣지 않기 위한 선행 조건 |
 | 트리거 enter/exit 이벤트 (선행: 콜라이더 신원 규약 §4-J) | `collider-design.md` 확장 |
@@ -132,7 +133,8 @@
   2D 신규 작업이 부딪히는 지점.
 - **G~L — 물리·좌표 규약**: `physics/p2d`와 `engine-conventions.md`의 기존 계약이 2D 게임플레이를
   만들 때 어긋나는 지점.
-- **M — 안전 확인됨**: 확인해봤더니 문제가 아니었던 것(과설계 방지용으로 남김).
+- **M — UI 수명**: 화면 교체가 즉시 파괴라, 콜백에서 화면을 바꾸는 코드가 자기를 지운다.
+- **N — 안전 확인됨**: 확인해봤더니 문제가 아니었던 것(과설계 방지용으로 남김).
 
 ### A. `ENGINE_WITH_3D`를 꺼도 2D 빌드가 성립하지 않는다 ⚠ 가장 먼저
 
@@ -322,7 +324,23 @@ id와 새 콜라이더의 id가 겹쳐 **유령 stay**(enter를 놓침)가 생�
   move-and-slide가 필수이므로 `game/CharacterController2D`의 자리를 카메라·타일맵과 함께 정한다
   (엔진 전체 로드맵의 "재사용 캐릭터 컨트롤러" P1 항목과 같은 것).
 
-### M. 안전 확인됨 — 과설계하지 말 것
+### M. `UIContext`의 화면 교체가 즉시 파괴다 — 콜백 안에서 화면을 바꾸면 자기를 지운다
+
+`SetScreen`/`SetOverlay`/`ClearOverlay`는 지연 큐 없이 `m_screen = std::move(...)`로 **옛 트리를 그 자리에서
+파괴**한다. `ui-architecture.md`는 오래도록 "프레임 끝에 적용한다 — 즉시 파괴하지 않으므로 안전하다"고
+적어 두었지만 그런 코드는 없다(그 문서의 "화면 교체 시점" 절에서 정정함).
+
+그래서 위젯 콜백에서 화면을 바꾸면 **실행 중인 버튼의 `onClick`(`std::function`)이 그 안에서 파괴**된다.
+`CLOSE` 버튼(→ `CloseSettings` → `ClearOverlay`)이 이미 그 경로다. 지금 안 터지는 건
+`Button::PointerUp`이 콜백 전에 멤버 쓰기를 끝내고 **지역변수를 반환**하며, 부모 순회가 소비 즉시
+`return true`로 빠져나가기 때문 — 우연이 아니라 **지켜야 할 불변식**이고, 그래도 표준상 UB는 남는다.
+
+- **조치**: `UIContext`에 지연 슬롯(`m_pendingScreen`/`m_pendingOverlay`)을 두고 프레임 경계에서 교체.
+  원래 문서가 주장하던 방식이다.
+- **지금 중요한 이유**: 로컬라이제이션 언어 전환이 이 경로를 한 번 더 늘린다(`localization-design.md` §5) —
+  그래서 그 재빌드를 일부러 보류해 두었다. 2D 화면이 늘수록 인스턴스가 계속 는다.
+
+### N. 안전 확인됨 — 과설계하지 말 것
 
 - **2D 브로드페이즈는 결정성을 깨지 않는다.** `CollisionWorld2D::Step()`이 마지막에 contacts를
   `(a, b)` id 기준으로 `std::sort` 하므로, 순회 순서가 그리드로 바뀌어도 결과 배열은 동일하다.
