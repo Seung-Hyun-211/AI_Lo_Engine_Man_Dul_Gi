@@ -18,6 +18,10 @@ namespace engine::game
     {
 #if defined(ENGINE_WITH_3D)
         constexpr float kPi = 3.14159265358979323846f;
+        // BuildCamera's vertical FOV - named so the crosshair (below) can project
+        // the real recoil cone angle through the same FOV instead of guessing a
+        // pixel range that drifts out of sync if this ever changes.
+        constexpr float kCameraFovY = kPi / 3.0f;
 
         // Unity-chan's mesh faces +Z in its local space, same as the engine's
         // "forward"; if the character ever runs backwards, flip this to kPi.
@@ -115,7 +119,7 @@ namespace engine::game
                 const math::Vec3 eye = eyePoint - forward * orbitDistance;
                 camera.view = math::LookAtLH(eye, eyePoint, { 0.0f, 1.0f, 0.0f });
             }
-            camera.projection = math::PerspectiveFovLH(kPi / 3.0f, aspect, 0.05f, 100.0f);
+            camera.projection = math::PerspectiveFovLH(kCameraFovY, aspect, 0.05f, 100.0f);
             return camera;
         }
 
@@ -909,17 +913,24 @@ namespace engine::game
                          look.hit ? math::Color{ 0.4f, 1.0f, 0.5f, 1.0f } : math::Color{ 0.7f, 0.7f, 0.75f, 1.0f });
 
             // Crosshair (docs/defense-combat-design.md §5.1): a static "+" that
-            // widens with RifleSpreadFraction() so the recoil bloom (§5.1) is
-            // visible, not just felt through where shots land. Screen-space
-            // pixel gap, not a true FOV-accurate angular projection - same
-            // "demo-grade is enough" call as RaycastTerrain's march-and-bisect
-            // (Simulation.cpp).
+            // widens with the rifle's actual recoil cone (kRifleSpreadMax),
+            // projected through the same vertical FOV (kCameraFovY) the camera
+            // itself uses - so the gap in pixels is where a shot can really
+            // land, not an arbitrary animation range. A small resting gap
+            // (kRestGapPixels) is added on top purely for legibility at
+            // spread=0 - only that part is cosmetic, the widening itself is
+            // geometrically accurate. Scales correctly with viewport
+            // resolution since it goes through viewportHeight, unlike a fixed
+            // pixel range would.
             {
                 const float cx = static_cast<float>(viewportWidth) * 0.5f;
                 const float cy = static_cast<float>(viewportHeight) * 0.5f;
-                constexpr float kGapMin = 6.0f, kGapMax = 40.0f;
+                constexpr float kRestGapPixels = 6.0f;
                 constexpr float kTickLength = 10.0f, kThickness = 2.0f;
-                const float gap = kGapMin + (kGapMax - kGapMin) * simulation.RifleSpreadFraction();
+                const float spreadRad = simulation.RifleSpreadFraction() * Simulation::kRifleSpreadMax;
+                const float spreadPixels = static_cast<float>(viewportHeight) * 0.5f
+                                          * std::tan(spreadRad) / std::tan(kCameraFovY * 0.5f);
+                const float gap = kRestGapPixels + spreadPixels;
                 const math::Color crosshairColor{ 1.0f, 1.0f, 1.0f, 0.85f };
                 ui::DrawRect(snapshot.uiQuads, { cx - kThickness * 0.5f, cy - gap - kTickLength, kThickness, kTickLength }, crosshairColor);
                 ui::DrawRect(snapshot.uiQuads, { cx - kThickness * 0.5f, cy + gap, kThickness, kTickLength }, crosshairColor);

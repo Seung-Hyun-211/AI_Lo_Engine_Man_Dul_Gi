@@ -517,12 +517,16 @@ void Simulation::FireWeapon(WeaponKind kind)
   퍼뜨린 방향으로 **자체 레이캐스트**를 새로 쏴서 데미지·트레이서 끝점을 결정한다(`vfx::
   ParticleSystem::SpawnBurst`와 같은 phi/theta 원뿔 스캐터 수식을 별도로 복제 — SRP, 셋 다
   서로 내부를 몰라도 됨).
-- **크로스헤어 UI**: `Simulation::RifleSpreadFraction()`(0..1, `kRifleSpreadMax` 기준 정규화 —
-  `MuzzleFlashDarken()`과 같은 이유로 라디안 상수를 `SnapshotBuilder`에 노출 안 함)를
-  `SnapshotBuilder`가 읽어 화면 중앙 "+"자 4획 사이 간격을 6~40px로 벌린다. 진짜 FOV
-  기반 각도→픽셀 투영이 아니라 정규화값을 그냥 픽셀 범위에 선형 매핑 — `RaycastTerrain`과
-  같은 "데모 등급이면 충분" 판단. `2D 오버레이(ui::DrawRect)`라 3D 씬 좌표와 무관, 뷰포트
-  중앙에 항상 고정.
+- **크로스헤어 UI (실제 탄퍼짐 각도 투영)**: 처음엔 정규화값(0..1)을 임의 픽셀 범위(6~40px)에
+  선형 매핑했는데 — 실제 탄퍼짐 각도(`kRifleSpreadMax`=0.09rad≈5.16°)를 카메라 수직
+  FOV(`kCameraFovY`=`kPi/3`=60°)로 투영하면 1080p 기준 최대 간격이 약 84px가 나와 절반 가까이
+  과소평가돼 있었고, 해상도가 바뀌어도 안 따라갔다(고정 픽셀이라). 지금은
+  `spreadPixels = viewportHeight/2 * tan(spreadRad) / tan(fovY/2)`로 **진짜 탄착 반경을
+  픽셀로 투영** — 크로스헤어 간격이 실제로 총알이 떨어질 수 있는 범위와 기하학적으로 일치한다
+  (해상도가 바뀌어도 `viewportHeight` 항 덕분에 그대로 맞음). 정지 상태(spread=0)에서도 보이게
+  더하는 `kRestGapPixels`(6px)만 순수 미관용 — 그 위에 더해지는 벌어짐 자체는 근사가 아니라
+  정확한 투영. `BuildCamera`의 FOV 리터럴을 `kCameraFovY` 상수로 빼서 카메라와 크로스헤어가
+  같은 값을 쓰도록 함(드리프트 방지).
 
 ### 5.2 지형 레이캐스트 — 크라우드를 안 보고 있어도 조준 가능 (구현 완료)
 
