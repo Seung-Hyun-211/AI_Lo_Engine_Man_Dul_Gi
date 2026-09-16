@@ -141,6 +141,17 @@ namespace engine::game
             lighting.ambient.sky = { 0.36f, 0.40f, 0.48f, 1.0f };
             lighting.ambient.ground = { 0.22f, 0.20f, 0.18f, 1.0f };
 
+            // Rifle muzzle flash contrast (docs/defense-combat-design.md §5):
+            // dim the scene briefly right after a shot so the additive flash
+            // particle reads clearly against it instead of blending into an
+            // already-bright frame - fades back to normal over
+            // kMuzzleFlashDarkenTime. No-op (dim = 1) outside DefenseCombat -
+            // MuzzleFlashDarken() is always 0 there since nothing sets the timer.
+            const float dim = 1.0f - simulation.MuzzleFlashDarken() * Simulation::kMuzzleFlashDarkenAmount;
+            lighting.key.color.a *= dim;
+            lighting.ambient.sky.r *= dim; lighting.ambient.sky.g *= dim; lighting.ambient.sky.b *= dim;
+            lighting.ambient.ground.r *= dim; lighting.ambient.ground.g *= dim; lighting.ambient.ground.b *= dim;
+
             // Cascaded directional shadow (docs/shadows.md "캐스케이드"):
             // cascade 0 is a tight box around the player in every scene - this
             // is what actually gives the character a crisp shadow. Cascade 1 is
@@ -321,7 +332,7 @@ namespace engine::game
                 // the base must be ~white (not a dark tint) or the textured
                 // zombie goes muddy. Highlights are a saturated multiply -
                 // still clearly readable against a near-white crowd.
-                if (look.hit && look.agentSlot == slotIdx)
+                if (look.hitAgent && look.agentSlot == slotIdx)
                 {
                     inst.colorRgba = PackRgba(1.0f, 0.82f, 0.15f, 1.0f);   // look-ray target (gold)
                 }
@@ -399,6 +410,19 @@ namespace engine::game
                 draw.world = math::Scaling({ zone.radius, 0.05f, zone.radius }) * math::Translation(zone.center);
                 draw.color = { 0.35f, 0.30f, 0.20f, 1.0f };   // dull rusty brown
                 scene.meshDraws.push_back(draw);
+            }
+
+            // Rifle tracers (docs/defense-combat-design.md §5 "시각 피드백"):
+            // short-lived bright lines from the muzzle to wherever the shot
+            // landed, so a shot reads as travelling instead of an instant
+            // silent hit. Reuses DebugDrawPass's line rendering (already used
+            // for the look-ray below) rather than a new render pass/shader -
+            // the existing particle billboard stretch caps at 2.5x, far too
+            // short to read as a tracer over tens of metres.
+            for (const TracerLine& tracer : simulation.Tracers())
+            {
+                const float alpha = math::Clamp(tracer.ageLeft / tracer.life, 0.0f, 1.0f);
+                render::debug::Line(scene.debugLines, tracer.start, tracer.end, { 1.0f, 0.95f, 0.55f, alpha });
             }
 
             // Debug draw: player AABB + a yellow line along the top of the ramp

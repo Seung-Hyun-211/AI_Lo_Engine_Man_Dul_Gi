@@ -178,17 +178,33 @@ namespace engine::game
     };
 
     // Result of the demo "what is the player looking at" raycast against the
-    // crowd (CollisionWorld3D). Render-only - it does not feed the simulation.
-    // SnapshotBuilder draws the ray + a marker + highlights the hit agent.
+    // crowd (CollisionWorld3D), with a terrain fallback (Simulation.cpp
+    // RaycastTerrain) when it misses every agent. Render-only - it does not
+    // feed the simulation. SnapshotBuilder draws the ray + a marker +
+    // highlights the hit agent.
     struct LookRayResult
     {
         math::Vec3    origin{};
         math::Vec3    dir{ 0.0f, 0.0f, 1.0f };
         float         length{ 0.0f };          // to the hit, or the full range on a miss
-        bool          hit{ false };
+        bool          hit{ false };            // true for an agent OR bare-ground hit - "is there a point to aim at"
+        bool          hitAgent{ false };        // true only when `hit` landed on a crowd agent (agentSlot valid then)
         math::Vec3    point{};
-        math::Vec3    normal{};
-        std::uint32_t agentSlot{ 0 };          // crowd slot index of the hit agent (valid iff hit)
+        math::Vec3    normal{};                // {0,1,0} approximation on a terrain hit - not a real slope normal
+        std::uint32_t agentSlot{ 0 };          // crowd slot index of the hit agent (valid iff hitAgent)
+    };
+
+    // A rifle tracer: a short-lived bright line from the muzzle to wherever
+    // the shot landed (docs/defense-combat-design.md §5 "시각 피드백") -
+    // render-only, ages out and is swap-removed by Simulation::Step (same
+    // "self-cleaning" idea as SlowZone, just much shorter-lived and no
+    // gameplay effect of its own).
+    struct TracerLine
+    {
+        math::Vec3 start{};
+        math::Vec3 end{};
+        float      ageLeft{ 0.0f };
+        float      life{ 1.0f };   // ageLeft/life -> 1 (just fired) .. 0 (about to vanish); SnapshotBuilder fades alpha by it
     };
 #endif
 
@@ -247,6 +263,23 @@ namespace engine::game
         static constexpr float kExplosionDamage = 60.0f;             // scaled by TriggerExplosion's existing falloff
         static constexpr float kRifleDamage = 34.0f;                  // 3 hits to kill (kAgentMaxHealth / 34 ~= 3)
         static constexpr float kRifleFireInterval = 0.1f;             // seconds between shots when held (10 rounds/s)
+        // Tracer (§5 "시각 피드백" - straight-line effect so a shot reads as
+        // travelling, not an instant silent hit).
+        static constexpr float kTracerLife = 0.06f;             // seconds a tracer line stays visible
+        static constexpr std::size_t kMaxTracers = 32;          // sanity cap; ~1 concurrent in practice at kRifleFireInterval
+        // Muzzle flash contrast: briefly dim the scene so the additive flash
+        // particle reads clearly against it instead of blending into an
+        // already-bright frame (playtest report - "라이팅이 더 잘 보이게").
+        static constexpr float kMuzzleFlashDarkenTime = 0.08f;   // seconds the dim lasts, fading back to normal
+        static constexpr float kMuzzleFlashDarkenAmount = 0.35f; // 0..1, fraction dimmer at peak (right after firing)
+        // Recoil bloom: sustained full-auto fire widens the cone the actual
+        // shot direction is drawn from, so it drifts off dead-centre instead
+        // of laser-precision hitscan (docs/defense-combat-design.md §5). Grows
+        // per shot, recovers while not firing - same "grow fast, decay slow"
+        // shape as most FPS bloom systems.
+        static constexpr float kRifleSpreadPerShot = 0.010f;     // radians added per shot (~0.6 deg)
+        static constexpr float kRifleSpreadMax = 0.09f;          // radians, cap (~5 deg cone half-angle)
+        static constexpr float kRifleSpreadDecayPerSec = 0.6f;   // radians/sec recovered while not firing
         static constexpr float kMuzzleForwardOffset = 0.4f;           // metres in front of the eye - keeps the flash off the near clip plane in first person
         // Lateral/vertical offset for the virtual muzzle socket (no FPS view-
         // model mesh exists, so this is VFX-only, not a bone attachment) -
@@ -447,6 +480,14 @@ namespace engine::game
         // Per pool slot: 1 if this crowd member overlapped another this step
         // (CollisionWorld3D broadphase). Indexed by slot; sized to the pool.
         [[nodiscard]] const std::vector<std::uint8_t>& AgentTouching() const { return m_agentTouch; }
+        [[nodiscard]] const std::vector<TracerLine>& Tracers() const { return m_tracers; }
+        // 0 (normal) .. 1 (just fired) - SnapshotBuilder::BuildLighting dims
+        // key/ambient by up to kMuzzleFlashDarkenAmount so the muzzle flash
+        // particle reads clearly against the scene.
+        [[nodiscard]] float MuzzleFlashDarken() const
+        {
+            return math::Clamp(m_muzzleFlashTimer / kMuzzleFlashDarkenTime, 0.0f, 1.0f);
+        }
         [[nodiscard]] const core::ObjectPool<GibPiece>& Gibs() const { return m_gibs; }
         [[nodiscard]] const core::ObjectPool<FireChunk>& FireChunks() const { return m_fireChunks; }
         [[nodiscard]] const core::ObjectPool<PlacedOrdnance>& Ordnance() const { return m_ordnance; }
@@ -511,6 +552,12 @@ namespace engine::game
         // coming from a held weapon instead of erupting dead-centre on the
         // view axis. No FPS view-model mesh exists, so this is VFX-only.
         [[nodiscard]] math::Vec3 MuzzleSocketPosition() const;
+        // Recoil bloom: perturbs `dir` within the current m_rifleSpread cone
+        // (same phi/theta cone-scatter math as vfx::ParticleSystem::SpawnBurst,
+        // duplicated rather than shared - three lines, and Simulation/vfx
+        // don't otherwise reach into each other's internals). Mutates
+        // m_rifleSpreadSeed (deterministic, no <random>), so not const.
+        [[nodiscard]] math::Vec3 ApplyRifleSpread(math::Vec3 dir);
         // Ticks the Combat/Prep timer and transitions phases (docs/defense-
         // combat-design.md §0). Runs last in Step() so this frame's other
         // systems still saw the OLD phase - a transition takes effect next
@@ -548,6 +595,10 @@ namespace engine::game
         physics::CollisionWorld3D m_collision3d;   // scene 2: crowd colliders, rebuilt each step (raycast + broadphase)
         LookRayResult m_lookRay;                   // scene 2: last player look-ray result (render-only)
         float m_rifleCooldown{ 0.0f };              // seconds left before the rifle can fire again (§5, full-auto)
+        std::vector<TracerLine> m_tracers;          // rifle tracers (§5); short-lived, no pool needed
+        float m_muzzleFlashTimer{ 0.0f };           // counts down from kMuzzleFlashDarkenTime after a shot
+        float m_rifleSpread{ 0.0f };                // radians, current aim-cone half-angle (recoil bloom)
+        float m_rifleSpreadSeed{ 1.0f };            // deterministic no-RNG scatter (same convention as vfx::ParticleSystem)
         std::vector<std::uint8_t> m_agentTouch;    // scene 2: per pool slot, 1 = overlapped another this step
         DemoScene m_demoScene{ DemoScene::DefenseCombat };   // runtime-selectable (EnterScene) - default is the constructor's first scene
         float m_cameraYaw{ 0.0f };                 // radians; orbit angle around the player

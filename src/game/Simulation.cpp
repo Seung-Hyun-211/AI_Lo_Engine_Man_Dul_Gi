@@ -53,6 +53,40 @@ namespace engine::game
             if (z >= kHillBottomZ) return 0.0f;
             return Simulation::kHillHeight * (1.0f - (z - kHillTopZ) / kHillRun);
         }
+
+        // Fallback ground hit against the hill terrain (HillHeightAtZ) for when
+        // a look/fire ray misses every crowd agent - lets ordnance/wire/
+        // explosions be aimed at bare ground instead of only at a live target
+        // (docs/defense-combat-design.md §4/§5/§6). March-and-bisect: the
+        // terrain here is a simple ramp, so a closed-form solve isn't worth the
+        // complexity for a demo-grade raycast (same "cheap enough" call as the
+        // linear scans elsewhere in this file, e.g. TriggerExplosion/StepOrdnance).
+        bool RaycastTerrain(math::Vec3 origin, math::Vec3 dir, float maxDist, math::Vec3& outPoint)
+        {
+            constexpr float kStep = 0.5f;
+            float prevT = 0.0f;
+            float prevDiff = origin.y - HillHeightAtZ(origin.z);
+            for (float t = kStep; t <= maxDist; t += kStep)
+            {
+                const math::Vec3 p = origin + dir * t;
+                const float diff = p.y - HillHeightAtZ(p.z);
+                if (diff <= 0.0f && prevDiff > 0.0f)
+                {
+                    float lo = prevT, hi = t;
+                    for (int i = 0; i < 8; ++i)   // bisect for a tighter hit point
+                    {
+                        const float mid = 0.5f * (lo + hi);
+                        const math::Vec3 pm = origin + dir * mid;
+                        if (pm.y - HillHeightAtZ(pm.z) > 0.0f) lo = mid; else hi = mid;
+                    }
+                    outPoint = origin + dir * hi;
+                    return true;
+                }
+                prevDiff = diff;
+                prevT = t;
+            }
+            return false;
+        }
 #endif
     }
 
@@ -153,6 +187,9 @@ namespace engine::game
         m_gibs.Init(kGibPoolCapacity);
         m_ordnance.Init(kOrdnancePoolCapacity);
         m_slowZones.clear();
+        m_tracers.clear();
+        m_muzzleFlashTimer = 0.0f;
+        m_rifleSpread = 0.0f;
 
         SpawnActors();   // DefenseCombat's branch repopulates the crowd via ResetMatch()
     }
@@ -302,6 +339,14 @@ namespace engine::game
         StepCollision2D();
 #if defined(ENGINE_WITH_3D)
         m_rifleCooldown = std::max(0.0f, m_rifleCooldown - fixedDelta);   // §5, full-auto fire-rate gate
+        m_rifleSpread = std::max(0.0f, m_rifleSpread - kRifleSpreadDecayPerSec * fixedDelta);   // recoil bloom recovery
+        m_muzzleFlashTimer = std::max(0.0f, m_muzzleFlashTimer - fixedDelta);
+        for (std::size_t i = 0; i < m_tracers.size(); )   // swap-remove expired tracers (same idiom as elsewhere in this file)
+        {
+            m_tracers[i].ageLeft -= fixedDelta;
+            if (m_tracers[i].ageLeft <= 0.0f) { m_tracers[i] = m_tracers.back(); m_tracers.pop_back(); }
+            else ++i;
+        }
         StepActors(fixedDelta, /*globalPaused=*/false, intent);
         StepOrdnance(fixedDelta);   // before StepSimAgents so a trigger this step still affects this step's crowd integration
         StepSimAgents(fixedDelta);
@@ -856,17 +901,48 @@ namespace engine::game
             switch (kind)
             {
             case WeaponKind::Rifle:
+            {
                 // Full-auto (§5): Application holds the trigger down every
                 // frame, this cooldown is what actually paces the rounds.
-                // LookRayResult already IS the hitscan - UpdateCrowdQueries()
-                // built it against last frame's aim (docs/defense-combat-design.md
-                // §5). A miss (m_lookRay.hit == false) is simply a whiffed shot,
-                // but it still consumes the cooldown like a real shot would.
                 if (m_rifleCooldown > 0.0f) return false;
                 m_rifleCooldown = kRifleFireInterval;
-                vfx::SpawnMuzzleFlash(m_vfx, MuzzleSocketPosition(), m_lookRay.dir);
-                if (m_lookRay.hit) DamageAgent(m_lookRay.agentSlot, kRifleDamage);
+
+                // Recoil bloom: the actual shot fires along a direction
+                // perturbed within the current spread cone, not the crosshair's
+                // exact m_lookRay.dir - that stays precise for the UI/ordnance
+                // placement, only the fired bullet drifts under sustained fire.
+                // Grows here every shot, recovers in Step() while not firing.
+                const math::Vec3 fireDir = ApplyRifleSpread(m_lookRay.dir);
+                m_rifleSpread = std::min(kRifleSpreadMax, m_rifleSpread + kRifleSpreadPerShot);
+
+                // Own raycast (not the cached m_lookRay - that was built from
+                // the un-perturbed crosshair direction): decides the real hit
+                // and gives the tracer an endpoint, with the same agent/terrain
+                // fallback as UpdateCrowdQueries.
+                physics::Ray3D ray{};
+                ray.origin = m_lookRay.origin;
+                ray.dir = fireDir;
+                ray.maxDistance = kLookRayRange;
+                ray.mask = kLayerCrowd3D;
+
+                math::Vec3 tracerEnd = m_lookRay.origin + fireDir * kLookRayRange;
+                if (const std::optional<physics::RayHit3D> hit = m_collision3d.RaycastClosest(ray))
+                {
+                    tracerEnd = hit->point;
+                    DamageAgent(static_cast<std::uint32_t>(hit->user), kRifleDamage);
+                }
+                else if (math::Vec3 groundPoint; RaycastTerrain(m_lookRay.origin, fireDir, kLookRayRange, groundPoint))
+                {
+                    tracerEnd = groundPoint;
+                }
+
+                const math::Vec3 muzzle = MuzzleSocketPosition();
+                vfx::SpawnMuzzleFlash(m_vfx, muzzle, fireDir);
+                if (m_tracers.size() < kMaxTracers)
+                    m_tracers.push_back({ muzzle, tracerEnd, kTracerLife, kTracerLife });
+                m_muzzleFlashTimer = kMuzzleFlashDarkenTime;
                 return true;
+            }
             case WeaponKind::Mortar:
             case WeaponKind::Mine:
                 return false;   // placed via PlaceOrdnance instead (§4/§8 - not an instant fire-and-forget)
@@ -1001,6 +1077,29 @@ namespace engine::game
              + math::Vec3{ 0.0f, -kMuzzleDownOffset, 0.0f };
     }
 
+    math::Vec3 Simulation::ApplyRifleSpread(math::Vec3 dir)
+    {
+        if (m_rifleSpread <= 0.0f) return dir;
+
+        dir = math::Normalized(dir);
+        const math::Vec3 up = std::fabs(dir.y) > 0.99f ? math::Vec3{ 1.0f, 0.0f, 0.0f } : math::Vec3{ 0.0f, 1.0f, 0.0f };
+        const math::Vec3 tangent = math::Normalized(math::Cross(up, dir));
+        const math::Vec3 bitangent = math::Cross(dir, tangent);
+
+        // Same fmod-based, no-<random> convention as vfx::ParticleSystem::
+        // NextRandom01/Simulation::SeedAgent - deterministic, and this is
+        // purely visual/gameplay scatter, not anything needing real entropy.
+        m_rifleSpreadSeed = std::fmod(m_rifleSpreadSeed * 16807.0f + 1.0f, 2147483647.0f);
+        const float r1 = std::fmod(m_rifleSpreadSeed, 1000.0f) / 1000.0f;
+        m_rifleSpreadSeed = std::fmod(m_rifleSpreadSeed * 16807.0f + 1.0f, 2147483647.0f);
+        const float r2 = std::fmod(m_rifleSpreadSeed, 1000.0f) / 1000.0f;
+
+        const float phi = r1 * 2.0f * kPi;
+        const float theta = r2 * m_rifleSpread;
+        const float st = std::sin(theta), ct = std::cos(theta);
+        return (tangent * (st * std::cos(phi))) + (bitangent * (st * std::sin(phi))) + (dir * ct);
+    }
+
     void Simulation::ApplyFlameCone(math::Vec3 origin, math::Vec3 dir, float range, float halfAngleCos)
     {
         if (m_demoScene != DemoScene::DefenseCombat) { return; }
@@ -1070,10 +1169,21 @@ namespace engine::game
             if (const std::optional<physics::RayHit3D> hit = m_collision3d.RaycastClosest(ray))
             {
                 m_lookRay.hit = true;
+                m_lookRay.hitAgent = true;
                 m_lookRay.length = hit->distance;
                 m_lookRay.point = hit->point;
                 m_lookRay.normal = hit->normal;
                 m_lookRay.agentSlot = static_cast<std::uint32_t>(hit->user);
+            }
+            else if (math::Vec3 groundPoint; RaycastTerrain(origin, forward, kLookRayRange, groundPoint))
+            {
+                // Terrain fallback (RaycastTerrain above) - aims ordnance/wire
+                // placement at bare ground. hitAgent stays false so the rifle
+                // (FireWeapon) doesn't mistake this for an agent hit.
+                m_lookRay.hit = true;
+                m_lookRay.length = math::Length(groundPoint - origin);
+                m_lookRay.point = groundPoint;
+                m_lookRay.normal = { 0.0f, 1.0f, 0.0f };
             }
 
             // Crowd-vs-crowd overlaps via the uniform-grid broadphase. Purely

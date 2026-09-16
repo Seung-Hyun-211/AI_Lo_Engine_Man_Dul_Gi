@@ -490,6 +490,49 @@ void Simulation::FireWeapon(WeaponKind kind)
   (`simulation.ActiveScene() == DemoScene::DefenseCombat`만) —
   실제 크로스헤어·무기 선택 UI가 생기면 제거할 플레이테스트용 임시 표시.
 
+### 5.1 시각 피드백 — 트레이서 · 머즐 플래시 대비 · 반동(연사 탄퍼짐) (구현 완료)
+
+세 가지 다 플레이테스트 요청으로 추가. `Simulation.h`/`.cpp`, `SnapshotBuilder.cpp`만 건드림 —
+새 렌더 패스·셰이더 없음.
+
+- **트레이서(직선 이펙트)**: `Simulation::TracerLine{ start, end, ageLeft, life }` 값 타입을
+  `m_tracers`(단순 `std::vector`, 수명 `kTracerLife`=0.06초라 동시 존재량이 거의 1개뿐 —
+  `core::ObjectPool` 오버킬, `Step()`에서 swap-remove로 직접 청소)에 쌓고
+  `SnapshotBuilder::BuildCliffScene`이 매 프레임 `render::debug::Line`으로 그린다.
+  **새 파티클/셰이더가 아니라 기존 `DebugDrawPass`(룩레이 시각화에 이미 쓰던 라인 렌더링)를
+  재사용** — `vfx::Particle`의 속도 방향 스트레치는 최대 2.5배(`SnapshotBuilder::
+  kMaxStretch`)로 캡돼 있어 수십 미터를 가로지르는 "선"으로는 너무 짧다. `DebugDrawPass`는
+  블렌드 스테이트가 기본값(불투명)이라 알파 페이드는 안 되지만, 수명이 0.06초(약 3~4프레임)
+  뿐이라 그냥 사라져도 눈에 안 띔.
+- **머즐 플래시 대비(라이팅 살짝 어둡게)**: 발사 성공 시 `m_muzzleFlashTimer =
+  kMuzzleFlashDarkenTime`(0.08초)를 세팅, `Simulation::MuzzleFlashDarken()`(0..1, 발사 직후
+  1)을 `SnapshotBuilder::BuildLighting`이 읽어 `key.color.a`·`ambient.sky/ground`를
+  `1 - darken*kMuzzleFlashDarkenAmount`(최대 35%)만큼 곱해 낮춘다 — 새 포스트프로세스 없이
+  이미 있는 조명 값을 프레임마다 살짝 어둡게 재계산하는 것뿐이라 `Frame` cbuffer 불변 규칙과
+  무관.
+- **반동(연사 탄퍼짐)**: `m_rifleSpread`(라디안, 원뿔 반각)가 샷마다 `kRifleSpreadPerShot`
+  증가(`kRifleSpreadMax` 상한), 쏘지 않는 동안 `Step()`에서 `kRifleSpreadDecayPerSec`로
+  회복 — 흔한 FPS 블룸 패턴("빠르게 커지고 천천히 준다"). **실제 탄착점이 바뀐다** — 크로스헤어
+  용 `m_lookRay.dir`은 그대로 두고(UI/배치 정밀도 유지), `FireWeapon`이 `ApplyRifleSpread`로
+  퍼뜨린 방향으로 **자체 레이캐스트**를 새로 쏴서 데미지·트레이서 끝점을 결정한다(`vfx::
+  ParticleSystem::SpawnBurst`와 같은 phi/theta 원뿔 스캐터 수식을 별도로 복제 — SRP, 셋 다
+  서로 내부를 몰라도 됨).
+
+### 5.2 지형 레이캐스트 — 크라우드를 안 보고 있어도 조준 가능 (구현 완료)
+
+기존 `m_lookRay`는 크라우드 콜라이더만 쏘는 레이캐스트라(`UpdateCrowdQueries`), 좀비가 없는
+빈 땅/허공을 보면 `hit=false`라 §4 박격포/지뢰·§6 철조망을 **아무 데도 배치할 수 없었다**.
+`Simulation.cpp`의 `RaycastTerrain(origin, dir, maxDist, outPoint)`가 언덕 지형
+(`HillHeightAtZ`)에 대한 폴백 레이캐스트를 march-and-bisect(지형이 단순 경사라 닫힌 해를 풀
+가치가 없음, 이 파일의 다른 선형 스캔들과 같은 "데모 등급이면 충분" 판단)로 제공 — 크라우드
+미스 시 이걸로 재시도해 `m_lookRay.hit=true`(단 `hitAgent=false`)를 채운다.
+
+`LookRayResult`가 `hit`(에이전트든 지형이든 "조준할 점이 있다")과 `hitAgent`(진짜 크라우드
+명중, `agentSlot` 유효)로 나뉜 것도 이 때문 — 라이플의 `DamageAgent` 호출은 `hitAgent`만
+보고, 배치 계열(`PlaceOrdnance`/`PlaceSlowZone`)은 `hit`만 본다. 이 구분이 없으면 지형 히트가
+`agentSlot`의 sentinel 값(0)을 크라우드 0번 슬롯 명중으로 오인해 엉뚱한 좀비에게 데미지가 들어갈
+뻔했다.
+
 ---
 
 ## 6. 요청 4 — 철조망 (슬로우 존) (구현 완료)
