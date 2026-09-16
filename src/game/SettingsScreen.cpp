@@ -70,7 +70,7 @@ namespace engine::game
         // well before Application itself is. Do not call this with a Settings
         // that might not outlive the returned widgets.
         auto panel = std::make_unique<ui::UIWindow>();
-        panel->SetBounds({ 360, 90, 560, 674 });
+        panel->SetBounds({ 360, 90, 560, 748 });
 
         auto title = std::make_unique<ui::TextLine>("SETTINGS");
         title->SetBounds({ 16, 16, 0, 0 });
@@ -174,6 +174,39 @@ namespace engine::game
         frNext->SetBounds({ 444, y, 100, 36 });
         frNext->onClick = [cycleFrameRate] { cycleFrameRate(1); };
         panel->AddChild(std::move(frNext));
+        y += 50.0f;
+
+        auto languageLabel = std::make_unique<ui::TextLine>("LANGUAGE");
+        languageLabel->SetBounds({ 16, y, 0, 0 });
+        languageLabel->pixelScale = 2.0f;
+        panel->AddChild(std::move(languageLabel));
+
+        auto languageValue = std::make_unique<ui::TextLine>(
+            core::kLanguagePresets[static_cast<std::size_t>(settings.languageIndex)].displayName);
+        languageValue->SetBounds({ 260, y, 0, 0 });
+        languageValue->pixelScale = 2.0f;
+        ui::TextLine* languageValueLabel = languageValue.get();
+        panel->AddChild(std::move(languageValue));
+        y += 24.0f;
+
+        auto cycleLanguage = [&settings, languageValueLabel, onLanguageChanged = actions.onLanguageChanged](int step)
+        {
+            const int count = static_cast<int>(core::kLanguagePresets.size());
+            settings.languageIndex = ((settings.languageIndex + step) % count + count) % count;
+            languageValueLabel->SetText(
+                core::kLanguagePresets[static_cast<std::size_t>(settings.languageIndex)].displayName);
+            if (onLanguageChanged) onLanguageChanged();
+        };
+
+        auto langPrev = std::make_unique<ui::Button>("PREV");
+        langPrev->SetBounds({ 16, y, 100, 36 });
+        langPrev->onClick = [cycleLanguage] { cycleLanguage(-1); };
+        panel->AddChild(std::move(langPrev));
+
+        auto langNext = std::make_unique<ui::Button>("NEXT");
+        langNext->SetBounds({ 444, y, 100, 36 });
+        langNext->onClick = [cycleLanguage] { cycleLanguage(1); };
+        panel->AddChild(std::move(langNext));
         y += 50.0f;
 
         auto close = std::make_unique<ui::Button>("CLOSE");

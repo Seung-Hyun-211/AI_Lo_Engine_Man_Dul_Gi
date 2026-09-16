@@ -50,6 +50,7 @@ namespace engine::game
     {
         m_uiAtlas.Load("assets/atlas/ui.atlas", render::kUiAtlasId);
         ApplyVolumes();
+        ApplyLanguage();
         EnterTitle();
     }
 
@@ -333,6 +334,7 @@ namespace engine::game
             .onVsyncToggled = [this] { ApplyFrameSettings(); },
             .onResolutionChanged = [this] { ApplyResolution(); },
             .onFrameRateChanged = [this] { ApplyFrameSettings(); },
+            .onLanguageChanged = [this] { ApplyLanguage(); },
             .onClose = [this] { CloseSettings(); },
             .onExitToTitle = [this] { m_settings.Save(core::kSettingsFilePath); EnterTitle(); },
         }));
@@ -343,6 +345,16 @@ namespace engine::game
         m_ui.ClearOverlay();
         m_settings.Save(core::kSettingsFilePath);
         if (m_state == GameState::InGame) m_window.SetPointerLocked(true);
+    }
+
+    void Application::ApplyLanguage()
+    {
+        // A missing or unreadable language file is not fatal: Localization
+        // keeps resolving against the default language (docs/localization-
+        // design.md §6). No screen is rebuilt here because no widget label
+        // comes from the table yet - that rebuild lands with the string
+        // migration (§10-4/§10-5).
+        m_localization.Load(m_settings.LanguageCode());
     }
 
     void Application::ApplyVolumes()

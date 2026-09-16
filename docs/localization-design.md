@@ -1,8 +1,9 @@
 # 로컬라이제이션 / 문자열 테이블 설계 (Localization & String Table)
 
 UTF-8 문자열 테이블 + 언어 설정 + 언어별 텍스트 조회 구조.
-**상태: `core::StringTable`·`core::Localization` 구현(§10-1·2), 나머지(§10-3~7)는 설계만 —
-아직 아무도 호출하지 않고 `assets/loc/*.txt`도 없다(문자열 이관이 §10-4).**
+**상태: §10-1·2·3 구현 + §10-5 부분. 언어 설정이 저장·복원되고 `Application`이 시작 시·변경 시 해당 언어
+표를 읽는다. 다만 `assets/loc/*.txt`가 아직 없고 어떤 위젯 라벨도 표에서 오지 않아 화면 텍스트는 바뀌지
+않는다 — 문자열 이관(§10-4)이 다음 단계.**
 
 기존 선례를 그대로 따른다 — 파일 포맷은 `core::Settings`(`settings.cfg`)의 `key=value` 계열,
 언어 선택은 해상도/프레임레이트와 같은 **고정 후보 목록 + 인덱스** 방식(`kResolutionPresets` 패턴).
@@ -282,10 +283,15 @@ ui::DrawText(out, loc.Format("hud.wave.label", waveIndex), { 16, 16 }, 2.0f, kHu
    짝 없는 `{`)에 예외를 던지면 안 되고, 그런 조각은 **그대로 화면에 보이게** 남긴다. 언어 코드는
    `[A-Za-z0-9_-]`만 허용(설정 파일이 손편집 가능한 경계라 경로 형태의 코드를 파일명으로 쓰지 않기 위함).
    미스 키는 `MissedKeys()`에 distinct로 쌓이고 `Load` 시 초기화된다.
-3. `core::Settings`에 `languageIndex` + `language=` 줄(§4) + `kLanguagePresets`.
+3. ~~`core::Settings`에 `languageIndex` + `language=` 줄(§4) + `kLanguagePresets`~~ **✅ 구현**.
+   파일엔 코드로 저장(`language=ko`)하고 모르는 코드는 기본값으로 되돌린다. `Settings::LanguageCode()`가
+   `Localization::Load`에 넘길 코드를 준다. `Application`이 `m_localization`을 소유하고 시작 시 +
+   설정 변경 시 `ApplyLanguage()`로 표를 읽는다. 설정 화면엔 해상도와 같은 PREV/NEXT 사이클 행 추가.
+   **화면 텍스트는 아직 안 바뀐다** — 라벨이 표에서 오지 않기 때문(4·5번).
 4. `assets/loc/en.txt` 생성 — **지금 하드코딩된 UI 문자열을 전부 여기로 이관**(가장 품이 드는 단계).
    화면 빌더 시그니처에 `const core::Localization&` 추가.
-5. `SettingsScreen`에 언어 사이클 행 + `Application::ApplyLanguage`(표 재로드 + 화면 재빌드, §5).
+5. **부분 ✅** — 언어 사이클 행 + `Application::ApplyLanguage`(표 재로드)까지 됨. **남은 것: 화면 재빌드**
+   (`SetScreen`/`SetOverlay`, §5) — 4번으로 라벨이 표에서 오게 된 다음에 의미가 생기므로 그때 같이 넣는다.
 6. `assets/loc/ko.txt` — 데이터만 준비(표시는 §8 이후).
 7. (§8) `GlyphAtlas` + `AddText` 코드포인트 순회 + `atlas_pack`의 loc 스캔 서브셋.
 

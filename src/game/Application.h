@@ -3,6 +3,7 @@
 #include "audio/AudioEngine.h"
 #include "core/JobSystem.h"
 #include "core/NonCopyable.h"
+#include "core/Localization.h"
 #include "core/Settings.h"
 #include "core/Time.h"
 #include "game/Simulation.h"
@@ -93,6 +94,7 @@ namespace engine::game
         void ApplyFrameSettings();
         void ApplyResolution();
         void ApplyVolumes();   // push master/music/sfx from m_settings to m_audio
+        void ApplyLanguage();  // load the string table for m_settings.LanguageCode()
 
         render::IRenderer& m_renderer;
         core::JobSystem m_jobs;
@@ -101,6 +103,9 @@ namespace engine::game
         // reflects the saved resolution instead of opening at a hardcoded
         // size and only matching Settings after the user touches it.
         core::Settings m_settings;
+        // Declared after m_settings: ApplyLanguage() loads the table for
+        // m_settings.LanguageCode().
+        core::Localization m_localization;
         platform::Win32Window m_window;
         input::InputState m_input;
         ui::UIContext m_ui;

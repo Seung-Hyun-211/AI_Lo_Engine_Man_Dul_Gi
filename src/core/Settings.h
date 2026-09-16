@@ -1,8 +1,10 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 // User-configurable options: one value struct, loaded once at startup and
 // saved back to disk when the settings screen closes. See
@@ -37,6 +39,22 @@ namespace engine::core
     // array.
     inline constexpr std::array<std::uint32_t, 3> kFrameRatePresets{ 60, 120, 144 };
 
+    // `code` is the file name stem of assets/loc/<code>.txt and what the
+    // settings file stores; `displayName` is what the settings screen shows.
+    // The display name stays ASCII until the glyph atlas can draw non-Latin
+    // text - the built-in 5x7 font would render "한국어" as blanks
+    // (docs/localization-design.md §4, §8).
+    struct Language
+    {
+        const char* code;
+        const char* displayName;
+    };
+
+    inline constexpr std::array<Language, 2> kLanguagePresets{ {
+        { "en", "ENGLISH" },
+        { "ko", "KOREAN" },
+    } };
+
     inline constexpr const char* kSettingsFilePath = "settings.cfg";
 
     struct Settings
@@ -64,6 +82,20 @@ namespace engine::core
         // SetFrameSettings (alongside vsync above - same call). Index into
         // kFrameRatePresets; out-of-range values clamped back in LoadOrDefault.
         int frameRateIndex{ 0 };   // 60fps by default
+
+        // Stored only - core::Localization is wired up (Application loads the
+        // table for this language at startup and on change), but no UI string
+        // comes from the table yet, so changing this does not visibly change
+        // any text (docs/localization-design.md §10-4). Index into
+        // kLanguagePresets; the file stores the CODE, not this index, so
+        // reordering the preset list never silently switches a user's language.
+        int languageIndex{ 0 };
+
+        // The active language's code, for core::Localization::Load.
+        [[nodiscard]] std::string_view LanguageCode() const
+        {
+            return kLanguagePresets[static_cast<std::size_t>(languageIndex)].code;
+        }
 
         // Reads kSettingsFilePath-shaped `key=value` lines; a missing file or a
         // field that fails to parse just keeps that field's default. Never

@@ -8,6 +8,16 @@ namespace engine::core
     namespace
     {
         [[nodiscard]] bool ParseBool(const std::string& value) { return value == "1"; }
+
+        // The file stores the language code, so a code this build doesn't know
+        // (hand-edited, or from a newer build) falls back to the default rather
+        // than to whatever happens to sit at that index.
+        [[nodiscard]] int LanguageIndexOf(const std::string& code)
+        {
+            for (std::size_t i = 0; i < kLanguagePresets.size(); ++i)
+                if (code == kLanguagePresets[i].code) return static_cast<int>(i);
+            return 0;
+        }
     }
 
     Settings Settings::LoadOrDefault(const std::string& path)
@@ -35,6 +45,7 @@ namespace engine::core
                 else if (key == "vsync") settings.vsync = ParseBool(value);
                 else if (key == "resolutionIndex") settings.resolutionIndex = std::stoi(value);
                 else if (key == "frameRateIndex") settings.frameRateIndex = std::stoi(value);
+                else if (key == "language") settings.languageIndex = LanguageIndexOf(value);
             }
             catch (const std::exception&)
             {
@@ -47,6 +58,8 @@ namespace engine::core
             settings.resolutionIndex = 1;
         if (settings.frameRateIndex < 0 || settings.frameRateIndex >= static_cast<int>(kFrameRatePresets.size()))
             settings.frameRateIndex = 0;
+        if (settings.languageIndex < 0 || settings.languageIndex >= static_cast<int>(kLanguagePresets.size()))
+            settings.languageIndex = 0;
 
         return settings;
     }
@@ -63,6 +76,7 @@ namespace engine::core
              << "invertMouseY=" << (invertMouseY ? 1 : 0) << '\n'
              << "vsync=" << (vsync ? 1 : 0) << '\n'
              << "resolutionIndex=" << resolutionIndex << '\n'
-             << "frameRateIndex=" << frameRateIndex << '\n';
+             << "frameRateIndex=" << frameRateIndex << '\n'
+             << "language=" << LanguageCode() << '\n';
     }
 }

@@ -15,6 +15,8 @@
 | `resolutionIndex` | `kResolutionPresets`(1280x720/1600x900/1920x1080) 인덱스, 기본 1(1600x900) | PREV/NEXT 버튼 + 값 표시 | ✅ `Win32Window::RequestResize`로 즉시 적용(`docs/scene-flow-design.md` §4) |
 | `frameRateIndex` | `kFrameRatePresets`(60/120/144) 인덱스, 기본 0(60) | PREV/NEXT 버튼 + 값 표시 | ✅ `Application::ApplyFrameSettings` → `IRenderer::SetFrameSettings`(vsync와 같은 호출 — `targetFramesPerSecond`는 vsync가 꺼져 있을 때만 실제로 제한함, `Dx11Renderer`). `Application::Run`의 메인 루프도 vsync 꺼졌을 때 같은 캡으로 자체 페이싱(아래 "카운터가 캡을 넘던 문제" 참고) |
 
+| `languageIndex` | `kLanguagePresets`(en/ko) 인덱스, 기본 0(en). **파일엔 인덱스가 아니라 코드**(`language=ko`) | PREV/NEXT 버튼 + 값 표시 | ⚠ 절반 — `Application::ApplyLanguage` → `core::Localization::Load`가 시작 시 + 변경 즉시 해당 언어 표를 읽는다. 다만 아직 **어떤 UI 문자열도 그 표에서 오지 않아** 화면 텍스트는 안 바뀐다(`docs/localization-design.md` §10-4 문자열 이관 대기) |
+
 **볼륨 3개는 이제 실제로 적용된다** (`docs/audio-design.md`). 남은 "저장만" 항목(마우스 감도/반전)은 거짓말이 아니라 정직한 상태 표시다 — 값은 UI·파일에 실존하고 다음 세션에도 유지되지만, `Simulation::UpdateCameraLook` 이 이미 있는데도 그 값을 안 읽는다(자기 `kMouseSensitivity` 상수만 씀). 연결은 `UpdateCameraLook` 호출부에 `settings.mouseSensitivity`/`invertMouseY` 를 인자로 넘기기만 하면 된다 — 설정 인프라를 먼저 깔아둔 것(볼륨이 그렇게 살아났다).
 
 **시작할 때부터 적용된다**: `Application`은 `Win32Window`를 만들기 전에 `Settings::LoadOrDefault`부터 하고, 그 `resolutionIndex`로 초기 창 크기를 정한다(생성자에서 `m_settings`가 `m_window`보다 먼저 선언·초기화됨) — 창이 하드코딩된 크기로 열렸다가 나중에야 저장된 해상도와 맞아떨어지는 어긋남이 없다. vsync·프레임레이트도 `Run()` 진입 시 `ApplyFrameSettings()`(`m_settings.vsync`+`frameRateIndex`를 한 번에 `SetFrameSettings`로) — 예전엔 `targetFramesPerSecond`가 60으로 하드코딩돼 있었다.
@@ -85,11 +87,17 @@ frameRateIndex=0
 2. `Settings::LoadOrDefault`/`Save`에 그 필드의 `key=value` 줄 추가.
 3. `SettingsScreen.cpp`의 `BuildSettingsScreen`에 행 추가 — 저장만 되는 값이면 `AddSliderRow`/`CheckBox`가 `settings.<field> = v;`만 하는 람다로 충분하다. 실제 부작용이 필요하면 `SettingsScreenActions`에 콜백을 추가하고 `Application`에서 실행부(`ApplyXxx`)를 구현한다.
 
-### 언어 설정 (설계됨, 미구현)
+### 언어 설정 (구현됨 — 단, 화면 텍스트는 아직 안 바뀜)
 
-`languageIndex`(+ 파일엔 `language=ko` 코드로 저장)는 해상도/프레임레이트와 같은 **고정 목록 사이클 행**으로
-붙는다. 값이 바뀌면 문자열 표를 재로드하고 현재 화면을 `SetScreen`으로 다시 만든다 — 상세는
-[localization-design.md](localization-design.md) §4·§5.
+`languageIndex`는 해상도/프레임레이트와 같은 **고정 목록 사이클 행**이다. 다른 인덱스 필드와 달리
+**파일엔 코드로 저장한다**(`language=ko`) — 프리셋 배열에 언어를 추가·재정렬해도 사용자의 선택이 엉뚱한
+언어로 밀리지 않게. 모르는 코드(손편집·신버전 파일)는 기본값 `en`으로 되돌린다.
+
+값이 바뀌면 `Application::ApplyLanguage`가 `core::Localization::Load(코드)`로 그 언어 표를 읽는다.
+**아직 위젯 라벨이 표에서 오지 않으므로 눈에 보이는 변화는 없다** — 문자열 이관과 화면 재빌드는
+[localization-design.md](localization-design.md) §10-4·§10-5. 볼륨이 그랬듯 인프라를 먼저 깔아둔 상태다.
+
+표시명은 폰트가 한글을 못 그려서 당분간 ASCII(`KOREAN`)다 — `GlyphAtlas` 이후 `한국어`로 바꾼다.
 
 ### 새 서브시스템이 "저장만" 항목을 실제로 쓰게 만들기
 

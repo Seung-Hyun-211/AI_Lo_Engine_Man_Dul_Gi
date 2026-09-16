@@ -22,6 +22,7 @@ namespace engine::game
         std::function<void()> onVsyncToggled;
         std::function<void()> onResolutionChanged;
         std::function<void()> onFrameRateChanged;
+        std::function<void()> onLanguageChanged;
         std::function<void()> onClose;
         std::function<void()> onExitToTitle;   // leave the current test scene, back to Title's scene-select
     };
