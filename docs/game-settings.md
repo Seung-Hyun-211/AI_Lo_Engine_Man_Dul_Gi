@@ -85,6 +85,12 @@ frameRateIndex=0
 2. `Settings::LoadOrDefault`/`Save`에 그 필드의 `key=value` 줄 추가.
 3. `SettingsScreen.cpp`의 `BuildSettingsScreen`에 행 추가 — 저장만 되는 값이면 `AddSliderRow`/`CheckBox`가 `settings.<field> = v;`만 하는 람다로 충분하다. 실제 부작용이 필요하면 `SettingsScreenActions`에 콜백을 추가하고 `Application`에서 실행부(`ApplyXxx`)를 구현한다.
 
+### 언어 설정 (설계됨, 미구현)
+
+`languageIndex`(+ 파일엔 `language=ko` 코드로 저장)는 해상도/프레임레이트와 같은 **고정 목록 사이클 행**으로
+붙는다. 값이 바뀌면 문자열 표를 재로드하고 현재 화면을 `SetScreen`으로 다시 만든다 — 상세는
+[localization-design.md](localization-design.md) §4·§5.
+
 ### 새 서브시스템이 "저장만" 항목을 실제로 쓰게 만들기
 
 해당 값을 읽는 코드(예: 오디오 시스템의 `PlaySound(clip, settings.sfxVolume * settings.masterVolume)`)만 추가하면 된다 — `Settings` 자체나 UI는 안 건드린다. 이게 지금 이 카탈로그를 미리 만들어 둔 이유다.

@@ -101,7 +101,8 @@
 | 항목 | 문서 |
 |---|---|
 | 2D 프레임 애니메이션(`anim::a2d::SpriteAnimator`) 구현 | `animation-design.md` §2 (설계 끝) |
-| `GlyphAtlas` + `AddText` 재작성 | `texture-atlas-and-sprite-pass.md` §1.3, §7-7 |
+| `GlyphAtlas` + `AddText` 코드포인트 순회 재작성 | `texture-atlas-and-sprite-pass.md` §1.3, §7-7 — 서브셋 목록은 문자열 표가 공급(`localization-design.md` §8) |
+| 로컬라이제이션 문자열 표 + 언어 설정 | `localization-design.md`(설계 완료) — 폰트보다 **먼저** 해도 되고, 하면 폰트 서브셋 입력이 준비된다 |
 | 아틀라스 BC7/BC4 압축 | `atlas-build-pipeline.md` §5 |
 | **타일 지형 질의 API + `CharacterController2D`(move-and-slide)** | 신규. §4-K·§4-L — 타일을 콜라이더로 넣지 않기 위한 선행 조건 |
 | 트리거 enter/exit 이벤트 (선행: 콜라이더 신원 규약 §4-J) | `collider-design.md` 확장 |
