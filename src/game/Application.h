@@ -76,12 +76,11 @@ namespace engine::game
 
         // Scene transitions: swap the UIContext's screen and update m_state.
         void EnterTitle();
-        // Title's "START" leads here - a menu screen (not gameplay) listing
-        // the runtime-selectable Simulation::DemoScene values.
-        void EnterSceneSelect();
+        // Title's "START" leads straight in - this branch only ever plays
+        // DemoScene::Circular, so the old scene-select menu (still available
+        // as TitleScreen::BuildSceneSelectScreen if a multi-scene build needs
+        // it again) is not wired up here.
         void EnterInGame(DemoScene scene);
-        // Menu-side screen (not gameplay): the ScrollList item demo.
-        void EnterItems();
         // Settings overlay: layered on top of whichever screen is active.
         void OpenSettings();
         void CloseSettings();

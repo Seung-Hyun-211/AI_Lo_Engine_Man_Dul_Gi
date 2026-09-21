@@ -1,7 +1,6 @@
 #include "game/Application.h"
 
 #include "game/InGameHud.h"
-#include "game/InventoryScreen.h"
 #include "game/SettingsScreen.h"
 #include "game/TitleScreen.h"
 
@@ -285,42 +284,13 @@ namespace engine::game
         m_window.SetPointerLocked(false);
         m_audio.StopMusic();
         m_ui.ClearOverlay();
+        // This branch only ever plays DemoScene::Circular (docs/circular-
+        // design.md), so START goes straight into it - no intermediate
+        // scene-select menu.
         m_ui.SetScreen(BuildTitleScreen(
-            [this] { EnterSceneSelect(); },
-            [this] { EnterItems(); },
+            [this] { EnterInGame(DemoScene::Circular); },
             [this] { OpenSettings(); },
             [this] { m_window.RequestClose(); }));
-    }
-
-    void Application::EnterSceneSelect()
-    {
-        m_state = GameState::Title;   // still a menu context: no simulation step
-        m_window.SetPointerLocked(false);
-        m_ui.ClearOverlay();
-        // Circular (docs/circular-design.md) is 2D-baseline and always
-        // offered; the other four callbacks are left empty without
-        // ENGINE_WITH_3D so BuildSceneSelectScreen skips those rows (its own
-        // doc comment) instead of this file needing an #if around the whole
-        // menu the way it used to.
-        m_ui.SetScreen(BuildSceneSelectScreen(
-            [this] { EnterInGame(DemoScene::Circular); },
-#if defined(ENGINE_WITH_3D)
-            [this] { EnterInGame(DemoScene::DefenseCombat); },
-            [this] { EnterInGame(DemoScene::CharacterDemo); },
-            [this] { EnterInGame(DemoScene::ShadowShowcase); },
-            [this] { EnterInGame(DemoScene::EffectsTest); },
-#else
-            nullptr, nullptr, nullptr, nullptr,
-#endif
-            [this] { EnterTitle(); }));
-    }
-
-    void Application::EnterItems()
-    {
-        m_state = GameState::Title;   // still a menu context: no simulation step
-        m_window.SetPointerLocked(false);
-        m_ui.ClearOverlay();
-        m_ui.SetScreen(BuildInventoryScreen([this] { EnterTitle(); }));
     }
 
     void Application::EnterInGame(DemoScene scene)
@@ -328,12 +298,11 @@ namespace engine::game
         m_state = GameState::InGame;
         m_inGameElapsed = 0.0f;
         m_autoExplodeFired = false;
-        // The only entry point into InGame - whether it's a fresh pick from
-        // the scene-select menu or (DefenseCombat only) a restart after a
-        // loss. Simulation::EnterScene rebuilds/resets state for `scene` -
-        // for DefenseCombat that includes ResetMatch() (always wave 1,
-        // docs/defense-combat-design.md §0); for Circular it resets the mob
-        // field/player (docs/circular-design.md).
+        // The only entry point into InGame - a fresh start from the title or
+        // (DefenseCombat only, unreachable on this branch's title flow but
+        // still valid if called directly) a restart after a loss.
+        // Simulation::EnterScene rebuilds/resets state for `scene` - for
+        // Circular it resets the mob field/player (docs/circular-design.md).
         m_simulation.EnterScene(scene);
         m_ui.ClearOverlay();
         m_ui.SetScreen(BuildInGameHud([this] { OpenSettings(); }));
