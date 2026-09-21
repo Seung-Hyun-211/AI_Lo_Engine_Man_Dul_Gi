@@ -25,7 +25,16 @@ namespace engine::game
     // demo-scene.md "씬 선택"), plus a way back to the title without picking
     // one. Kept as its own screen (not a 4th title button) so growing the
     // scene list later doesn't crowd the title panel.
+    //
+    // Circular (docs/circular-design.md) is 2D-baseline and always shown; the
+    // other four need ENGINE_WITH_3D. An empty (default-constructed)
+    // std::function for any of onDefenseCombat/onCharacterDemo/
+    // onShadowShowcase/onEffectsTest skips that button entirely (OCP - this
+    // function does not itself know about ENGINE_WITH_3D, the caller decides
+    // by which callbacks it passes) and the remaining rows re-flow upward, so
+    // a 2D-only build's menu is just CIRCULAR + BACK.
     [[nodiscard]] std::unique_ptr<ui::Widget> BuildSceneSelectScreen(
+        std::function<void()> onCircular,
         std::function<void()> onDefenseCombat,
         std::function<void()> onCharacterDemo,
         std::function<void()> onShadowShowcase,

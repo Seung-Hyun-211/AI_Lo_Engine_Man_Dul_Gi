@@ -19,8 +19,13 @@ namespace engine::render
     // It is a container of per-module payloads: the 3D module contributes
     // `scene3d` (only when ENGINE_WITH_3D), the 2D module contributes the quad
     // lists. Draw order across the default pipeline:
-    //   1. mesh pass  - scene3d.meshDraws, depth-tested, perspective
-    //   2. quad pass  - worldQuads then uiQuads, screen space, no depth
+    //   1. mesh pass    - scene3d.meshDraws, depth-tested, perspective
+    //   2. quad pass    - worldQuads then uiQuads, screen space, no depth
+    //   3. effect pass  - worldEffects, additive, screen space, no depth (2D
+    //      "Circular" scene VFX, docs/circular-design.md §7 - drawn after the
+    //      quad pass so a hit flash layers on top of the mob/player it hit)
+    //   4. sprite pass  - uiSprites, screen space, drawn last so UI sits on
+    //      top of any gameplay effect
     struct RenderSnapshot
     {
         std::uint64_t frameNumber{};
@@ -32,6 +37,11 @@ namespace engine::render
 
         std::vector<Quad> worldQuads;
         std::vector<Quad> uiQuads;
+
+        // Additive glow VFX in world (camera-relative) screen space - card/
+        // weapon hit & death effects for the 2D "Circular" scene. Drawn by
+        // EffectPass2D. See docs/circular-design.md §7.
+        std::vector<EffectInstance> worldEffects;
 
         // Textured UI (atlas sprites, glyphs once the font moves to an atlas),
         // drawn by SpritePass2D after the quad passes. Grouped by (atlasId, clip)

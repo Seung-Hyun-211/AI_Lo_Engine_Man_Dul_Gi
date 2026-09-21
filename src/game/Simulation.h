@@ -2,6 +2,8 @@
 
 #include "core/JobSystem.h"
 #include "core/NonCopyable.h"
+#include "game/CircularConfig.h"
+#include "game/MobField.h"
 #include "math/Math.h"
 #include "physics/p2d/CollisionWorld2D.h"
 
@@ -40,19 +42,37 @@ namespace engine::game
         float x{}, y{}, vx{}, vy{};
     };
 
-#if defined(ENGINE_WITH_3D)
-    // Which 3D demo/test scene is active - runtime-selectable from the title
+    // Which demo/test scene is active - runtime-selectable from the title
     // screen's scene-select menu (docs/demo-scene.md), not a rebuild-time
-    // constant anymore. Values match the old Simulation::kDemoScene numbering
-    // so existing docs/comments referencing "씬 1/2/3" still line up.
+    // constant. Declared outside the ENGINE_WITH_3D guard (unlike the rest of
+    // this file's demo state) because Circular is a 2D-baseline scene and
+    // must stay selectable even when the 3D module is compiled out (CLAUDE.md
+    // invariant 7, "2D는 baseline") - docs/circular-design.md §0. The other
+    // four values still need ENGINE_WITH_3D; EnterScene()'s two definitions
+    // below (one per #if branch) handle that split.
     enum class DemoScene : int
     {
-        CharacterDemo = 1,   // local-time-scale actors + a small slab
-        DefenseCombat = 2,   // hill overlook + SimAgent crowd + weapons/wave loop
-        ShadowShowcase = 3,  // no crowd - staircase/pillars for graphics work
-        EffectsTest = 4,     // flat range + distance markers - on-demand VFX preview, no crowd/weapons/wave loop
+        Circular = 5,          // 2D baseline - vampire-survivors-like mob swarm (docs/circular-design.md)
+#if defined(ENGINE_WITH_3D)
+        CharacterDemo = 1,     // local-time-scale actors + a small slab
+        DefenseCombat = 2,     // hill overlook + SimAgent crowd + weapons/wave loop
+        ShadowShowcase = 3,    // no crowd - staircase/pillars for graphics work
+        EffectsTest = 4,       // flat range + distance markers - on-demand VFX preview, no crowd/weapons/wave loop
+#endif
     };
 
+    // A short-lived attack-pulse glow at `pos` (docs/circular-design.md §7
+    // option A) - render-only, ages out the same way TracerLine does further
+    // down. SnapshotBuilder turns each into a render::EffectInstance for
+    // EffectPass2D.
+    struct HitFlash
+    {
+        math::Vec2 pos{};
+        float ageLeft{ 0.0f };
+        float life{ 1.0f };   // ageLeft/life -> 1 (just spawned) .. 0 (about to vanish)
+    };
+
+#if defined(ENGINE_WITH_3D)
     // Which VFX burst Simulation::PreviewVfxEffect spawns - the EffectsTest
     // scene's whole purpose, decoupled from the rifle/explosion/gib call
     // sites that normally trigger these (docs/particle-system-research.md).
@@ -215,10 +235,20 @@ namespace engine::game
     class Simulation final : private core::NonCopyable
     {
     public:
-        static constexpr float kPlayerSpeed = 300.0f;   // pixels / second (legacy 2D overlay)
+        static constexpr float kPlayerSpeed = 300.0f;   // pixels / second
         static constexpr float kPlayerSize = 64.0f;
         static constexpr std::size_t kParticleCount = 20'000;
         static constexpr int kObstacleCount = 3;
+
+        // Circular scene demo "card" (docs/circular-design.md §10 step 1 -
+        // real cards/decks are a later step; this is the minimum that proves
+        // MobField::DamageInRadius + the hit-flash -> EffectInstance pipeline
+        // end to end). A fixed-radius pulse around the player on its own
+        // cooldown, auto-firing exactly like every real card eventually will.
+        static constexpr float kCircularAttackInterval = 0.6f;   // seconds between pulses
+        static constexpr float kCircularAttackRadius = 120.0f;   // pixels
+        static constexpr float kCircularAttackDamage = 12.0f;
+        static constexpr float kHitFlashLife = 0.18f;             // seconds a pulse glow stays visible
 
 #if defined(ENGINE_WITH_3D)
         // Demo character controller (docs/demo-scene.md). Metres / seconds.
@@ -352,6 +382,14 @@ namespace engine::game
         // the delta fed to FixedTimestep::Advance, not here.
         void Step(float fixedDelta, const PlayerIntent& intent, bool globalPaused = false);
 
+        // Switches the active demo/test scene at runtime (docs/demo-scene.md
+        // "씬 선택", docs/circular-design.md §0) - the title screen's
+        // scene-select menu calls this before entering InGame. Safe to call
+        // again later to jump to a different scene without restarting the
+        // app. Declared unconditionally (Circular needs no ENGINE_WITH_3D);
+        // see the two `#if`-split definitions in Simulation.cpp.
+        void EnterScene(DemoScene scene);
+
 #if defined(ENGINE_WITH_3D)
         // Mouse-look for the orbit camera. Called once per frame (not per fixed
         // step) so a frame with 0 or >1 sim steps still turns the camera exactly
@@ -443,19 +481,6 @@ namespace engine::game
         // wave 1 / full objective HP rather than resuming a lost one. Releases
         // all agents/gibs/ordnance/slow zones and re-spawns wave 1.
         void ResetMatch();
-
-        // Switches the active 3D demo/test scene at runtime (docs/demo-scene.md
-        // "씬 선택") - the title screen's scene-select menu calls this before
-        // entering InGame, and it is safe to call again later to jump to a
-        // different scene without restarting the app. Clears the actor list
-        // and rebuilds it for `scene`; DefenseCombat additionally goes through
-        // ResetMatch() so re-entering it always starts at wave 1. Any crowd/
-        // gib/ordnance/particle state left over from a previous DefenseCombat
-        // visit is harmless if left behind when leaving it - every function
-        // that steps or renders that state is itself gated on the scene being
-        // active, so it simply goes untouched until DefenseCombat is re-entered
-        // (which resets it fully via ResetMatch() anyway).
-        void EnterScene(DemoScene scene);
 #endif
 
         // --- reads for the snapshot builder ---
@@ -464,6 +489,13 @@ namespace engine::game
         [[nodiscard]] bool PlayerBlocked() const { return m_playerBlocked; }
         [[nodiscard]] const std::array<math::Rect, kObstacleCount>& Obstacles() const { return m_obstacles; }
         [[nodiscard]] const std::vector<Particle>& Particles() const { return m_particles; }
+        [[nodiscard]] DemoScene ActiveScene() const { return m_demoScene; }
+
+        // --- Circular scene (docs/circular-design.md) - 2D baseline, no
+        // ENGINE_WITH_3D dependency ---
+        [[nodiscard]] const MobField& Mobs() const { return m_mobs; }
+        [[nodiscard]] int MobKillCount() const { return m_mobKillCount; }
+        [[nodiscard]] const std::vector<HitFlash>& HitFlashes() const { return m_hitFlashes; }
 
 #if defined(ENGINE_WITH_3D)
         // The player is actor 0; these stay as thin accessors so the snapshot
@@ -472,7 +504,6 @@ namespace engine::game
         [[nodiscard]] float CharacterFacingYaw() const { return m_actors[0].facingYaw; }
         [[nodiscard]] float CameraYaw() const { return m_cameraYaw; }
         [[nodiscard]] float CameraPitch() const { return m_cameraPitch; }
-        [[nodiscard]] DemoScene ActiveScene() const { return m_demoScene; }
         [[nodiscard]] AnimPose HeroAnimPose() const { return m_actors[0].anim.Pose(); }
         [[nodiscard]] const std::vector<Actor>& Actors() const { return m_actors; }
         [[nodiscard]] const core::ObjectPool<SimAgent>& SimAgents() const { return m_agents; }
@@ -507,6 +538,15 @@ namespace engine::game
         void SeedParticles();
         void LayOutObstacles();
         void StepCollision2D();
+        // Circular scene (docs/circular-design.md) - unconditional, 2D
+        // baseline only. Resets mob field/timers/kill count/hit flashes to a
+        // fresh run; called by both EnterScene() definitions below.
+        void ResetCircularScene();
+        // Spawns mobs onto a ring around the player, steers the mob field
+        // toward the player (MobField::Step), fires the demo attack pulse
+        // (kCircularAttackInterval) and ages out hit flashes. Called from
+        // Step() when m_demoScene == DemoScene::Circular.
+        void StepCircularScene(float fixedDelta);
 #if defined(ENGINE_WITH_3D)
         void SpawnActors();
         void SpawnSimAgents();
@@ -594,6 +634,23 @@ namespace engine::game
         std::vector<Particle> m_particles;
         physics::CollisionWorld2D m_collision2d;
 
+        // Default scene differs by build: DefenseCombat when the 3D module is
+        // in (existing demo default, unchanged), Circular when it's the only
+        // scene that exists at all (2D-only build).
+#if defined(ENGINE_WITH_3D)
+        DemoScene m_demoScene{ DemoScene::DefenseCombat };
+#else
+        DemoScene m_demoScene{ DemoScene::Circular };
+#endif
+
+        // --- Circular scene (docs/circular-design.md) - 2D baseline, no
+        // ENGINE_WITH_3D dependency ---
+        MobField m_mobs{ kActiveMob.capacity };
+        float m_mobSpawnTimer{ 0.0f };
+        int m_mobKillCount{ 0 };
+        float m_circularAttackCooldown{ 0.0f };
+        std::vector<HitFlash> m_hitFlashes;
+
 #if defined(ENGINE_WITH_3D)
         std::vector<Actor> m_actors;               // [0] = player; [1..] = local-time-scale demo (scene 1)
         core::ObjectPool<SimAgent> m_agents;       // scene 2: wandering crowd on the lower field
@@ -607,7 +664,6 @@ namespace engine::game
         float m_rifleSpread{ 0.0f };                // radians, current aim-cone half-angle (recoil bloom)
         float m_rifleSpreadSeed{ 1.0f };            // deterministic no-RNG scatter (same convention as vfx::ParticleSystem)
         std::vector<std::uint8_t> m_agentTouch;    // scene 2: per pool slot, 1 = overlapped another this step
-        DemoScene m_demoScene{ DemoScene::DefenseCombat };   // runtime-selectable (EnterScene) - default is the constructor's first scene
         float m_cameraYaw{ 0.0f };                 // radians; orbit angle around the player
         float m_cameraPitch{ -0.28f };            // radians; negative looks down at the player
         float m_objectiveHealth{ kObjectiveMaxHealth };   // base combat layer (docs/defense-combat-design.md §0)

@@ -42,6 +42,7 @@ namespace engine::game
     }
 
     std::unique_ptr<ui::Widget> BuildSceneSelectScreen(
+        std::function<void()> onCircular,
         std::function<void()> onDefenseCombat,
         std::function<void()> onCharacterDemo,
         std::function<void()> onShadowShowcase,
@@ -56,30 +57,28 @@ namespace engine::game
         title->pixelScale = 2.0f;
         panel->AddChild(std::move(title));
 
-        auto combat = std::make_unique<ui::Button>("DEFENSE COMBAT");
-        combat->SetBounds({ 16, 56, 368, 42 });
-        combat->onClick = std::move(onDefenseCombat);
-        panel->AddChild(std::move(combat));
+        // Rows stack top-down at a fixed cursor instead of hardcoded Y
+        // offsets, so an empty callback (a scene not built into this
+        // configuration) just skips its row and the rest re-flow upward -
+        // e.g. a 2D-only build only ever passes onCircular and onBack.
+        float y = 56.0f;
+        constexpr float kRowHeight = 52.0f;   // 42 button + 10 gap
+        const auto addButton = [&](const char* label, std::function<void()> onClick)
+        {
+            if (!onClick) return;
+            auto button = std::make_unique<ui::Button>(label);
+            button->SetBounds({ 16, y, 368, 42 });
+            button->onClick = std::move(onClick);
+            panel->AddChild(std::move(button));
+            y += kRowHeight;
+        };
 
-        auto character = std::make_unique<ui::Button>("CHARACTER DEMO");
-        character->SetBounds({ 16, 108, 368, 42 });
-        character->onClick = std::move(onCharacterDemo);
-        panel->AddChild(std::move(character));
-
-        auto shadow = std::make_unique<ui::Button>("SHADOW SHOWCASE");
-        shadow->SetBounds({ 16, 160, 368, 42 });
-        shadow->onClick = std::move(onShadowShowcase);
-        panel->AddChild(std::move(shadow));
-
-        auto effects = std::make_unique<ui::Button>("EFFECTS TEST");
-        effects->SetBounds({ 16, 212, 368, 42 });
-        effects->onClick = std::move(onEffectsTest);
-        panel->AddChild(std::move(effects));
-
-        auto back = std::make_unique<ui::Button>("BACK");
-        back->SetBounds({ 16, 316, 368, 42 });
-        back->onClick = std::move(onBack);
-        panel->AddChild(std::move(back));
+        addButton("CIRCULAR", std::move(onCircular));
+        addButton("DEFENSE COMBAT", std::move(onDefenseCombat));
+        addButton("CHARACTER DEMO", std::move(onCharacterDemo));
+        addButton("SHADOW SHOWCASE", std::move(onShadowShowcase));
+        addButton("EFFECTS TEST", std::move(onEffectsTest));
+        addButton("BACK", std::move(onBack));
 
         return panel;
     }

@@ -16,6 +16,17 @@ namespace engine::game
 {
     namespace
     {
+        // Generic float[0..1] -> 8:8:8:8 packer. Unconditional (unlike most of
+        // this anonymous namespace) - the Circular scene's hit-flash effects
+        // need it too, and it has no 3D dependency of its own.
+        std::uint32_t PackRgba(float r, float g, float b, float a)
+        {
+            const auto u8 = [](float v) {
+                return static_cast<std::uint32_t>(math::Clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f);
+            };
+            return u8(r) | (u8(g) << 8) | (u8(b) << 16) | (u8(a) << 24);
+        }
+
 #if defined(ENGINE_WITH_3D)
         constexpr float kPi = 3.14159265358979323846f;
         // BuildCamera's vertical FOV - named so the crosshair (below) can project
@@ -75,14 +86,6 @@ namespace engine::game
             return { -(tx * v.m[0] + ty * v.m[1] + tz * v.m[2]),
                      -(tx * v.m[4] + ty * v.m[5] + tz * v.m[6]),
                      -(tx * v.m[8] + ty * v.m[9] + tz * v.m[10]) };
-        }
-
-        std::uint32_t PackRgba(float r, float g, float b, float a)
-        {
-            const auto u8 = [](float v) {
-                return static_cast<std::uint32_t>(math::Clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f);
-            };
-            return u8(r) | (u8(g) << 8) | (u8(b) << 16) | (u8(a) << 24);
         }
 
         // Scene 2 is first-person (no visible self - see BuildScene3D's ModelDraw
@@ -675,6 +678,57 @@ namespace engine::game
             place("icon_play", 44.0f, 430.0f, 96.0f, { 24.0f, 430.0f, 320.0f, 40.0f });
         }
 
+        // 2D "Circular" scene (docs/circular-design.md): mob swarm + player,
+        // camera-follow. The player stays screen-centred and the world
+        // scrolls under it - computed here on the main thread since Quad/
+        // EffectInstance are already "final pixel space" by this pipeline's
+        // convention (unlike the 3D module's camera matrix, which rides
+        // along in the snapshot and is resolved on the render thread
+        // instead). MobField is SoA end to end - this reads its raw arrays
+        // directly; no per-mob struct exists to copy out of.
+        void BuildCircularScene(render::RenderSnapshot& snapshot, const Simulation& simulation,
+                                int viewportWidth, int viewportHeight)
+        {
+            const math::Vec2 screenCenter{ static_cast<float>(viewportWidth) * 0.5f,
+                                           static_cast<float>(viewportHeight) * 0.5f };
+            const math::Vec2 playerCenter = simulation.PlayerPosition()
+                + math::Vec2{ Simulation::kPlayerSize * 0.5f, Simulation::kPlayerSize * 0.5f };
+            const auto toScreen = [&](math::Vec2 world) { return world - playerCenter + screenCenter; };
+
+            const MobField& mobs = simulation.Mobs();
+            const std::vector<float>& mobX = mobs.PosX();
+            const std::vector<float>& mobY = mobs.PosY();
+            const std::vector<float>& mobRadius = mobs.Radius();
+            for (const std::uint32_t idx : mobs.ActiveIndices())
+            {
+                const math::Vec2 screenPos = toScreen({ mobX[idx], mobY[idx] });
+                const float d = mobRadius[idx] * 2.0f;
+                snapshot.worldQuads.push_back({ screenPos.x - mobRadius[idx], screenPos.y - mobRadius[idx], d, d,
+                                                0.75f, 0.25f, 0.30f, 1.0f });
+            }
+
+            // Player: always screen-centred by construction (toScreen(playerCenter) == screenCenter).
+            snapshot.worldQuads.push_back({ screenCenter.x - Simulation::kPlayerSize * 0.5f,
+                                            screenCenter.y - Simulation::kPlayerSize * 0.5f,
+                                            Simulation::kPlayerSize, Simulation::kPlayerSize,
+                                            0.20f, 0.75f, 1.0f, 1.0f });
+
+            // Attack-pulse hit flashes -> EffectPass2D (docs/circular-design.md §7).
+            for (const HitFlash& flash : simulation.HitFlashes())
+            {
+                const float t = flash.life > 0.0f ? math::Clamp(flash.ageLeft / flash.life, 0.0f, 1.0f) : 0.0f;
+                const math::Vec2 screenPos = toScreen(flash.pos);
+                render::EffectInstance effect{};
+                effect.x = screenPos.x;
+                effect.y = screenPos.y;
+                effect.radius = Simulation::kCircularAttackRadius;
+                effect.colorRgba = PackRgba(1.0f, 0.85f, 0.35f, t * 0.55f);   // fades out, does not shrink
+                effect.seed = flash.pos.x * 0.013f + flash.pos.y * 0.017f;   // deterministic per-flash blob variation
+                snapshot.worldEffects.push_back(effect);
+            }
+        }
+
+#if defined(ENGINE_WITH_3D)
         // Converts simulation.VfxParticles() (muzzle/explosion/gib blood spray,
         // docs/particle-system-research.md) into the render-side instance/batch
         // arrays. Age->size/colour lerp happens here (main thread), not in
@@ -809,6 +863,7 @@ namespace engine::game
                 scene.meshDraws.push_back(draw);
             }
         }
+#endif
     }
 
     render::RenderSnapshot SnapshotBuilder::Build(std::uint64_t frameNumber,
@@ -823,17 +878,26 @@ namespace engine::game
         snapshot.frameNumber = frameNumber;
 
 #if defined(ENGINE_WITH_3D)
+        // Skipped for Circular (docs/circular-design.md) - it is 2D-baseline
+        // and builds none of this; snapshot.scene3d is left at its default
+        // (empty meshDraws/particleInstances), so the 3D passes simply draw
+        // nothing this frame instead of rendering whatever 3D scene was
+        // previously selected underneath the 2D overlay.
+        if (simulation.ActiveScene() != DemoScene::Circular)
+        {
         snapshot.scene3d.camera = BuildCamera(simulation, viewportWidth, viewportHeight);
         snapshot.scene3d.lighting = BuildLighting(simulation, simulation.ElapsedTime());
         snapshot.scene3d.postProcess = BuildPostProcess();
         BuildScene3D(snapshot.scene3d, simulation);
         BuildVfxParticles(snapshot.scene3d, simulation);
         BuildFireChunks(snapshot.scene3d, simulation);
-#else
-        (void)viewportWidth;
-        (void)viewportHeight;
-        if constexpr (!kDrawLegacy2D) (void)simulation;
+        }
 #endif
+
+        if (simulation.ActiveScene() == DemoScene::Circular)
+        {
+            BuildCircularScene(snapshot, simulation, viewportWidth, viewportHeight);
+        }
 
         // 2D test overlay (player + obstacles + particle sample) - disabled.
         if constexpr (kDrawLegacy2D)
@@ -988,6 +1052,24 @@ namespace engine::game
             ui::DrawText(snapshot.uiQuads, text, { x, y }, scale, { 0.6f, 0.9f, 1.0f, 1.0f });
         }
 #endif
+
+        // Circular scene HUD (docs/circular-design.md) - same "plain text
+        // readout, top area, every frame" convention as the DefenseCombat
+        // wave HUD above, minus the ENGINE_WITH_3D dependency.
+        if (simulation.ActiveScene() == DemoScene::Circular)
+        {
+            char text[64];
+            std::snprintf(text, sizeof(text), "MOBS %zu   KILLS %d",
+                          simulation.Mobs().LiveCount(), simulation.MobKillCount());
+            constexpr float scale = 2.0f;
+            const float glyph = 6.0f * scale;
+            const float width = static_cast<float>(std::strlen(text)) * glyph;
+            const float x = (static_cast<float>(viewportWidth) - width) * 0.5f;
+            const float y = 12.0f;
+            ui::DrawRect(snapshot.uiQuads, { x - 8.0f, y - 4.0f, width + 16.0f, 7.0f * scale + 8.0f },
+                         { 0.0f, 0.0f, 0.0f, 0.45f });
+            ui::DrawText(snapshot.uiQuads, text, { x, y }, scale, { 1.0f, 0.95f, 0.35f, 1.0f });
+        }
 
         // Frame-rate readout, top-right, over every screen.
         if (fps > 0.0f)

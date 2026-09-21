@@ -34,4 +34,21 @@ namespace engine::render
         std::uint32_t atlasId{ 0 };
         math::Rect clip{ 0.0f, 0.0f, 0.0f, 0.0f };   // width <= 0 -> unclipped
     };
+
+    // One procedural glow billboard, additive-blended, no texture - card/
+    // weapon hit & death VFX for the 2D "Circular" scene (docs/circular-
+    // design.md §7 option A). Instanced: SV_VertexID builds the quad, no
+    // per-vertex buffer - same shape as render::ParticleInstance/
+    // ParticlePass3D, but always screen-space (no camera matrix, no depth;
+    // this module has neither). Consumed by EffectPass2D, shape/shading by
+    // assets/shaders/effect2d.hlsl (same irregular-blob noise as particle.hlsl,
+    // just evaluated in screen space instead of a camera-facing billboard).
+    struct EffectInstance
+    {
+        float         x{}, y{};                  // dest centre, pixel space   (offset 0, 4)
+        float         radius{ 8.0f };             // billboard half-extent, px (offset 8)
+        float         rotation{ 0.0f };           // screen-plane roll, rad   (offset 12)
+        std::uint32_t colorRgba{ 0xffffffffu };   // 8:8:8:8                  (offset 16)
+        float         seed{ 0.0f };               // per-instance blob noise phase (offset 20)
+    };                                             // 24 bytes
 }

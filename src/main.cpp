@@ -1,5 +1,6 @@
 #include "game/Application.h"
 #include "render/Dx11Renderer.h"
+#include "render/r2d/EffectPass2D.h"
 #include "render/r2d/SpritePass2D.h"
 #if defined(ENGINE_WITH_3D)
 #include "render/r3d/DebugDrawPass.h"
@@ -36,6 +37,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
         // it exactly there.
         renderer.AddRenderPass(std::make_unique<engine::render::ParticlePass3D>());
 #endif
+        // 2D "Circular" scene glow VFX (docs/circular-design.md §7) - after
+        // QuadPass2D (mobs/player) so a hit flash layers on top of what it
+        // hit, before SpritePass2D (below) so UI still draws over it.
+        renderer.AddRenderPass(std::make_unique<engine::render::EffectPass2D>(), /*atEnd=*/true);
         // Textured UI sprites + scissor clipping. Runs last (atEnd) so its
         // scissor rasterizer state does not leak into QuadPass2D.
         renderer.AddRenderPass(std::make_unique<engine::render::SpritePass2D>(

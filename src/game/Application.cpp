@@ -115,6 +115,16 @@ namespace engine::game
                 if (m_state == GameState::InGame && !m_ui.HasOverlay())
                 {
 #if defined(ENGINE_WITH_3D)
+                    // None of this applies to Circular (docs/circular-design.md)
+                    // - it is 2D-baseline and has no actors/crowd/weapons for
+                    // these to touch. Gated at runtime, not just by
+                    // ENGINE_WITH_3D, because Circular exists in every build
+                    // config (docs/circular-design.md §0) and this whole block
+                    // would otherwise still run (and touch stale 3D state, or
+                    // worse, m_actors before it's ever been populated) while a
+                    // 3D-capable build has Circular selected.
+                    if (m_simulation.ActiveScene() != DemoScene::Circular)
+                    {
                     // Mouse-look once per frame (independent of the fixed-step
                     // count) so it never double-applies or drops a delta. Jump
                     // is an edge, so latch it the same way - a press on a
@@ -185,6 +195,7 @@ namespace engine::game
                     {
                         m_simulation.FireWeapon(WeaponKind::Flamethrower);
                     }
+                    }   // ActiveScene() != DemoScene::Circular
 #endif
                     if (steps > 0)
                     {
@@ -199,6 +210,8 @@ namespace engine::game
                     }
 
 #if defined(ENGINE_WITH_3D)
+                    if (m_simulation.ActiveScene() != DemoScene::Circular)
+                    {
                     // Loss condition (docs/defense-combat-design.md §0): no
                     // results screen yet (§0.3 is still design-only), so this
                     // is the bare-minimum connection - drop straight back to
@@ -215,6 +228,7 @@ namespace engine::game
                         // slow frame.
                         m_simulation.UpdateCrowdQueries();
                     }
+                    }   // ActiveScene() != DemoScene::Circular
 #endif
                 }
 
@@ -283,14 +297,22 @@ namespace engine::game
         m_state = GameState::Title;   // still a menu context: no simulation step
         m_window.SetPointerLocked(false);
         m_ui.ClearOverlay();
-#if defined(ENGINE_WITH_3D)
+        // Circular (docs/circular-design.md) is 2D-baseline and always
+        // offered; the other four callbacks are left empty without
+        // ENGINE_WITH_3D so BuildSceneSelectScreen skips those rows (its own
+        // doc comment) instead of this file needing an #if around the whole
+        // menu the way it used to.
         m_ui.SetScreen(BuildSceneSelectScreen(
+            [this] { EnterInGame(DemoScene::Circular); },
+#if defined(ENGINE_WITH_3D)
             [this] { EnterInGame(DemoScene::DefenseCombat); },
             [this] { EnterInGame(DemoScene::CharacterDemo); },
             [this] { EnterInGame(DemoScene::ShadowShowcase); },
             [this] { EnterInGame(DemoScene::EffectsTest); },
-            [this] { EnterTitle(); }));
+#else
+            nullptr, nullptr, nullptr, nullptr,
 #endif
+            [this] { EnterTitle(); }));
     }
 
     void Application::EnterItems()
@@ -306,16 +328,13 @@ namespace engine::game
         m_state = GameState::InGame;
         m_inGameElapsed = 0.0f;
         m_autoExplodeFired = false;
-#if defined(ENGINE_WITH_3D)
         // The only entry point into InGame - whether it's a fresh pick from
         // the scene-select menu or (DefenseCombat only) a restart after a
-        // loss. Simulation::EnterScene rebuilds the actor list for `scene`
-        // and, for DefenseCombat, runs ResetMatch() so it always starts at
-        // wave 1 (docs/defense-combat-design.md §0).
+        // loss. Simulation::EnterScene rebuilds/resets state for `scene` -
+        // for DefenseCombat that includes ResetMatch() (always wave 1,
+        // docs/defense-combat-design.md §0); for Circular it resets the mob
+        // field/player (docs/circular-design.md).
         m_simulation.EnterScene(scene);
-#else
-        (void)scene;
-#endif
         m_ui.ClearOverlay();
         m_ui.SetScreen(BuildInGameHud([this] { OpenSettings(); }));
         m_window.SetPointerLocked(true);   // mouse-look / centre-locked cursor

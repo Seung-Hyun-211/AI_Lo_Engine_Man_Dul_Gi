@@ -56,6 +56,7 @@
     <ClCompile Include="src\game\CharacterAnimationState.cpp" />
     <ClCompile Include="src\game\InGameHud.cpp" />
     <ClCompile Include="src\game\InventoryScreen.cpp" />
+    <ClCompile Include="src\game\MobField.cpp" />
     <ClCompile Include="src\game\SettingsScreen.cpp" />
     <ClCompile Include="src\game\Simulation.cpp" />
     <ClCompile Include="src\game\SnapshotBuilder.cpp" />
@@ -69,6 +70,7 @@
     <ClCompile Include="src\physics\p2d\CollisionWorld2D.cpp" />
     <ClCompile Include="src\physics\p3d\CollisionWorld3D.cpp" />
     <ClCompile Include="src\render\Dx11Renderer.cpp" />
+    <ClCompile Include="src\render\r2d\EffectPass2D.cpp" />
     <ClCompile Include="src\render\r2d\PostProcessPass.cpp" />
     <ClCompile Include="src\render\r2d\QuadPass2D.cpp" />
     <ClCompile Include="src\render\r2d\SpritePass2D.cpp" />
@@ -101,9 +103,11 @@
     <ClInclude Include="src\core\Time.h" />
     <ClInclude Include="src\game\Application.h" />
     <ClInclude Include="src\game\CharacterAnimationState.h" />
+    <ClInclude Include="src\game\CircularConfig.h" />
     <ClInclude Include="src\game\CrowdConfig.h" />
     <ClInclude Include="src\game\InGameHud.h" />
     <ClInclude Include="src\game\InventoryScreen.h" />
+    <ClInclude Include="src\game\MobField.h" />
     <ClInclude Include="src\game\SettingsScreen.h" />
     <ClInclude Include="src\game\Simulation.h" />
     <ClInclude Include="src\game\SnapshotBuilder.h" />
@@ -132,6 +136,7 @@
     <ClInclude Include="src\render\IRenderer.h" />
     <ClInclude Include="src\render\RenderPass.h" />
     <ClInclude Include="src\render\RenderSnapshot.h" />
+    <ClInclude Include="src\render\r2d\EffectPass2D.h" />
     <ClInclude Include="src\render\r2d\PostProcessPass.h" />
     <ClInclude Include="src\render\r2d\QuadPass2D.h" />
     <ClInclude Include="src\render\r2d\Sprite2D.h" />
@@ -158,6 +163,7 @@
     <None Include="assets\shaders\composite.hlsl" />
     <None Include="assets\shaders\composite_ms.hlsl" />
     <None Include="assets\shaders\crease.hlsl" />
+    <None Include="assets\shaders\effect2d.hlsl" />
     <None Include="assets\shaders\mesh.hlsl" />
     <None Include="assets\shaders\mesh_instanced.hlsl" />
     <None Include="assets\shaders\mesh_instanced_toon.hlsl" />

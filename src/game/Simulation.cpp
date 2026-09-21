@@ -171,6 +171,12 @@ namespace engine::game
     void Simulation::EnterScene(DemoScene scene)
     {
         m_demoScene = scene;
+        if (scene == DemoScene::Circular)
+        {
+            ResetCircularScene();
+            return;   // none of the 3D actor/crowd reset below applies
+        }
+
         m_actors.clear();
         m_cameraYaw = 0.0f;
         m_cameraPitch = -0.28f;   // SpawnActors overrides this for DefenseCombat's steeper overlook
@@ -263,7 +269,75 @@ namespace engine::game
                 SeedAgent(*a, static_cast<float>(i));
         }
     }
+#else
+    void Simulation::EnterScene(DemoScene scene)
+    {
+        // Only ever DemoScene::Circular in a build without the 3D module -
+        // it is the only enumerator that exists (see the enum's own #if
+        // split in Simulation.h).
+        m_demoScene = scene;
+        ResetCircularScene();
+    }
 #endif
+
+    void Simulation::ResetCircularScene()
+    {
+        m_mobs.Clear();
+        m_mobSpawnTimer = 0.0f;
+        m_mobKillCount = 0;
+        m_circularAttackCooldown = 0.0f;
+        m_hitFlashes.clear();
+        // Re-centre the player - a re-entry after a previous run should not
+        // resume wherever that run left off.
+        m_player = { static_cast<float>(m_worldWidth) * 0.5f - kPlayerSize * 0.5f,
+                     static_cast<float>(m_worldHeight) * 0.5f - kPlayerSize * 0.5f };
+    }
+
+    void Simulation::StepCircularScene(float fixedDelta)
+    {
+        const math::Vec2 playerCenter = m_player + math::Vec2{ kPlayerSize * 0.5f, kPlayerSize * 0.5f };
+
+        // Spawn: a steady trickle onto a ring around the player so mobs
+        // always approach from off-screen, capped by MobField's fixed
+        // capacity (docs/circular-design.md §1/§9 "2D 몹 스폰/충돌/HP").
+        m_mobSpawnTimer -= fixedDelta;
+        if (m_mobSpawnTimer <= 0.0f && !m_mobs.Full())
+        {
+            m_mobSpawnTimer = kActiveMob.spawnIntervalSeconds;
+            // Deterministic angle from the elapsed clock - same no-<random>
+            // convention as SeedAgent's spread (a spawn a frame apart lands
+            // at a different angle without needing an RNG).
+            const float angle = std::fmod(m_elapsed * 53.17f, 6.2831853f);
+            const math::Vec2 spawnPos = playerCenter
+                + math::Vec2{ std::cos(angle), std::sin(angle) } * kActiveMob.spawnRadius;
+            m_mobs.Spawn(spawnPos, kActiveMob.health, kActiveMob.radius);
+        }
+
+        m_mobs.Step(m_jobs, playerCenter, kActiveMob.speed, fixedDelta);
+
+        // Demo "card" (docs/circular-design.md §10 step 1 - real cards are a
+        // later step): a fixed-radius pulse on its own cooldown, auto-firing
+        // like every real card will. Proves MobField::DamageInRadius + the
+        // hit-flash -> EffectInstance pipeline end to end without the deck/
+        // slot system that doc still defers.
+        m_circularAttackCooldown -= fixedDelta;
+        if (m_circularAttackCooldown <= 0.0f)
+        {
+            m_circularAttackCooldown = kCircularAttackInterval;
+            const std::uint32_t killed =
+                m_mobs.DamageInRadius(playerCenter, kCircularAttackRadius, kCircularAttackDamage);
+            m_mobKillCount += static_cast<int>(killed);
+            m_hitFlashes.push_back({ playerCenter, kHitFlashLife, kHitFlashLife });
+        }
+
+        // Swap-remove expired hit flashes (same idiom as elsewhere in this file, e.g. tracers).
+        for (std::size_t i = 0; i < m_hitFlashes.size(); )
+        {
+            m_hitFlashes[i].ageLeft -= fixedDelta;
+            if (m_hitFlashes[i].ageLeft <= 0.0f) { m_hitFlashes[i] = m_hitFlashes.back(); m_hitFlashes.pop_back(); }
+            else ++i;
+        }
+    }
 
     void Simulation::SetWorldSize(int width, int height)
     {
@@ -337,7 +411,20 @@ namespace engine::game
             }).Wait();
 
         StepCollision2D();
+
+        if (m_demoScene == DemoScene::Circular)
+        {
+            StepCircularScene(fixedDelta);
+        }
+
 #if defined(ENGINE_WITH_3D)
+        // Skipped for Circular (docs/circular-design.md) - it has none of
+        // this state (actors/crowd/gibs/ordnance/wave loop), and stepping it
+        // anyway would waste CPU on whatever the previously-active 3D scene
+        // left behind (EnterScene's Circular branch deliberately does not
+        // clear it, only stops populating it further).
+        if (m_demoScene != DemoScene::Circular)
+        {
         m_rifleCooldown = std::max(0.0f, m_rifleCooldown - fixedDelta);   // §5, full-auto fire-rate gate
         m_rifleSpread = std::max(0.0f, m_rifleSpread - kRifleSpreadDecayPerSec * fixedDelta);   // recoil bloom recovery
         m_muzzleFlashTimer = std::max(0.0f, m_muzzleFlashTimer - fixedDelta);
@@ -357,6 +444,7 @@ namespace engine::game
         // Crowd colliders + look-ray + overlap tint run ONCE per frame from
         // Application::UpdateCrowdQueries(), not here - they are O(crowd) and
         // render-only, so per-sub-step made a slow frame spiral.
+        }   // m_demoScene != DemoScene::Circular
 #endif
     }
 
