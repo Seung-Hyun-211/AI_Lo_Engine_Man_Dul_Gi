@@ -92,6 +92,14 @@ for (i in [0, sub)) StepOneActor(actor, subDt, ...);
 - 유효 배율 = `globalTimeScale × actor.timeScale` (전역이 이미 `Advance` 에서 스텝 수로 반영되므로 `StepActors` 는 `actor.timeScale` 만 곱함). 전역 `0` + `ignoreGlobalPause` 액터면 `globalPaused` 경로로 `actor.timeScale` 만 적용돼 계속 움직임(타임스톱 시전자 패턴).
 - 데모: `Simulation::SpawnActors` 가 액터 3개 — `[0]` 플레이어(1×), `[1]` 3× + `ignoreGlobalPause`, `[2]` 0.35×. `SnapshotBuilder` 가 `[1..]` 를 큐브로 그림(색: 따뜻=빠름, 차가움=느림).
 
+### 게임플레이 정지는 시간 배율이 아니다 (서큘러 레벨업)
+
+서큘러의 레벨업 모달 동안 월드가 멈추는 건 `SetGlobalTimeScale(0)`이 아니라 **`Simulation`이 스스로
+얼리는 것**이다: `m_levelUpPending`이 true인 동안 `Simulation::Step`이 Circular 씬에서 시계(`m_elapsed`,
+`m_circularTime`)까지 통째로 early-out. 모달이 오버레이라 `Application`도 어차피 스텝을 안 돌리지만(설정 화면과
+동일한 "오버레이 = 정지"), 같은 프레임에 남은 스텝이 더 돌아 XP가 겹쳐 쌓이는 걸 막으려는 안전장치다.
+전역 배율(PageUp/Down 데모)과는 별개 메커니즘이다.
+
 ### 아직 안 한 것
 
 - **unscaled 클럭 분리**: UI/로딩 화면 애니메이션이 pause·배속에 안 물리게 `struct TimeContext { float scaled, unscaled; }` 로 나누는 것. 현재 `UpdateCameraLook` 만 사실상 unscaled(프레임당 1회, 스텝 밖). `m_elapsed`(조명 스윕)는 의도적으로 scaled.

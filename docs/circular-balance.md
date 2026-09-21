@@ -1,0 +1,167 @@
+# 서큘러 밸런싱 환경 (CSV) — 몹 수 · 경험치 · 레벨
+
+**상태: 구현 완료.** 숫자를 코드가 아니라 CSV 세 개로 뺐고, 게임 안에서 F5로 다시 읽고, 창 없이 결과를
+뽑는 시뮬레이터가 있다. 게임 설계(기초 설계 기반: 무기·XP·레벨업·스폰 패턴 등)는 [circular-design.md](circular-design.md), 앞으로 늘릴 표는 이 문서 맨 아래 "확장 계획".
+
+## 한눈에
+
+```text
+assets/data/circular/
+  balance.csv      key,value,note            몹 HP·속도·크기·XP, 스폰 거리, 레벨표 밖 성장률
+  levels.csv       level,xp_to_next,note     레벨별 필요 XP (1,2,3… 빈틈 없이)
+  spawn_curve.csv  time_sec,spawns_per_sec,max_alive   런 시간별 초당 스폰 수 · 살아있는 몹 상한
+
+game/CircularBalance.{h,cpp}   CSV → CircularBalance (몹/레벨/스폰 곡선 평가기)
+core/CsvFile.{h,cpp}           범용 CSV 리더 (BOM·CRLF·따옴표·# 주석)
+tools/balance_sim.cpp          창 없는 시뮬레이터 (실제 Simulation 을 그대로 돌림)
+tools/run_balance_sim.bat      빌드 + 실행 한 방
+```
+
+컴파일 타임 기본값은 `game/CircularConfig.h`(`kActiveMob`, `kProgression`)에 남아 있다 — CSV 가 없거나 깨져도
+게임은 그 값으로 돈다. **`kActiveMob.capacity`(4096)만은 CSV 로 못 바꾼다**(`MobField` 슬롯 수라 시작 때
+정해짐) — `max_alive` 가 그 위로 올라가면 잘라내고 경고한다.
+
+## CSV 형식 규칙
+
+- UTF-8(BOM 있어도 됨, Excel "CSV UTF-8"), LF/CRLF 둘 다. 소수점은 `.`.
+- 빈 줄과 `#` 로 시작하는 줄은 무시. 첫 유효 줄이 헤더(대소문자 무시). 열 순서는 헤더 이름으로 찾으니 자유.
+- `note` 같은 남는 열은 읽지 않는다 — 메모용. 쉼표가 든 셀은 `"따옴표"`로 감싼다.
+- **잘못된 행은 그 행만 건너뛰고** 나머지는 적용한다. 파일이 없으면 그 파일 전체가 기본값.
+  문제는 줄 번호와 함께 보고된다(아래 "문제 확인").
+
+### balance.csv — key,value
+
+| key | 뜻 | 제약 |
+|---|---|---|
+| `mob_health` | 새로 스폰되는 몹 HP | > 0 |
+| `mob_speed` | 몹 속도 px/s (플레이어는 300) | ≥ 0 |
+| `mob_radius` | 몹 충돌/표시 반경 px | > 0 |
+| `mob_xp` | 킬당 XP (플레이어 XP 획득 배율 곱하기 전) | ≥ 0 |
+| `spawn_radius` | 플레이어로부터 스폰 거리 px | > 0 |
+| `xp_growth_after_table` | `levels.csv` 마지막 행 뒤로 레벨마다 곱해지는 배수 | ≥ 1 |
+
+모르는 key 는 경고 후 무시.
+
+### levels.csv — level,xp_to_next
+
+`level` 은 1,2,3… 순서대로 빈틈 없이(어긋난 행은 오류로 건너뜀). `xp_to_next` = 그 레벨에서 다음으로 가는 데
+필요한 XP, > 0. **표의 마지막 행 뒤로는 `xp_growth_after_table` 배씩 계속 늘어나므로** 손으로 튜닝할 구간만
+적으면 된다. 기본 표는 옛 공식 `30 × 1.35^(n-1)` 을 20레벨까지 정수로 옮긴 것.
+
+### spawn_curve.csv — time_sec,spawns_per_sec,max_alive
+
+`time_sec` = 런 시작 후 초(엄격히 증가해야 함). 행 사이는 **선형 보간**, 마지막 행 뒤로는 마지막 값 유지.
+`spawns_per_sec` = 초당 스폰 수(고정 스텝 1/60 초보다 커도 됨 — 스텝당 여러 마리). `max_alive` = 살아있는 몹이
+이 수에 닿으면 스폰을 멈춘다(빈 만큼 몰아서 뱉지 않음). 기본은 `0,100,4096` 한 줄 = 초당 100마리 평탄.
+
+> **범위**: 지금 이 곡선(과 `levels.csv`)은 **런 전체에 하나**다. 스테이지가 90초 단위로 생기면(M6, [circular-design.md](circular-design.md) §4.3, [circular-design.md](circular-design.md) §6.4) 스폰 곡선은 스테이지별 시계(0~90초)로 재구성되고 `stages.csv` 의 `timeline_id` 가 고른다. 레벨/XP 는 런 전체에 이어진다 [살].
+
+램프 예(파일 안에 주석으로 들어 있음): `0,10,300` → `60,40,1000` → `180,100,2500` → `300,150,4096`.
+
+## 사용 방법 (How to use)
+
+### A. 게임 안에서 조율 (눈으로 보기)
+
+1. 게임 실행 → 곧장 Circular (타이틀 없음. 씬에 들어올 때마다 CSV 를 새로 읽는다 — ESC → 설정 → SCENE SELECT → CIRCULAR 로 다시 들어오면 재로드).
+2. 다른 창에서 CSV 편집·저장 → 게임에서 **F5** = 다시 읽기(런 유지: 새 스폰은 새 HP/크기, 속도·XP표·스폰 곡선은
+   즉시), **F6** = 다시 읽고 런 처음부터.
+3. 화면 왼쪽 아래 두 줄이 현재 값을 보여준다: `T 42  RATE 100  CAP 4096  XP 12 OF 41`(런 시계, 지금 적용 중인
+   스폰 곡선 값, 현재 레벨 XP) / `BALANCE OK` 또는 `BALANCE n ERR m WARN - SEE OUTPUT`.
+4. 오류·경고 상세는 Visual Studio **Output 창**(`[balance] ...` 줄)에 나온다. F5 로 디버깅 중이 아니면 안 보이니,
+   그땐 B 의 시뮬레이터로 확인.
+
+### B. 시뮬레이터로 조율 (빠르게, 표로)
+
+```bash
+tools\run_balance_sim.bat --seconds 300 --interval 10
+```
+
+실제 `game::Simulation` 을 GPU/창 없이 실시간보다 훨씬 빨리 돌려 콘솔 표 + CSV 두 개를 낸다:
+
+- `build/tools/balance_timeline.csv` — `interval` 초마다 한 행: 살아있는 몹 수, 누적 킬, 초당 킬, 레벨, XP,
+  다음 레벨 필요 XP, 그 시각 스폰 곡선 값, 덱.
+- `build/tools/balance_levels.csv` — **각 레벨에 도달한 시각**(`seconds_since_prev` 로 "레벨업 간격"이 바로 보임).
+  XP 표를 잡을 때 이 열을 원하는 리듬(예: 처음엔 10~20초, 후반 40초+)에 맞춘다.
+- 옵션: `--seconds N`(기본 600) `--interval S`(기본 10) `--out PREFIX`(기본 `build/tools/balance`).
+  다른 값으로 여러 번 돌려 `--out build\tools\try1` 식으로 이름을 달리하면 Excel 에서 겹쳐 비교하기 좋다.
+- CSV 에 오류가 있으면 실행 첫 줄들에 `[balance] ERROR …` 가 나오고 종료 코드 1.
+- **한계**: 대역 플레이어는 가만히 서 있고 죽지 않으며(플레이어 HP 가 아직 없음), 레벨업마다 "첫 번째 무기(카드)
+  옵션(없으면 첫 옵션)"을 고른다. 돌진 패턴은 돌아가지만 피해가 없다. 곡선의 **모양**을 잡는 도구지 실제
+  난이도 판정 도구가 아니다 — 최종 감각은 A 로 직접 플레이.
+
+### 튜닝 레시피
+
+| 하고 싶은 것 | 어디를 |
+|---|---|
+| 초반 레벨업이 너무 잦다/뜸하다 | `levels.csv` 앞 몇 행 (`balance_levels.csv` 의 `seconds_since_prev` 로 확인) |
+| 후반 레벨업이 너무 빠르다 | `levels.csv` 뒷부분 또는 `xp_growth_after_table` |
+| 시간에 따라 몹이 늘어나게 | `spawn_curve.csv` 에 행 추가(램프) |
+| 화면이 몹으로 터진다 | `spawn_curve.csv` `max_alive` 낮추기 (또는 `spawns_per_sec`) |
+| 몹이 너무 단단하다/무르다 | `balance.csv` `mob_health` (무기 데미지는 `game/Card.h` `kCardDefs`) |
+| 킬 보상 자체를 키우기 | `balance.csv` `mob_xp` |
+
+### 새 밸런스 항목 추가하기
+
+- **스칼라 하나**: `CircularBalance` 에 필드 + `Defaults()` 에 기본값 + `LoadCircularBalance` 의 `entries[]` 에 한 줄
+  (key 이름·최소값). 쓰는 곳은 `m_balance.<필드>`.
+- **표 하나(예: 웨이브별 몹 타입)**: `CircularBalance` 에 `std::vector<Row>` + 새 CSV + 로더에 블록 하나(`levels.csv`
+  블록을 복제). `Simulation` 은 `m_balance` 만 읽는다.
+- **CSV 를 더 늘려도** `Application::LogBalanceReport` / HUD 상태줄은 `BalanceLoadReport` 하나만 보므로 안 고쳐도 된다.
+
+### 하지 말 것
+
+- 밸런스 숫자를 `Simulation.cpp` / `CircularConfig.h` 에 다시 하드코딩하지 말 것 — `CircularConfig.h` 는 *기본값(폴백)*
+  이지 튜닝 지점이 아니다. 튜닝은 CSV.
+- 게임 스레드가 아닌 곳(렌더 스레드/워커 잡)에서 `ReloadBalance` 를 부르지 말 것 — 메인 스레드(`Application::OnKey`)만.
+  `MobField::Step` 의 `ParallelFor` 는 `Step()` 안에서 끝나므로 그 사이엔 안 불린다.
+- `max_alive` 를 `MobField` capacity(4096) 이상으로 쓰지 말 것 — 잘리고 경고만 난다. 더 필요하면
+  `kActiveMob.capacity` 를 올리고 다시 빌드.
+- 시뮬레이터 결과를 "밸런스 완료"의 근거로 삼지 말 것(위 한계).
+
+## 설계 메모
+
+- **왜 CSV**: 한 줄이 곧 한 행인 표(레벨표·스폰 곡선)라 Excel/시트로 편집·그래프하기 쉽고, 별도 툴/직렬화
+  없이 텍스트 diff 가 된다. 스칼라도 같은 형식(`key,value`)으로 통일.
+- **왜 씬 진입마다 + F5**: 핫리로드 감시 스레드 없이 "저장 → 키 하나"로 끝나 단순하다. 셰이더의 파일 감시
+  핫리로드(`docs/shader-pipeline.md`)와 달리 게임 상태(`m_balance`)를 건드리므로 메인 스레드가 명시적으로 호출.
+- **왜 `core::CsvFile` 가 범용**: 같은 형식을 무기 표(`kCardDefs`)·몹 타입 표 등으로 넓힐 때 재사용. `game/` 은 이 위에
+  얇은 로더만 얹는다(`CircularBalance.cpp`).
+- **결정성**: 시뮬레이터는 고정 시드(`kProgression.rngSeed`) + 고정 스텝이라 같은 CSV 면 항상 같은 표가 나온다.
+- 무기 수치(`kCardDefs`)는 아직 코드 테이블 — `weapons.csv` 로 뺄 후속 후보(맨 아래 "확장 계획").
+
+---
+
+## 기초 설계 기반 확장 계획 — 앞으로 얹을 CSV 표
+
+기준 문서 [# Circular 기초 설계.md](<# Circular 기초 설계.md>) 와 [circular-design.md](circular-design.md) 를 위반하지 않는 범위에서,
+**테이블로 설정한다**는 기초 설계 원칙(스폰 패턴의 숫자·속도·모양은 테이블)을 CSV 로 이어 간다. 아래는 **예정(❌)** 이고,
+현재 구현된 것은 위 세 파일(`balance`/`levels`/`spawn_curve`)뿐이다. 태그는 [circular-design.md](circular-design.md) §0 와 같다.
+
+| 파일 (예정) | 한 행 = | 열(제안) [살] | 기초 설계 근거 | 단계 |
+|---|---|---|---|---|
+| `player.csv` | 이동/스태미너 설정 1세트(키-값) | `walk_speed, run_mult, run_drain, dash_mult, dash_sec, dash_cost, dash_cooldown, dash_invuln_sec, dash_chain_window, dash_chain_penalty, stamina_max, stamina_regen, regen_delay` | B-규칙 + **[확정]** 달리기 ≪ 대쉬, 연타 시 손해, 대쉬 무적 | M1 |
+| `characters.csv` | 플레이어블 1명 | `id, name, portrait, main_stat(vit\|int\|cor\|agi), start_vit, start_int, start_cor, start_agi, start_weapon, ultimate_kills, ultimate_id(미정)` | B-캐릭터 + **[확정]** 캐릭터별 주력 스텟 | M1 |
+| `mobs.csv` | 몹 1종 | `id, name, class, biome, health, speed, radius, contact_damage, xp, range, projectile, telegraph_sec, zone_radius` | B-적(근접·탱커·원거리·마법) | M3 |
+| `spawn_patterns.csv` | 스폰 패턴 1개 | `pattern_id, kind(oneway\|enclose\|lines_alt), mob, count, speed, shape(arrow\|rect\|line), width, spacing, direction, interval, telegraph_sec` | B-스폰(숫자·속도·모양은 테이블) | M4 |
+| `stage_timeline.csv` | 시간표 1칸 | `timeline_id, time_sec, pattern_id` | B-스폰 + B-스테이지 | M4 |
+| `weapons.csv` | 무기 1종(현재 `kCardDefs`) | `id, effect, cooldown, damage, range, base_targets, max_level(=5), damage_per_level, range_per_level, cooldown_scale, levels_per_extra_target, overflow_stat, overflow_value` | B-규칙(소지 무기) + **[확정]** 최대 레벨 5, 오버플로우 | M5 |
+| `accessories.csv` | 장신구 1종(능력치 가산/배율 목록) | `id, name, stat, add, mul, max_level(=5)` (여러 능력치면 여러 행) | B-UI(소지 장신구) + **[확정]** 슬롯 6 | M5 |
+| `stages.csv` | 스테이지 1개(20행) | `stage_no, biome, flow, survive_sec(=90), mob_pool, timeline_id, boss_pool` — **`arena` 열 없음: 무한 필드 [확정]** | B-스테이지, B-적(보스) + **[확정]** 90초 버티기 | M6 |
+| `stats.csv` | 능력치 1개 | `stat_id, name_ko, kind(base\|derived), base_value, min, max, from_vit, from_int, from_cor, from_agi, display_order` | **[확정]** 기초 4스텟(체력·지력·오염·민첩) + 행운·공격 크기·추가 투사체·공격속도 등([circular-design.md](circular-design.md) §2.6) | M1 |
+| `bosses.csv` | 보스 1체 | `boss_id, name, biome, health, phases, pattern_ids` — **바이옴당 2~3행 [확정]**, 이름·능력 [미정], 왕국 성에 `왕의 기사` [기초] | B-적(보스) + **[확정]** 컨셉별 2~3개 | M6 |
+| `nodes.csv` | 마계숲 라운드 후보 가중치 | `node_type(battle\|rest\|shop\|event), weight, min_stage, max_stage` — **휴식·상점·이벤트 [확정]** | B-스테이지(마계숲 선택지) | M6 |
+| `rest.csv` / `shop.csv` / `events.csv` | 노드 세부 | 내용 **[미정]** (휴식 효과·상점 진열/가격·이벤트 종류) — 파일만 예약 | 위 노드 | M6 |
+| `anim_clips.csv` | 애니메이션 클립 1개 | `clip, fps, mode, fit_sec, pivot_x, pivot_y, hit_frame` | (살) — [circular-art-guide.md](circular-art-guide.md) §6 | M7 |
+
+### 공통 규칙 [살]
+
+- **id 는 소문자 영문/숫자/밑줄**(`madoknight`, `forest_imp`, `oneway_arrow_basic`). 한글 표시 이름은 `name` 열. 이미지 파일 이름이 이 id 를 그대로 쓴다([circular-art-guide.md](circular-art-guide.md) §3).
+- **참조는 id 로만**(`stages.csv` 의 `mob_pool`, `timeline_id`, `boss_id` 등). 없는 id 참조는 **오류 행**(현재 로더의 "문제 행만 건너뛰고 보고" 규칙 그대로).
+- 새 표 = `CircularBalance` 에 `std::vector<Row>` + 로더 블록 하나(아래 "새 밸런스 항목 추가하기"의 표 방식). `Simulation` 은 `m_balance` 만 읽는다. HUD 밸런싱 줄·F5/F6·시뮬레이터는 그대로 새 표를 포함한다.
+- **[기초]·[확정] 항목(스폰 패턴 3종의 존재, 바이옴별 출현 분류, 스테이지 90초 버티기, 마계숲 노드 3종 등)을 CSV 로 뒤집을 수 있게 만들지 않는다** — CSV 는 숫자·속도·모양·개수 같은 [살] 값의 튜닝 지점이다.
+
+### 지금 코드와의 대응
+
+- 현재 `balance.csv` 의 `mob_*` 한 세트 = **근접 몹 1종**. `mobs.csv`(M3)가 생기면 이 키들은 `mobs.csv` 의 첫 근접 행으로 이관하고 `balance.csv` 에는 스폰 거리 등 전역 값만 남긴다.
+- 현재 `kChargePattern`(붉은 구역 예고→돌진)은 **기초 설계 밖 임시 테스트**([circular-design.md](circular-design.md) §6.5) — CSV 로 빼지 않고 정식 스폰 패턴이 대체한다.
+- "카드"는 기초 설계의 **"소지 무기"**다 — 코드 이름 `Card*`/`kCardDefs` 는 그대로이며 `weapons.csv` 가 이를 대체할 후보다.

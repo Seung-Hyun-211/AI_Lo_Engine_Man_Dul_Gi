@@ -375,6 +375,11 @@ pool.Release(h);  auto h2 = pool.Acquire();  if (T* x = pool.Get(h2)) reseed(*x)
 
 ### 6.2 `game/AgentStore` — SoA, 고정 capacity — **아직 안 함 (측정 게이트)**
 
+> 참고: 같은 SoA 형태(병렬 벡터 + free-list + dense active list + `ParallelFor` 스티어링)가 2D 서큘러 씬의
+> `game::MobField`로 **먼저 구현**됐다([circular-design.md](circular-design.md) 부록 A). 3D 크라우드 `AgentStore`를
+> 만들 때 그 코드(슬롯 회수, 상태별 커널 분기, `DamageInRadius`)가 참고 구현이 된다 — 단 2D/3D 분리 규칙 7
+> 때문에 코드를 공유하진 못하고 패턴만 이식한다.
+
 현재 데모 씬 2 크라우드는 **AoS** 다: `core::ObjectPool<SimAgent>`(§6.1) 에 `SimAgent`
 구조체가 그대로 산다. 수백~수천에선 이게 맞다(§6.2 마지막 불릿). `ParallelFor` 가 pos/vel 만
 스트리밍하는 게 병목으로 측정되면 그때 아래 SoA 로 승격한다 — `ObjectPool` 은 그대로 두고

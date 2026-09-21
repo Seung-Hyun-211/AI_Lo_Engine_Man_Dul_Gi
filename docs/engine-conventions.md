@@ -28,6 +28,7 @@
 |---|---|
 | 공간 | **픽셀**, 원점 **좌상단**, **+Y 아래** (Win32 클라이언트 + `quad2d.hlsl`/`sprite2d.hlsl`) |
 | 색 | `math::Color` = **linear RGBA 0..1, straight(비-premultiplied) alpha** |
+| 입력 축 → 2D 이동 | `PlayerIntent.move.y` 는 3D 와 공유하는 **앞 = +** 값. 2D 플레이어(`Simulation::m_player`, 서큘러)는 `+Y 아래`라서 `Simulation::Step` 이 **한 곳에서** `-move.y` 로 뒤집는다. 다른 2D 코드는 다시 뒤집지 말 것(이중 반전 → W 가 아래로 가던 버그의 원인) |
 
 ---
 
@@ -38,7 +39,7 @@
 | 길이 | **미터 (m)** | **픽셀 (px)** | 3D 임포트 스케일 `ImportOptions::scale` 로 파일 단위→m (Unity-chan cm → `0.01`) |
 | 시간 | **초 (s)** | 초 | `std::chrono` 직접 사용 금지 — `core::FrameClock`/`FixedTimestep` 만 (§3) |
 | 각도 | **라디안 (rad)** | rad | 모든 yaw/pitch/turn-rate. `kCharTurnRate = 12 rad/s`, `kMouseSensitivity = 0.0022 rad/px` |
-| 속도 | m/s | px/s | `kCharWalkSpeed 2.2`, `kCharRunSpeed 5.2` (m/s) · `kPlayerSpeed 300` (px/s, 레거시 2D) |
+| 속도 | m/s | px/s | `kCharWalkSpeed 2.2`, `kCharRunSpeed 5.2` (m/s) · `kPlayerSpeed 300` (px/s, 서큘러 플레이어 — 옛 2D 오버레이 데모와 공용) |
 | 가속도 | m/s² | — | **중력 `kCharGravity = 14` — 실제 9.8 이 아니라 게임 튜닝값.** `kCharJumpSpeed 4.6 m/s` |
 | 질량 · 힘 · 임펄스 | **없음** | — | 강체 동역학 미구현. 캐릭터는 kinematic (속도 직접 적분) |
 | 지면 | `y = 0` 평면 | — | 캐릭터 발이 `pos.y`. 데모 이동 범위 `±kCharHalfRange 7.5 m` 클램프 |

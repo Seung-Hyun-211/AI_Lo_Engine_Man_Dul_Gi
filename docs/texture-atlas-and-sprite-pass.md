@@ -109,7 +109,10 @@ struct SpriteDraw
 };
 ```
 
-`Quad` 는 그대로 둔다(레거시 `worldQuads` 2D 오버레이 데모 전용, 텍스처·클립 불필요).
+`Quad` 는 그대로 둔다(`worldQuads` — 지금은 서큘러 씬의 몹/플레이어 색 사각형이 씀, 텍스처·클립 불필요).
+같은 `Sprite2D.h` 에 서큘러용 `EffectInstance`(절차적 글로우, `EffectPass2D`)도 있다 — `SpriteDraw` 와
+무관. **`SpriteDraw` 는 아직 UI 전용(`RenderSnapshot::uiSprites`)** 이라, 월드 스프라이트(몹 아트)는
+월드용 배열 + 아틀라스 다중 지정이 추가로 필요하다([circular-design.md](circular-design.md) §8, [circular-art-guide.md](circular-art-guide.md), 로드맵 M7).
 
 ### 2.2 UI 프리미티브 통일 — 판단 (통일 권장)
 
@@ -262,9 +265,9 @@ dl.PopClip();               // 반드시 짝 맞추기 (RAII 가드 ui::ClipScop
 
 1. ✅ `render/r2d/Sprite2D.h` 에 `SpriteDraw`(dest+uv+tint+atlasId+`clip` math::Rect). `RenderSnapshot` 에 `uiSprites`.
 2. ✅ `assets/shaders/sprite2d.hlsl` + `render/r2d/SpritePass2D.{h,cpp}` — `(atlasId, clip)` 연속 런 그룹핑, SRV 바인드, `RSSetScissorRects`, 동적 VB `WRITE_DISCARD`/`NO_OVERWRITE`. scissor rasterizer state 는 패스가 소유. `Dx11Renderer::AddRenderPass(pass, atEnd=true)` 신설(scissor state 가 `QuadPass2D` 로 새지 않게 맨 끝) + `main.cpp` 등록. `atlasId 0` = 내장 1×1 흰 텍스처.
-3. 최소본 ✅ / 나머지 ❌ — `render/r2d/TextureAtlas.{h,cpp}` 에 `SpriteRect` + `AtlasIndex`(텍스트 `.atlas` 파서, 메인 스레드). `SpritePass2D` 가 `Initialize` 에서 `.dds` 1장 로드(최소 DX10-헤더 DDS 리더, RGBA8/BC7/BC4). `Application` 이 `m_uiAtlas` 로드 → `SnapshotBuilder::Build` 에 넘김(데모 스프라이트). **`AssetKind::Atlas` / `AssetRegistry` / `loading-and-streaming` 연동은 아직** — 지금은 `ModelMeshPass3D` 처럼 로드-원스.
+3. 최소본 ✅ / 나머지 ❌ — `render/r2d/TextureAtlas.{h,cpp}` 에 `SpriteRect` + `AtlasIndex`(텍스트 `.atlas` 파서, 메인 스레드). `SpritePass2D` 가 `Initialize` 에서 `.dds` 1장 로드(최소 DX10-헤더 DDS 리더, RGBA8/BC7/BC4). (예전엔 `Application` 이 `m_uiAtlas` 를 로드해 `SnapshotBuilder::Build` 에 넘겨 데모 스프라이트를 그렸으나, 데모 UI 삭제와 함께 CPU 쪽 `AtlasIndex` 배선도 뗐다 — 월드/UI 스프라이트가 필요해지면 다시 연결.) **`AssetKind::Atlas` / `AssetRegistry` / `loading-and-streaming` 연동은 아직** — 지금은 `ModelMeshPass3D` 처럼 로드-원스.
 4. ✅ v1 — `tools/atlas_pack.{cpp,bat}` (오프라인, 엔진 빌드 밖): 플랫 `atlas.groups` 파싱 + shelf 패킹 + edge-extend gutter + box-filter 밉 + 무압축 `R8G8B8A8_UNORM_SRGB` `.dds`(DX10 헤더) + `.atlas` + `.cache`(증분). 디코드는 `import::LoadImageFromFile` 재사용. `assets/src/ui/*` → `assets/atlas/ui.{0.dds,atlas}`. fixture 생성기 `tools/make_test_atlas_src.cpp`. ❌ 남음: **BC7/BC4 압축**(`bc7enc` vendor + `--format bc7`), 셀 16px 밉 컷.
-5. ❌ `ui::DrawList` + 클립 스택 + `ui::ClipScope`. `Widget::Build(DrawList&, Vec2)` 오버로드. `UIContext::Build` 가 `uiSprites` 채움. 위젯 단계적 이전. (그 전까지 `SnapshotBuilder::BuildDemoUiSprites` 가 임시로 채움.)
+5. ❌ `ui::DrawList` + 클립 스택 + `ui::ClipScope`. `Widget::Build(DrawList&, Vec2)` 오버로드. `UIContext::Build` 가 `uiSprites` 채움. 위젯 단계적 이전. (임시 `SnapshotBuilder::BuildDemoUiSprites` 는 삭제됨 — 지금 `uiSprites` 는 비어 있고 `SpritePass2D` 는 대기 상태.)
 6. ❌ `ScrollList` 가 `dl.PushClip(viewport)` 사용.
 7. ❌ `GlyphAtlas` + `AddText` 재작성. 5×7 폴백 유지.
 8. ❌ `command-playbook.md` #3ea·`ui-architecture.md` #8·`scrollable-list-and-pool.md` §1.5 갱신.

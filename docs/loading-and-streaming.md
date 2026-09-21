@@ -1,5 +1,7 @@
 # 로딩 · 스트리밍 설계 (Loading & Streaming)
 
+> 참고: 이 문서가 쓰는 `GameState::Title` 은 현재 코드에서 `GameState::Menu`(씬 선택 화면)로 바뀌었고 타이틀 화면 자체가 삭제됐다 — 아래 "Title" 은 그 메뉴로 읽는다([scene-flow-design.md](scene-flow-design.md)).
+
 씬 전환 / 큰 위치 이동에서 **화면을 가리는 로딩 커튼**(진행바 + 로테이션 팁)과,
 그 뒤에서 도는 **비동기 에셋 로드 파이프라인**, 그리고 한 맵 안 인접 구역을
 플레이 중 미리 당겨오는 **백그라운드 프리스트림**의 구조.
@@ -73,7 +75,7 @@ if (m_state == GameState::Loading)
         m_simulation.AdoptWorld(m_sceneLoader.TakeWorld(), m_pendingSpawn);  // 프레임 경계 스왑
         m_ui.ClearOverlay();
         m_state = GameState::InGame;
-        m_ui.SetScreen(BuildInGameHud([this] { OpenSettings(); }));
+        m_ui.SetScreen(nullptr);   // InGame 은 위젯 화면이 없다 — HUD 는 SnapshotBuilder 가 그리고 설정은 ESC 오버레이
     }
 }
 ```
@@ -224,7 +226,7 @@ public:
 7. **레퍼런스 카운트 + 매니페스트 diff** — 씬 간 공유 에셋은 한 번만 로드, 델타만 이동.
 8. **메모리 예산 + LRU** — 레지스트리가 상주 바이트 추적. 전환 시 ref-0 에셋은 "warm" 으로 두다가 소프트 상한 초과하면 오래된 것부터 evict. 긴 플레이 세션·잦은 전환에서 증가 방지.
 9. **취소** — 항목마다 `stop_token`. 전환을 되무르면 큐 작업 취소 + 인플라이트 CPU 결과 폐기(이미 GPU 올라간 건 refcount 0 → LRU).
-10. **실패 격리** — 나쁜 에셋은 `Entry` 를 `Failed` 로 표시하고 커튼에 보고(재시도 / 타이틀로). 크래시 없음, 반쯤 로드된 월드 설치 없음.
+10. **실패 격리** — 나쁜 에셋은 `Entry` 를 `Failed` 로 표시하고 커튼에 보고(재시도 / 씬 선택으로). 크래시 없음, 반쯤 로드된 월드 설치 없음.
 11. **최소 표시 시간** — 로드가 즉시 끝나도 커튼 ≥ N ms(예: 500ms). 진행바는 이징(§5)이라 순간이동 안 함.
 12. **스레드 개수** — IO 스레드 `clamp(hw_concurrency/4, 1, 2)`. `JobSystem` 풀·렌더 스레드를 굶기면 안 됨. OS 우선순위 낮추기는 선택.
 13. **파이프라인 워밍업** — 새 머티리얼/셰이더 순열의 첫 드로우가 드라이버 컴파일로 히칭할 수 있다. 커튼 동안 1px 오프스크린 워밍 드로우를 날려 커튼 걷힌 첫 프레임을 매끄럽게(고급, 나중).

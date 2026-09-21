@@ -5,7 +5,7 @@
 (가상화 / UI virtualization — RecyclerView·UITableView cell reuse 와 같은 패턴).
 
 **상태: `ui::ScrollList` 구현됨 (v1) + `core::ObjectPool<T>` 구현됨 (§1.1).** 고정 행 높이 ·
-클리핑 A · 휠 입력 · 스크롤바 드래그 · 데모 화면(`game/InventoryScreen`, 타이틀 → ITEMS).
+클리핑 A · 휠 입력 · 스크롤바 드래그 · (데모 화면 `game/InventoryScreen` 은 삭제됨 — 아래 "사용 방법"의 코드는 그 형태를 참고용으로 남긴 것).
 `core::ObjectPool<T>` 는 `src/core/ObjectPool.h`, 첫 사용처는 데모 씬 2 크라우드. 미구현:
 `ScrollList` 가 `ObjectPool` 을 쓰도록 리팩터(현재 자체 ring, §1.2), 가변 행 높이, 키보드 네비,
 크라우드 SoA 승격(`instanced-rendering.md` §6.2). 이 문서가 계약.
@@ -239,7 +239,7 @@ m_bar.Build(...) : thumbH ∝ viewportH / contentH,  thumbY ∝ scrollOffset / (
 
 ## 4. 사용 방법 (How to use)
 
-구현: `src/ui/ScrollList.{h,cpp}`, 데모 `src/game/InventoryScreen.{h,cpp}`. 배선(휠 경로,
+구현: `src/ui/ScrollList.{h,cpp}` (데모 `InventoryScreen` 은 삭제 — 현재 사용처 없음, 카드 인벤토리에서 재사용 예정). 배선(휠 경로,
 클리핑 A, 저수준 프리미티브)은 §5.
 
 ### 목록 화면 하나 만들기
@@ -277,7 +277,7 @@ std::unique_ptr<ui::Widget> BuildInventoryScreen(std::span<const std::string> it
 }
 ```
 
-`Application` 쪽은 다른 화면과 동일: `m_ui.SetScreen(BuildInventoryScreen(items, [this](std::size_t i){ ... }))`.
+(삭제된 데모 화면의 예) `Application` 쪽은 다른 화면과 동일: `m_ui.SetScreen(BuildInventoryScreen(items, [this](std::size_t i){ ... }))`.
 
 ### 데이터가 바뀌면 (항목 추가/삭제/정렬)
 
@@ -320,7 +320,7 @@ for (Tooltip& t : m_tooltips.Active())   // 연속 순회
   (`MouseWheel()`, `BeginFrame` 리셋) + `Widget::PointerWheel` + `UIContext::PointerWheel`.
 - 클리핑 **A**: `ScrollList` 내부 `ClampQuad`. `render::Quad`/`QuadPass2D` 무변경.
 - `ui::DrawRect`/`ui::DrawText` — `UI.h` 에 노출한 저수준 프리미티브(행이 자기 Quad 를 직접 그림).
-- `src/game/InventoryScreen.{h,cpp}` + 데모(색상별 200개), 타이틀 화면 ITEMS 버튼.
+- ~~`src/game/InventoryScreen.{h,cpp}` + 데모(색상별 200개), 씬 선택 화면 ITEMS 버튼~~ — 데모 삭제(현재 `ScrollList` 사용처 없음).
 
 남음:
 

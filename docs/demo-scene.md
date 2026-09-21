@@ -15,7 +15,7 @@ Win32Window (platform/)
                                        포커스 잃으면 자동 해제, 되찾으면 재적용
 Application (game/)
   · EnterInGame / CloseSettings   → m_window.SetPointerLocked(true)
-    EnterTitle  / OpenSettings    → m_window.SetPointerLocked(false)
+    EnterSceneSelect / OpenSettings → m_window.SetPointerLocked(false)
   · OnMouseDelta                  → m_input.OnMouseDelta   (InputState 가 프레임 단위 누적, BeginFrame 에서 리셋)
   · BuildPlayerIntent()           → WASD(+화살표) / Shift / Space(에지) / MouseDelta 를 PlayerIntent 값으로
   · Run 루프 (InGame && !overlay) → m_simulation.UpdateCameraLook(intent.look)   ← 프레임당 1회 (고정스텝 밖)
@@ -74,7 +74,7 @@ SnapshotBuilder (game/)
 
 ## 데모 씬 2 — 언덕 위 조망 + 시뮬레이션 군중
 
-`Simulation::DemoScene`(런타임 열거형, **아래 "사용 방법" — 타이틀의 SELECT SCENE 메뉴로
+`Simulation::DemoScene`(런타임 열거형, **아래 "사용 방법" — 설정의 SCENE SELECT 메뉴로
 고른다, 리빌드 불필요**) 로 고른다. `CharacterDemo`(1) = 위에서 설명한 로컬 배속 액터 3인 +
 작은 슬랩. `DefenseCombat`(2) = **같은 플레이어**가 완만한 언덕(10m 높이, 20도 경사로 아래
 평지까지 이어짐 — 원래는 수직 절벽/메사였으나 사격 시야 확보를 위해 경사로로 교체) 위에 서서
@@ -141,12 +141,14 @@ SnapshotBuilder (game/)
 
 ### 사용 방법 (How to use)
 
-- **씬 전환은 런타임** (리빌드 불필요) — 타이틀 화면 "START" → "SELECT SCENE" 메뉴
-  (`TitleScreen.h/.cpp` `BuildSceneSelectScreen`, 버튼 4개: DEFENSE COMBAT/CHARACTER DEMO/
-  SHADOW SHOWCASE/EFFECTS TEST) → 고른 씬으로 `Application::EnterInGame(DemoScene)`. 게임
-  중엔 ESC → 설정 화면 맨 아래 **"EXIT TO TITLE"** 로 언제든 타이틀/씬 선택으로 돌아가 다른
+- **씬 전환은 런타임** (리빌드 불필요) — 앱은 곧장 CIRCULAR 로 부팅(타이틀 화면 없음) — 다른 씬은 ESC → 설정 → "SCENE SELECT" 메뉴
+  (`SceneSelectScreen.h/.cpp` `BuildSceneSelectScreen`, 씬 버튼 5개: **CIRCULAR**(2D, 항상 표시)/
+  DEFENSE COMBAT/CHARACTER DEMO/SHADOW SHOWCASE/EFFECTS TEST(3D 4개는 `ENGINE_WITH_3D`일 때만) + SETTINGS/QUIT →
+  고른 씬으로 `Application::EnterInGame(DemoScene)`. **`Circular`(5)는 2D 뱀서라이크 씬 —
+  이 문서의 3D 씬들과 별개, [circular-design.md](circular-design.md)가 계약.** 게임
+  중엔 ESC → 설정 화면 맨 아래 **"SCENE SELECT"** 로 언제든 씬 선택 메뉴로 돌아가 다른
   씬을 고를 수 있다. `Simulation::kDemoScene`(예전 `static constexpr int`)는 이제 `enum class
-  DemoScene {CharacterDemo=1, DefenseCombat=2, ShadowShowcase=3, EffectsTest=4}` 런타임
+  DemoScene {CharacterDemo=1, DefenseCombat=2, ShadowShowcase=3, EffectsTest=4, Circular=5}` 런타임
   멤버(`m_demoScene`,
   `ActiveScene()`로 읽음) — `Simulation::EnterScene(DemoScene)`이 액터 목록을 지우고 새로
   짓는다(크라우드/기브/오드넌스 풀도 씬이 뭐든 매번 정리 — DefenseCombat 이 아닌 씬에 남은
@@ -223,8 +225,8 @@ SnapshotBuilder (game/)
 ## 데모 씬 EffectsTest — VFX 검증 사격장
 
 좀비/무기/웨이브 루프 없이 파티클 이펙트 3종(머즐 플래시, 폭발, 기브 피 스프레이 —
-[particle-system-research.md](particle-system-research.md))만 즉시 미리보기하는 빈 씬. 타이틀
-"START" → "SELECT SCENE" → "EFFECTS TEST".
+[particle-system-research.md](particle-system-research.md))만 즉시 미리보기하는 빈 씬. 설정
+→ "SCENE SELECT" → "EFFECTS TEST".
 
 ```text
 Simulation::SpawnActors (EffectsTest 분기)
@@ -247,7 +249,7 @@ Simulation::PreviewVfxEffect
 
 - **씬을 나가도 안전**: `IsMatchLost()`가 `ActiveScene()==DefenseCombat`도 같이 확인하도록
   고쳐뒀다 — 안 그러면 DefenseCombat 에서 패배(목표 HP 0)한 직후 EffectsTest 로 넘어와도
-  `m_objectiveHealth` 가 여전히 0이라 매 프레임 타이틀로 튕기는 버그가 났다.
+  `m_objectiveHealth` 가 여전히 0이라 매 프레임 씬 선택 메뉴로 튕기는 버그가 났다.
 - **사용 방법**: 마우스로 조준하고 1/2/3 눌러서 원하는 이펙트를 원하는 거리 마커 근처에서
   관찰. 크기·색·수명 튜닝은 `game/vfx/ParticleEffects.h`.
 

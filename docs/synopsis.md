@@ -1,5 +1,9 @@
 # 시놉시스 (Synopsis) — 장르 확정
 
+> **참고 (브랜치 `circular`)**: 이 문서의 "대규모 디펜스"(3D, `DefenseCombat` 씬)는 그대로 유지된다.
+> 2D 뱀서 라이크 "서큘러"는 **별도 씬으로 공존**(A안 확정)하며 기준 문서 [# Circular 기초 설계.md](<# Circular 기초 설계.md>) 아래 [circular-design.md](circular-design.md)가
+> 그 계약이다 — 이 시놉시스를 덮어쓰지 않는다.
+
 ## 장르 · 핵심 루프
 
 **대규모 디펜스 (mass-object defense).** 화면 밖에서 오브젝트(적)가 **대량으로, 파도처럼** 몰려오고,

@@ -15,7 +15,7 @@ Application
  ├─ Graphics (DX11)         SpriteBatch, font atlas, scissor, draw call
  ├─ Game                    월드 업데이트·월드 렌더링
  └─ UIContext               화면(m_screen) + 모달 오버레이(m_overlay) 슬롯 두 개
-     ├─ 화면(Title / InGame HUD / ...)   SetScreen 으로 통째 교체
+     ├─ 화면(씬 선택 Menu / InGame HUD / ...)   SetScreen 으로 통째 교체
      │   └─ Widget
      │       ├─ UIWindow    배경, 테두리, 자식 배치 컨테이너
      │       ├─ Button      hover / pressed / click 이벤트
@@ -37,8 +37,8 @@ src/
   input/InputState.h        [구현됨] 마우스/키보드 이번 프레임 상태 + 에지 질의
   ui/UI.h / UI.cpp          [구현됨] Widget · UIWindow · Button · CheckBox · Slider · TextLine · UIContext 를 한 파일에
   render/RenderSnapshot.h   [구현됨] UI 는 여기의 값 타입 Quad 만 방출한다
-  game/TitleScreen.h/.cpp   [구현됨] Title 화면 위젯 트리 (자유 함수, UIContext 는 game 을 모른다)
-  game/InGameHud.h/.cpp     [구현됨] InGame 화면 위젯 트리
+  game/SceneSelectScreen.h/.cpp [구현됨] 씬 선택 화면 위젯 트리 (예전 Title 은 삭제) (자유 함수, UIContext 는 game 을 모른다)
+  game/InGameHud.*           [삭제됨] InGame 은 위젯 화면 없이 `SnapshotBuilder` 텍스트 HUD + ESC 설정 오버레이
   game/SettingsScreen.h/.cpp [구현됨] Settings 오버레이 위젯 트리 — docs/game-settings.md
   ─────────────────────────────────────────────────────────────
   graphics/UIRenderer.h     [미구현] DrawFilledRect/DrawText/PushClipRect 경계. 현재는 Quad 직접 방출로 대체
@@ -194,7 +194,7 @@ public:
 
 ## 사용 예시
 
-실제 코드(`src/game/TitleScreen.cpp`)에서 그대로 가져온 형태 — 화면 하나를 자유 함수가 만들어 반환하고, `Application`이 `UIContext::SetScreen`으로 꽂는다.
+예전 타이틀 화면 코드(삭제됨, 형태만 참고 — 현재는 `src/game/SceneSelectScreen.cpp`)에서 가져온 형태 — 화면 하나를 자유 함수가 만들어 반환하고, `Application`이 `UIContext::SetScreen`으로 꽂는다.
 
 ```cpp
 std::unique_ptr<ui::Widget> BuildTitleScreen(

@@ -1,6 +1,6 @@
 # AI Lo Engine — 2D DX11 게임 엔진 뼈대
 
-**C++20 / Win32 / DirectX 11** 기반 2D 게임 엔진의 프로젝트 루트. 특정 게임은 아직 없고, 게임을 얹을 수 있는 **구조와 프레임 흐름**만 구현되어 있다.
+**C++20 / Win32 / DirectX 11** 기반 2D 게임 엔진의 프로젝트 루트. 게임을 얹을 수 있는 **구조와 프레임 흐름**이 구현되어 있고, 위에 데모/프로토타입 씬이 올라가 있다. 브랜치 `circular`는 그중 **2D 뱀서 라이크 "서큘러"**(`DemoScene::Circular`) 개발 라인이다. 기준은 [docs/# Circular 기초 설계.md](<docs/# Circular 기초 설계.md>), 엔진 설계는 [docs/circular-design.md](docs/circular-design.md), 이미지 추가 방법은 [docs/circular-art-guide.md](docs/circular-art-guide.md). 3D 디펜스 프로토타입(`DefenseCombat` 등)은 별도 씬으로 그대로 공존한다.
 
 ## 실행
 
@@ -20,6 +20,7 @@ src/
     JobSystem.*            워커 풀 + Job + Fence (예외 안전). ParallelFor
     Time.h                 FrameClock(clamp 된 delta), FixedTimestep(고정 스텝)  → docs/time-design.md
     AssetPaths.*           작업 디렉터리와 무관하게 assets/ 루트 탐색
+    CsvFile.*              범용 CSV 리더 (BOM·CRLF·따옴표·# 주석) — 디자이너 수치 표  → docs/circular-balance.md
     NonCopyable.h          소유 타입 공통 base
   platform/Win32Window.*   OS 창 + WndProc → IWindowEventSink 로 이벤트 전달
   input/InputState.h       이번 프레임 키/마우스 상태 + 에지 질의(Pressed/Released)
@@ -30,6 +31,7 @@ src/
     shader/ShaderLibrary.* assets/shaders/*.hlsl 컴파일·캐시·핫리로드  → docs/shader-pipeline.md
     Dx11Renderer.*         렌더 스레드. device/swapchain/depth + ShaderLibrary 소유. 패스 목록 실행
     r2d/Sprite2D.h, QuadPass2D.*   [2D] 스크린 공간 Quad, 깊이 off, straight-alpha
+    r2d/EffectPass2D.*     [2D] 절차적 글로우(가산, 화면공간) — 서큘러 힛플래시  → docs/circular-design.md §7
     r3d/Lighting.h, FrameConstants.h  [3D] key + ambient 조명, Frame cbuffer  → docs/lighting.md
     r3d/Scene3D.h, MeshPass3D.*    [3D] 깊이 테스트, 원근 카메라, 내장 큐브·평면
     r3d/ModelMeshPass3D.*          [3D] FBX 셀 셰이딩 + 아웃라인 + 크리즈 라인 + TGA  → docs/toon-rendering.md
@@ -49,14 +51,25 @@ src/
     Simulation.*           가변 월드. 고정 timestep. 플레이어 + 장애물 + 20k 파티클 + 3D 데모. 충돌 구동
     SnapshotBuilder.*      Simulation + UIContext → RenderSnapshot
     Application.*           조립·프레임 지휘. IWindowEventSink 구현
+    MobField.*             [서큘러] 몹 스웜 SoA (스폰·추적·범위 데미지·돌진 상태)  → docs/circular-design.md
+    Card.h                 [서큘러] 무기 정의 테이블(CardDef) + 소지 무기(CardInstance) + PlayerStats(장신구 임시)
+    CircularConfig.h       [서큘러] 컴파일 타임 기본값 (몹·진행·돌진 패턴)
+    CircularBalance.*      [서큘러] CSV 밸런스 로더/평가기  → docs/circular-balance.md
+    LevelUpScreen.*        [서큘러] 레벨업 3택 모달 UI ([살] — 기초 설계 밖)
 assets/
   shaders/*.hlsl(i)        cel / model / mesh / outline / crease / quad2d + common3d.hlsli (핫리로드)
   models/                  FBX (+ .tga 는 .gitignore)
+  data/circular/           balance / levels / spawn_curve .csv — 서큘러 밸런스 (F5 리로드)
+  src/<그룹>/*.png         이미지 원본 (아틀라스 그룹별)  → docs/circular-art-guide.md
+  atlas/                   atlas_pack 산출물 (.dds/.atlas) + atlas.groups
+tools/
+  atlas_pack.*, entity_memory_bench, fbx_probe   에셋/벤치 도구
+  balance_sim.cpp, run_balance_sim.bat           서큘러 밸런스 시뮬레이터 (창 없이 레벨/몹 수 타임라인 CSV)
 ```
 
 2D와 3D는 서로 `#include` 하지 않는 별도 모듈이다. `ENGINE_WITH_3D`를 빼면 3D 코드가 빌드에서 완전히 제외되고 2D 전용 exe가 경고 0으로 빌드된다.
 
-자세한 지도·프레임 흐름·확장 지점은 [docs/engine-overview.md](docs/engine-overview.md). 명령 단위 작업 절차는 [docs/command-playbook.md](docs/command-playbook.md). 설계 문서: [time-design](docs/time-design.md) · [collider-design](docs/collider-design.md) · [model-animation-research](docs/model-animation-research.md) · [shader-pipeline](docs/shader-pipeline.md) · [toon-rendering](docs/toon-rendering.md) · [lighting](docs/lighting.md) · [msaa](docs/msaa.md) · [shadows](docs/shadows.md).
+자세한 지도·프레임 흐름·확장 지점은 [docs/engine-overview.md](docs/engine-overview.md). 명령 단위 작업 절차는 [docs/command-playbook.md](docs/command-playbook.md). 설계 문서: [circular 기초 설계](<docs/# Circular 기초 설계.md>) · [circular-design](docs/circular-design.md) · [circular-balance](docs/circular-balance.md) · [circular-art-guide](docs/circular-art-guide.md) · [time-design](docs/time-design.md) · [collider-design](docs/collider-design.md) · [model-animation-research](docs/model-animation-research.md) · [shader-pipeline](docs/shader-pipeline.md) · [toon-rendering](docs/toon-rendering.md) · [lighting](docs/lighting.md) · [msaa](docs/msaa.md) · [shadows](docs/shadows.md).
 
 ## 스레드 계약
 
@@ -79,9 +92,9 @@ Render Thread (Dx11Renderer::RenderLoop): latest-frame mailbox → DX11 draw →
 
 객체지향 설계와 SOLID를 최우선으로 한다. 각 모듈은 변경 이유가 하나(SRP)이고, `Application`은 조립만 한다. 상위 레이어는 구현이 아니라 추상(`IRenderer`, `IWindowEventSink`)에 의존한다(DIP). 위젯·렌더 프리미티브는 기존 타입 수정 없이 확장한다(OCP). 복사 방지(`NonCopyable`), 소유권은 `unique_ptr`, raw 포인터는 비소유 관찰용.
 
-## 현재 데모 (게임 아님)
+## 현재 데모
 
-3D: 회전 큐브 + 궤도 반경이 진동하는 위성 큐브 2개(중심 큐브와 접촉하면 빨강 — `CollisionWorld3D` Box↔Sphere) + 바닥 평면, 궤도 카메라, directional light. 2D 오버레이: 방향키로 움직이는 사각형 + 장애물 박스 3개(겹치면 주황 — `CollisionWorld2D` AABB), 반투명 UI 패널 + `START` 버튼 + 상태 텍스트. 배경: 매 고정 스텝 `ParallelFor`로 도는 20,000개 파티클(앞 2,048개만 그림). 충돌은 탐지만 하고 위치 보정은 없다. 실제 게임 로직은 아직 없다.
+앱은 곧장 **서큘러(2D 뱀서 라이크)** 씬으로 부팅한다 — 플레이어(파란 사각)가 WASD 로 움직이고 몹이 몰려오며 무기가 자동으로 발동한다([docs/circular-design.md](docs/circular-design.md), 아트는 색 사각형 자리표시자). 다른 씬(3D 디펜스 `DefenseCombat`, `CharacterDemo`, `ShadowShowcase`, `EffectsTest`)은 ESC → 설정 → SCENE SELECT 로 들어간다([docs/demo-scene.md](docs/demo-scene.md)). 충돌은 탐지만 하고 위치 보정은 없다.
 
 ## UI 설계
 

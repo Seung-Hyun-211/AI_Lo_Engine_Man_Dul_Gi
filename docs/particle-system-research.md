@@ -732,7 +732,7 @@ jobs.ParallelFor(0, n, c, [&](b,e){ for(...) pool.Release(h); });   // 금지 �
   행이든 열이든 축"이라는 직관은 틀렸다(정규직교는 행렬이 회전만 한다는 뜻이지, 축이 행에
   있다는 뜻이 아니다).
 - **전용 검증 씬**: 좀비/무기/웨이브 없이 세 이펙트만 즉시 미리보기하는
-  `Simulation::DemoScene::EffectsTest`(타이틀 "SELECT SCENE"의 "EFFECTS TEST") 추가 —
+  `Simulation::DemoScene::EffectsTest`(설정 → "SCENE SELECT"의 "EFFECTS TEST") 추가 —
   5/10/20/40m 거리 마커가 있는 빈 사격장, 1인칭, 키 1/2/3이 각각 머즐 플래시/폭발/기브 피
   스프레이를 `Simulation::PreviewVfxEffect`로 현재 조준 방향에 스폰(`docs/demo-scene.md`
   "EffectsTest"). 폭발/기브는 `kEffectsPreviewDistance`(8m) 앞에, 머즐은 눈 바로 앞에.

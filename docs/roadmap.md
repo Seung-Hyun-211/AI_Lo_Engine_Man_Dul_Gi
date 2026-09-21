@@ -12,13 +12,13 @@
 
 | 영역 | 됨 | 부분/설계 | 없음 |
 |---|---|---|---|
-| 렌더 | MSAA 씬타깃, 셀+아웃라인+크리즈+프레넬(림), 방향광 1개 + **2캐스케이드 섀도우맵**(근접 고정+원거리 씬별), G-버퍼(view-space 노멀)+SSAO(반구커널+블러)+거리 안개(포스트프로세스 합성), MeshPass3D(큐브/평면 + **인스턴스드 드로우** + 프러스텀·거리 컬), QuadPass2D, 디버그 드로우 패스 | SpritePass2D + 아틀라스(무압축), ModelMeshPass3D(정적+CPU스키닝) | 포인트/스팟광(`light-types-design.md`, 설계만), 카메라 프러스텀 기반 진짜 CSM(지금은 플레이어 중심 동심 박스 2개), 투명 정렬, 인스턴스 LOD/빌보드, sRGB 파이프라인, 메시 LOD |
+| 렌더 | MSAA 씬타깃, 셀+아웃라인+크리즈+프레넬(림), 방향광 1개 + **2캐스케이드 섀도우맵**(근접 고정+원거리 씬별), G-버퍼(view-space 노멀)+SSAO(반구커널+블러)+거리 안개(포스트프로세스 합성), MeshPass3D(큐브/평면 + **인스턴스드 드로우** + 프러스텀·거리 컬), QuadPass2D, **EffectPass2D(서큘러 글로우)**, 디버그 드로우 패스 | SpritePass2D + 아틀라스(무압축), ModelMeshPass3D(정적+CPU스키닝) | 포인트/스팟광(`light-types-design.md`, 설계만), 카메라 프러스텀 기반 진짜 CSM(지금은 플레이어 중심 동심 박스 2개), 투명 정렬, 인스턴스 LOD/빌보드, sRGB 파이프라인, 메시 LOD |
 | 애니메이션 | CPU LBS 스키닝, 클립 리타깃, Locomotion→클립 스냅, 재생 모드(Once/PingPong), 크로스페이드(로컬 TRS lerp), 파라메트릭 점프 | 2D 프레임 애니(설계만) | **루트 모션, GPU 스키닝, IK, 블렌드 트리** |
 | 물리/충돌 | Box/Sphere 탐지, layer/mask, Contacts, 3D 균일 그리드 브로드페이즈, 레이캐스트 2D·3D(Closest/Any/All) + 데모 씬 2 `Simulation` 연동 | — | **레이캐스트 그리드 가속(D3b), 2D 브로드페이즈, 스윕/CCD, 캡슐, 트리거 enter/exit 이벤트, 재사용 캐릭터 컨트롤러** |
-| 에셋 | FBX+스키닝, 이미지 디코드 seam, atlas_pack v1(무압축) | — | BC7 압축, AssetRegistry, 비동기 로더, 핫리로드(아틀라스/모델), 글리프 아틀라스 |
-| 게임 프레임워크 | 씬 상태(Title/InGame/Settings), 고정 스텝 + time scale, EntityId 뼈대, `core::ObjectPool<T>`, **오디오 스트리밍(전용 스레드) + voice 풀링(XAudio2)** | ScrollList v1 | **오디오 3D 위치음(X3DAudio)·OGG, 세이브, 이벤트 버스, 프리팹/직렬화, 게임 루프(장르 미정)** |
+| 에셋 | FBX+스키닝, 이미지 디코드 seam, atlas_pack v1(무압축), **CSV 데이터 표(`core::LoadCsv` + `assets/data/`)** | — | BC7 압축, AssetRegistry, 비동기 로더, 핫리로드(아틀라스/모델), 글리프 아틀라스 |
+| 게임 프레임워크 | 씬 상태(Menu/InGame/Settings — 타이틀 화면 없음, 부팅 즉시 Circular), 고정 스텝 + time scale, EntityId 뼈대, `core::ObjectPool<T>`, **오디오 스트리밍(전용 스레드) + voice 풀링(XAudio2)** | ScrollList v1 | **오디오 3D 위치음(X3DAudio)·OGG, 세이브, 이벤트 버스, 프리팹/직렬화, 게임 루프(장르 미정)** |
 | 입력 | 키보드/마우스/휠 | — | 게임패드(XInput), 리바인딩, 액션맵 레이어 |
-| 툴/디버그 | entity 메모리 벤치, atlas_pack | — | 프레임타임 HUD/프로파일러(FPS 표시만 됨), 인게임 콘솔, 엔티티 인스펙터, 리플레이 |
+| 툴/디버그 | entity 메모리 벤치, atlas_pack, **서큘러 밸런스 시뮬레이터(`tools/balance_sim`)** | — | 프레임타임 HUD/프로파일러(FPS 표시만 됨), 인게임 콘솔, 엔티티 인스펙터, 리플레이 |
 
 ---
 
@@ -179,6 +179,29 @@ if (auto hit = world.RaycastClosest(down)) { actor.pos.y = hit->point.y; actor.g
 | ~~D6~~ ✅ | 오디오 (믹서 + 스트리밍 + voice 풀링) | 타격·스폰·경보음 + 설정 슬라이더 살리기 | `audio-design.md` |
 | — | 애니 재생 모드/크로스페이드(§2.1) | 플레이어 유닛/보스엔 필요하나 **적 다수엔 저비용 표현이 맞음** → 시점·적 표현 확정 후로 미룸 | P0 → 낮춤 |
 
+### 서큘러 트랙 (2D 뱀서 라이크, 브랜치 `circular` — 디펜스 트랙과 별도 씬으로 공존)
+
+**기준은 [# Circular 기초 설계.md](<# Circular 기초 설계.md>)** (헌법). 그 밑의 엔진 설계·격차표·단계 정의는 [circular-design.md](circular-design.md) §9·§10,
+데이터 표는 [circular-balance.md](circular-balance.md), 이미지·애니메이션은 [circular-art-guide.md](circular-art-guide.md).
+삭제된 옛 트랙: "덱빌딩 × 오토배틀"(덱 합성, 미니언 그리드) — 기초 설계에 없다.
+
+현재 ✅: 씬·이동(걷기)·카메라·`MobField`(SoA 4096, 초당 100마리 스폰)·무기 자동 발동 1차(`Card*` = 소지 무기, PULSE/BOLT)·
+XP/레벨업 3택 모달([살])·`EffectPass2D`·**CSV 밸런싱 환경**·🟡 임시(붉은 구역 예고→돌진, 텍스트 HUD).
+
+| 단계 | 내용 (기초 설계 항목) | 상태 |
+|---|---|---|
+| ~~M0~~ | 뱀서 골격: 몹 스웜·자동 공격·XP·CSV 밸런싱 환경 (B-장르, B-규칙 일부) | ✅ |
+| **M1** | 달리기(Shift)·대쉬(Space, **무적**, 달리기 ≪ 대쉬·연타 페널티·스킬로 조절)·**스태미너**, **능력치 체계**(기초 4스텟 체력·지력·오염·민첩 + 행운·공격 크기·추가 투사체·공격속도 등 — `stats.csv`), 캐릭터 4종(주력 스텟) — B-규칙, B-캐릭터, [확정] | ❌ **다음** |
+| M2 | **HUD.png 배치**(앵커 + 위젯 6종 + `HudState`), 마우스 고정/표시 자동 전환, 호버 아웃라인 — B-UI | ❌ |
+| M3 | 적 종류: 근접·탱커·원거리·마법 (`mobs.csv`, `MobBehavior`) — B-적 | ❌ |
+| M4 | 스폰 패턴 3종(일방통행·사각 포위·좌우 줄) + 시간표 CSV, 텔레그래프 일반화, 임시 돌진 삭제 — B-스폰 | ❌ (**패턴 상세는 사용자가 추가 예정**) |
+| M5 | 장신구 + 무기/장신구 슬롯 분리(6/6, 최대 Lv5) + **오버플로우**(최대 레벨 시 능력치 소량), `weapons.csv`, 캐릭터별 시작 무기(궁극기 내용 [미정], Q 게이지만) — B-무기장신구, [확정] | ❌ |
+| M6 | 스테이지 20개·바이옴 4·**무한 필드 90초 버티기 → 보스(바이옴당 2~3체)**·`StageFlow`(마계숲 라운드 선택: **휴식·상점·이벤트** / 초원 직선 / 왕국 성 방·보스방), 왕의 기사 — B-스테이지, [확정] | ❌ (인간마을·보스 이름·노드 세부는 [미정]) |
+| M7 | 월드 스프라이트 경로 + 스프라이트 애니메이션 + 아틀라스 그룹 — [circular-art-guide.md](circular-art-guide.md) | ❌ (M1~M6 과 병행 가능) |
+| M8 | 메타 재화·세이브·다회차 강화 — B-UI 재화 2종 | ❌ (세이브 인프라 신규) |
+
+사용자 확정 사항(레벨업 유지, 슬롯 6/6·Lv5·오버플로우, 대쉬 무적·스태미너 규칙, 무한 필드 90초, 노드 3종, 능력치 체계 등)은 [circular-design.md](circular-design.md) §12.1, 남은 질문은 §12.3.
+
 ---
 
 ## 4. 추천 (엔진이 지금 가장 아쉬운 것)
@@ -191,7 +214,7 @@ if (auto hit = world.RaycastClosest(down)) { actor.pos.y = hit->point.y; actor.g
 
 착수 순서 제안: **1·2·3 완료 → (4 결정) → 5**.
 
-**현재 위치 (2026-09 기준)**: D1 ✅ · D2 ✅ · D3 ✅(3D `Step()` 그리드) · D4 ✅(인스턴싱 + 컬 + LOD 2단계 + FBX 정적 크라우드 메시, 설정은 `game/CrowdConfig.h`). **핵심 인프라 4개 완료.** 씬 선택은 이제 런타임(`Simulation::DemoScene`, 타이틀 "START"→"SELECT SCENE" 메뉴, 리빌드 불필요 — `docs/demo-scene.md`) — 4개 중 `DefenseCombat`(디폴트, `m_demoScene` 초기값)이 D5 의 실제 플레이 씬: 언덕 위 1인칭 플레이어 + `kActiveCrowd`(현재 500 좀비 — 실기기 체감 끊김으로 16384에서 낮춤, `docs/demo-scene.md` "풀 churn 버그") 조망. 나머지 3개(`CharacterDemo`/`ShadowShowcase`/`EffectsTest`)는 그래픽·VFX 확인용. 남은 갈래:
+**현재 위치 (2026-09 기준)**: D1 ✅ · D2 ✅ · D3 ✅(3D `Step()` 그리드) · D4 ✅(인스턴싱 + 컬 + LOD 2단계 + FBX 정적 크라우드 메시, 설정은 `game/CrowdConfig.h`). **핵심 인프라 4개 완료.** 씬 선택은 이제 런타임(`Simulation::DemoScene`, 앱은 곧장 CIRCULAR 로 부팅(타이틀 화면 삭제), 다른 씬은 설정 → "SCENE SELECT" 메뉴, 리빌드 불필요 — `docs/demo-scene.md`) — 3D 씬 중 `DefenseCombat`(3D 빌드에서 `Simulation::m_demoScene` 초기값이지만 **앱은 곧장 Circular 로 부팅**하고 이 씬은 설정 → SCENE SELECT 로 진입)이 D5 의 실제 플레이 씬: 언덕 위 1인칭 플레이어 + `kActiveCrowd`(현재 500 좀비 — 실기기 체감 끊김으로 16384에서 낮춤, `docs/demo-scene.md` "풀 churn 버그") 조망. 나머지 3개(`CharacterDemo`/`ShadowShowcase`/`EffectsTest`)는 그래픽·VFX 확인용. 남은 갈래:
 - **D5 — 웨이브/스폰 + HP/데미지 + 목표 지점·패배 판정 + 무기 5종**: 게임 루프 본체. 여기부터
   "게임 사이클". 설계 완료(`defense-combat-design.md`) → 구현 순서는 그 문서 §10.
 - **D4 잔여 — VAT 확장(법선·셰도우 실루엣·다중 클립·fp16) / 빌보드·중간 LOD(§5.3)**. (디퓨즈 §9.6-A·1클립 VAT §9.6-B 는 ✅)

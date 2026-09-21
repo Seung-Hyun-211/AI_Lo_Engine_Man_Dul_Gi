@@ -5,6 +5,7 @@
 ```
 assets/
   models/    FBX 모델 (테스트/데모)
+  data/      디자이너가 편집하는 CSV 데이터 (data/circular = 서큘러 밸런스, docs/circular-balance.md)
 ```
 
 ## 테스트 FBX 넣는 곳

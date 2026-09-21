@@ -10,14 +10,30 @@ C++20 / Win32 / DirectX 11 기반 2D 게임 엔진 뼈대. 이 파일은 세션�
 - 응답은: ① 바뀐 것 1~3줄 ② 판단 필요 시 옵션 A/B(권장안 먼저), 아니면 결정하고 한 줄로 밝힘 ③ 빌드 결과 `경고 N / 오류 N` ④ 커밋은 명시 요청 시에만.
 - "사용법/확장법" 지식은 채팅이 아니라 `CLAUDE.md` · `docs/*` · memory에 남긴다.
 - **설계(구조·모듈·시스템 문서화)를 하면 반드시 그 문서에 "사용 방법(How to use)" 항목을 남긴다.** 붙이는 법·확장하는 법·하지 말 것을 예시 코드와 함께. 설계만 하고 사용법을 안 적는 것 금지. 기존 예: `docs/time-design.md`, `docs/collider-design.md`.
-- CLI 빌드·스모크테스트 절차는 memory `build-and-run` 참조 (이 환경은 GPU 없어 WARP 폴백이 정상).
+- 문서를 고친 뒤에는 `tools\check_docs.ps1` 로 링크·§ 참조·삭제된 이름 잔존을 점검한다(아래 "빌드 / 실행").
+
+## 지금 무슨 브랜치인가 (세션 시작 / 컨텍스트 압축 뒤 여기부터)
+
+- 브랜치 **`circular`** = 2D 뱀서 라이크 **"서큘러"** 개발. 앱은 **곧장 Circular 씬으로 부팅**한다(타이틀 화면 없음). 3D 디펜스 등 다른 씬은 ESC → 설정 → SCENE SELECT.
+- **기준(헌법)은 `docs/# Circular 기초 설계.md`** — 수정·위반 금지(사용자가 씀). 그 밑에 사용자 **[확정]**, 그 밑에 설계서의 **[살]**(제안). 충돌하면 먼저 사용자에게 묻는다.
+- **가장 먼저 `docs/circular-design.md` 의 "현재 위치" 블록**을 읽는다(구현 상태·다음 할 일·결정 대기). 다음 할 일 = **M1**(달리기/대쉬/스태미너/능력치/캐릭터). 마일스톤을 끝내면 그 블록·격차표(§9)·`docs/roadmap.md` 서큘러 트랙을 함께 갱신한다.
 
 ## 빌드 / 실행
 
 - Visual Studio 2022로 `CppWindowGame.vcxproj`를 연다. `Debug | x64` 선택 후 `F5`.
-- 툴셋 v143, `LanguageStandard=stdcpp20`, `WarningLevel=Level4`.
-- 링크: `d3d11.lib;dxgi.lib;d3dcompiler.lib`. 인클루드 루트는 `src`.
-- 별도 테스트 프로젝트·CI 없음.
+- 툴셋 v143, `LanguageStandard=stdcpp20`, `WarningLevel=Level4`. 링크: `d3d11.lib;dxgi.lib;d3dcompiler.lib`. 인클루드 루트는 `src`.
+- **CLI 빌드**(저장소 루트, PowerShell): `& "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" CppWindowGame.vcxproj /p:Configuration=Debug /p:Platform=x64 /m /nologo /v:m /clp:"Summary;WarningsOnly;ErrorsOnly"` → 출력의 `경고 N개 / 오류 N개` 를 그대로 보고한다. 증분 빌드는 몇 초.
+- **스모크 테스트**: `x64\Debug\CppWindowGame.exe` 를 작업 디렉터리=저장소 루트로 실행 → 수 초 생존 확인 → `CloseMainWindow`. 종료 시 저장소 루트에 **`settings.cfg` 가 생긴다**(추적 안 되는 실행 산출물 — 지운다). 이 환경은 GPU 없이 WARP 폴백이어도 정상.
+- 도구: `tools\run_balance_sim.bat`(서큘러 밸런스 시뮬레이터, `docs/circular-balance.md`), `tools\build_atlas_pack.bat` → `build\tools\atlas_pack.exe`(이미지 패킹, `docs/circular-art-guide.md`), `tools\check_docs.ps1`(문서 점검). 산출물은 `build/`(gitignore).
+- 별도 테스트 프로젝트·CI 없음. 로직 검증이 필요하면 2D 전용 하네스를 스크래치에서 `cl /DENGINE_WITH_2D …` 로 컴파일해 `Simulation` 을 창 없이 돌린다(`tools/balance_sim.cpp` 가 예시).
+
+### 환경 함정 (실제로 겪은 것)
+
+- **줄바꿈**: `.vcxproj` 와 일부 소스는 CRLF 다. **Git Bash `sed -i` 는 CRLF 를 LF 로 바꿔 버린다** → 파일 편집은 Edit 도구 또는 PowerShell(`[IO.File]::ReadAllText` → 치환 → CRLF 유지해 `WriteAllText`, UTF-8 BOM 없음)로 한다. 문서(`docs/*.md`)는 UTF-8 BOM 없음.
+- 새 `.cpp/.h` 는 **`CppWindowGame.vcxproj` 에 등록**해야 빌드된다(`<ClCompile>`/`<ClInclude>`). 삭제할 땐 등록도 같이 뺀다.
+- PowerShell 도구에서 `Remove-Item`/`git rm` 이 "보호 경로" 오탐으로 막힐 수 있다 → Bash 의 `git rm`/`rm` 을 쓴다.
+- Python/Node 가 없다 → 일회성 스크립트는 PowerShell 로.
+- 파일을 Edit 하기 전에 그 파일을 Read 해야 한다. 큰 문서는 부분 Read 후에도 Write 가 "수정됨" 으로 막히면 다시 Read.
 
 ## 아키텍처 불변 규칙 (절대 깨지 말 것)
 
@@ -27,25 +43,66 @@ C++20 / Win32 / DirectX 11 기반 2D 게임 엔진 뼈대. 이 파일은 세션�
 4. 렌더러는 최신 스냅샷 1개만 보관한다(1슬롯 메일박스). 오래된 미렌더 프레임은 버린다.
 5. 창 resize 요청은 메인에서 전달하되 `ResizeBuffers`는 렌더 스레드만 호출한다.
 6. `JobSystem::ParallelFor`의 각 잡은 겹치지 않는 연속 `[begin, end)` 범위만 쓴다. 워커 안에서 공유 카운터 증가·`vector` 재할당·엔티티 생성/파괴 금지. `JobFence::Wait()`는 프레임 단계 경계에서만 쓴다.
-7. **2D/3D는 별도 모듈이다.** `math/Math2D.h`↔`Math3D.h`, `render/r2d/`↔`render/r3d/`, `physics/p2d/`↔`physics/p3d/`는 서로 `#include` 하지 않는다. 공유는 각 계층의 core(`math` 공통, `render/RenderPass.h`·`IRenderer.h`, `physics/Collision.h`)로만. 3D 코드는 `ENGINE_WITH_3D` 프리프로세서로 감싸 없으면 빌드에서 완전 제외된다(패스 미등록, 스냅샷에 `scene3d` 없음, `.cpp` 본문 `#if`로 비움). 2D는 baseline(`ENGINE_WITH_2D`, UI가 의존).
+7. **2D/3D는 별도 모듈이다.** `math/Math2D.h`↔`Math3D.h`, `render/r2d/`↔`render/r3d/`, `physics/p2d/`↔`physics/p3d/`는 서로 `#include` 하지 않는다. 공유는 각 계층의 core(`math` 공통, `render/RenderPass.h`·`IRenderer.h`, `physics/Collision.h`)로만. 3D 코드는 `ENGINE_WITH_3D` 프리프로세서로 감싸 없으면 빌드에서 완전 제외된다(패스 미등록, 스냅샷에 `scene3d` 없음, `.cpp` 본문 `#if`로 비움). 2D는 baseline(`ENGINE_WITH_2D`, UI가 의존). **서큘러는 2D baseline 만 쓰고, `Simulation::Step`/`SnapshotBuilder::Build`/`Application::Run` 의 3D 블록은 `ActiveScene() != DemoScene::Circular` 런타임 가드로 분리한다** — 3D 전용 코드를 추가할 때 가드를 빠뜨리지 말 것.
 8. 충돌은 **탐지만**. `CollisionWorld*::Step()`은 콜라이더를 움직이지 않는다. 응답(밀어내기·물리)은 이 모듈 밖. `CollisionWorld`는 메인 스레드(시뮬)만 만진다. 세부는 `docs/collider-design.md`.
 
 9. 서드파티는 `src/vendor/<lib>/`에 소스 vendor + 그 라이브러리 `LICENSE` 동봉, 상업 이용 가능한 permissive/PD 라이선스만. 구현 TU 는 per-file 경고 off(`vcxproj` `TurnOffAllWarnings`). 벤더 타입은 그걸 쓰는 `.cpp` 안에만 — 밖으로는 엔진 타입만.
    - `ufbx` — FBX 로더, MIT/PD, v0.23.0. `ufbx.c` 는 C++ 로 컴파일. 타입은 `src/import/ModelImporter.cpp` 안에만. 세부 `docs/model-animation-research.md`.
    - `stb` — `stb_image.h` 이미지 디코더, MIT/PD(Unlicense), v2.30. 구현은 `src/vendor/stb/stb_image_impl.cpp`(`STB_IMAGE_IMPLEMENTATION` 유일 정의, `STBI_NO_STDIO` + PNG/JPEG/BMP/GIF/TGA 만). 엔진 진입점은 `import::LoadImageFromFile(path)` → `import::ImageData`(RGBA8 top-down straight-alpha). `.tga` 는 자체 `LoadTga`, 그 외는 stb. stb 타입은 `src/import/ImageFile.cpp` 안에만. **이미지 디코드·색공간·dev/ship 경계 규칙은 `docs/image-assets.md` 가 계약** — `stb_*` 를 `ImageFile.cpp` 밖에서 직접 부르지 않는다.
 
-모듈별 상세: `docs/engine-overview.md`(지도), `engine-conventions.md`(축·단위·중력·LOD·텍스처·애니 구조 — 불변값 한 곳), `roadmap.md`(다음에 뭘 — 우선순위 + 애니 재생모드·레이캐스트 미니 설계), `multithreaded_game_engine_architecture.md`(스레드), `ui-architecture.md`, `scrollable-list-and-pool.md`(스크롤 목록 `ui::ScrollList` v1 + 마우스 휠; `core::ObjectPool<T>` 구현 — `src/core/ObjectPool.h`, 슬롯 고정 + `ActiveIndices()` + generation 핸들), `image-assets.md`(이미지 디코드 진입점 `import::LoadImageFromFile` + 색공간/알파 규칙 + dev/ship 경계), `texture-atlas-and-sprite-pass.md`(아틀라스 런타임 + SpriteDraw + scissor 클리핑 — 파이프라인 부분 구현, §7 참조), `atlas-build-pipeline.md`(아틀라스 빌드 — `tools/atlas_pack` v1 구현, 무압축 `.dds`; BC7 압축은 후속), `scene-flow-design.md`(Title/InGame/Settings 씬 상태), `game-settings.md`(설정 카탈로그), `synopsis.md`(게임 시놉시스, 초안), `entity-lifecycle-design.md`(엔티티 식별·생존주기 뼈대), `demo-scene.md`(unity_chan 캐릭터 컨트롤러 + 팔로우 카메라; **씬 선택은 이제 런타임**(`Simulation::DemoScene` 열거형 + `EnterScene(scene)`, 타이틀 "START"→"SELECT SCENE" 메뉴 또는 게임 중 ESC→설정→"EXIT TO TITLE"로 왕복, 리빌드 불필요) — `CharacterDemo`=로컬배속 액터, **`DefenseCombat`=언덕 조망 + `SimAgent` 군중을 인스턴스드로 + 1인칭, 기본 진입 씬(플레이어블 디펜스 씬 — `defense-combat-design.md`)** — 수·모델·크기는 `game/CrowdConfig.h` `kActiveCrowd`(`kCrowdBoxes` 600큐브 ↔ `kCrowdZombies` 500 FBX — 실기기 끊김 신고로 16384에서 낮춤), `ShadowShowcase`=그림자/조명 쇼케이스(`SnapshotBuilder::BuildShadowShowcaseScene` — 계단형 플린스+뒷벽+거리별 필러, 크라우드 없음, 3인칭, `docs/shadows.md` "씬 3"), `EffectsTest`=VFX 단독 미리보기(크라우드/웨이브 없음, 1인칭, 키 1/2/3으로 머즐/폭발/기브 이펙트 온디맨드 스폰, `particle-system-research.md`)), `instanced-rendering.md`(수천 개체 출력 — 인스턴스드 드로우(`MeshInstance`/`InstanceBatch` + `MeshPass3D` 확장) + 프러스텀·거리 컬 + 거리 LOD 2단계 + `core::ObjectPool<SimAgent>` + FBX 크라우드 메시(`MeshId::CrowdModel`) + 디퓨즈 텍스처(§9.6-A) + 1클립 VAT 애니(§9.6-B) + 배치별 셰이더(`InstanceShader`, §9.7) 구현. 크라우드 설정 = `game/CrowdConfig.h` §9.5·§9.7. 빌보드·VAT 확장(법선/셰도우/다중클립)·SoA(`AgentStore`)는 미구현), `horde-design.md`(대규모 좀비 웨이브 — 플로우필드 + VAT, 설계만; 인스턴스 골격은 `instanced-rendering.md`), `defense-combat-design.md`(무한 웨이브 디펜스 — 전투 60초/정비 60초 반복, `GameState::WaveResults`, 무기 5종(총·화염방사기·박격포·지뢰·철조망), HP/데미지/기브/자원경제 — §0(60초 전투/정비 핵심 상태기계 — `MatchPhase`/`StepMatchPhase`/`EndCombatPhase`, 패배 시 `Application::Run()`이 `IsMatchLost()`로 즉시 `EnterTitle()`, 재시작은 `EnterInGame()`→`Simulation::ResetMatch()`)+§0.1(자원 경제 — 킬당 공급 획득, 배치 비용 차감, 상점 UI는 없음)+§1~§7(HP·목표 추적·무한 리스폰·기브·박격포/지뢰·라이플·철조망·화염방사기 도트) 구현 완료(`Simulation::DamageAgent/FireWeapon/SpawnGibs/PlaceOrdnance/PlaceSlowZone/ApplyFlameCone`). 총구·폭발·화염 콘·기브 피 스프레이 VFX 전부 `particle-system-research.md` 구현과 연동(`Simulation::MuzzleSocketPosition()` — 눈 기준 우측·아래 오프셋된 가상 총구 소켓에서 스폰, 시야를 안 가림). 정산 화면(§0.3) 자체는 없지만 웨이브/페이즈/목표HP/자원/킬 수 + 무기 키매핑은 `SnapshotBuilder`가 FPS 카운터와 같은 방식으로 상시 텍스트 HUD로 표시(`m_demoScene == DemoScene::DefenseCombat`만). 패배는 결과 표시 없이 바로 타이틀로 끊김. §5.1(트레이서·머즐 플래시 대비·연사 반동 탄퍼짐)+§5.2(룩레이 지형 폴백 — `RaycastTerrain`, `LookRayResult::hit`(지형 포함)/`hitAgent`(진짜 크라우드 명중) 분리) 구현 완료), `loading-and-streaming.md`(로딩 커튼 + 비동기 에셋 로드 + 프리스트림 — 설계만), `time-design.md`(고정 스텝 + 전역/개체별 time scale·일시정지), `collider-design.md`(탐지 + 3D 균일 그리드 브로드페이즈 + 레이캐스트 2D·3D + 데모 씬 2 `Simulation` 연동), `model-animation-research.md`, `animation-design.md`(2D/3D 애니메이션 통합 설계 + 연구 필요 항목), `audio-design.md`(XAudio2 마스터+music/sfx 서브믹스, PCM 원샷/루핑 — 최소 구현), `shader-pipeline.md`(셰이더 로딩), `toon-rendering.md`(셀·아웃라인·크리즈·프레넬(림 라이트) — 구현 완료), `toon-fresnel-research.md`(프레넬 설계 리서치 기록 — 구현은 `toon-rendering.md`로 이동, `Frame` cbuffer 확장 없이 이미 있는 `view`+`WorldToViewNormal`로 뷰공간 N·V만 계산, 밴드형 채택 이유), `lighting.md`(조명), `light-types-design.md`(포인트(전구)·스팟(손전등) 라이트 설계 — 별도 cbuffer(b4), 감쇠 수식, 셀 밴드는 키 라이트 전담·보조광은 연속 감쇠, 그림자는 처음엔 태양만, 설계만·미구현), `msaa.md`(AA), `shadows.md`(그림자), `particle-system-research.md`(파티클 시스템 — 총구 이펙트(플래시+연기) + 폭발 버섯구름 + 좀비 파편 피 스프레이(§7.3, `defense-combat-design.md` §3 기브와 조합) — **구현 완료**, 빌보드 인스턴싱 + 새 렌더 패스 `ParticlePass3D` + `assets/shaders/particle.hlsl`(텍스처 없이 절차적 원형 글로우). `game/vfx/{Particle,ParticleEffectDef,ParticleEffects,ParticleSystem,VfxHooks}.*`), `post-process-gbuffer-research.md`(포스트프로세싱 인프라 + G-버퍼(노멀/깊이) — 구현 완료. 오프스크린 씬 타깃 + MRT(컬러+view-space 노멀) + 풀스크린 패스 인프라 위에 `render/r2d/PostProcessPass`가 반구 커널 SSAO(블러 포함) + 거리 안개를 계산해 백버퍼로 합성(옛 MSAA 리졸브도 흡수). 값 노출은 `Scene3D::PostProcessSettings` + `SnapshotBuilder::BuildPostProcess`. 남은 건 전부 선택: half-res AO, 스크린스페이스 아웃라인, `crease.hlsl` 노멀 기여), `circular-design.md`(뱀서라이크 × 덱빌딩 × 오토배틀 "서큘러" — `synopsis.md`의 "대규모 디펜스"와 별도 씬으로 공존 확정(A안). `Simulation::DemoScene::Circular`(항상 선택 가능, `ENGINE_WITH_3D` 무관) + `game::MobField`(진짜 SoA 몹 스웜, 병렬 벡터 + `JobSystem::ParallelFor` 스티어링, `game/CircularConfig.h` `kActiveMob`) + 2D 이펙트 파이프라인(`render::EffectInstance`/`EffectPass2D`, `assets/shaders/effect2d.hlsl`, `RenderSnapshot::worldEffects`) 구현 완료. 몹/플레이어는 기존 `QuadPass2D`(`worldQuads`) 재사용, 아트는 흰 사각형 근사. 카드는 자리표시자(반경 펄스 1개)뿐 — 카드/성장/미니언그리드/메타프로그레션(§2~§6, §8)은 여전히 설계만. `Simulation::Step`/`SnapshotBuilder::Build`/`Application::Run` 셋 다 `ActiveScene() != Circular` 런타임 가드로 3D 파이프라인과 완전히 분리(3D 빌드에서도 Circular 진입 시 3D 렌더 안 섞임)).
-
 렌더러 코어는 **멀티샘플 씬 타깃**(`m_sceneColorRtv`/`m_sceneDepthDsv`, 최대 8x)에 그리고 프레임 끝에 백버퍼로 resolve한다. 패스는 백버퍼가 아니라 씬 타깃에 그린다. 세부 `docs/msaa.md`.
 
 3D 조명은 `Scene3D::lighting`(값 타입, `render/r3d/Lighting.h`) → `Frame` cbuffer(b0). C++ `FrameConstantsGpu` 와 `common3d.hlsli` 의 `cbuffer Frame` 레이아웃은 항상 같이 고친다. 패스마다 `FrameConstants` 재정의 금지 — `render/r3d/FrameConstants.h` 공유.
+
+## 문서 지도 (`docs/`) — 여기엔 한 줄씩만, 상세는 각 문서
+
+**서큘러 (이 브랜치의 주제)**
+
+| 문서 | 내용 |
+|---|---|
+| `# Circular 기초 설계.md` + `images/HUD.png` | **헌법.** 장르·규칙·스테이지·캐릭터·UI·적·스폰. 수정 금지 |
+| `circular-design.md` | **먼저 읽기.** "현재 위치" 스냅샷, 태그 [기초]/[확정]/[살]/[미정], 격차표, 개발 순서 M1~M8, 결정 기록(§12), 종류 늘리는 법 |
+| `circular-balance.md` | 몹 수·XP·레벨 **CSV 밸런싱 환경**(`assets/data/circular/`, F5/F6, 시뮬레이터) + 앞으로 늘릴 CSV 표 계획 |
+| `circular-art-guide.md` | **이미지 추가 절차·파일 이름 규칙·이미지 사양·애니메이션 설계** (패킹은 지금 됨, 월드 스프라이트 표시는 M7) |
+
+**엔진 공통**
+
+| 문서 | 내용 |
+|---|---|
+| `engine-overview.md` | 모듈 지도·프레임 흐름·확장 지점 |
+| `engine-conventions.md` | 축·단위·시간·텍스처·LOD·애니 구조 — **불변값 한 곳** (2D: +Y 아래, 입력 축 반전 한 번만) |
+| `roadmap.md` | **"다음에 뭘"의 단일 소스**(우선순위) — 서큘러 트랙 포함 |
+| `command-playbook.md` | 명령 → 처리 절차 표(트리거·판단지점·파일) |
+| `multithreaded_game_engine_architecture.md` | 스레드 계약 |
+| `scene-flow-design.md` | Menu/InGame/Settings 상태(타이틀 없음), 모달 오버레이 패턴, ESC/핫키 |
+| `ui-architecture.md`, `game-settings.md` | 위젯 계층·`UIContext`, 설정 카탈로그(볼륨은 적용, 마우스 감도/반전은 값만 저장) |
+| `scrollable-list-and-pool.md` | `ui::ScrollList`(현재 사용처 없음), `core::ObjectPool<T>` |
+| `time-design.md` | 고정 스텝 + 전역/개체별 time scale, 레벨업 정지는 별개 메커니즘 |
+| `collider-design.md` | 탐지 전용 충돌(2D/3D), 3D 그리드 브로드페이즈, 레이캐스트 |
+| `entity-lifecycle-design.md` | 엔티티 식별·생존주기, 저장 전략 §3A/§3B |
+| `audio-design.md` | XAudio2 마스터+music/sfx, 스트리밍·voice 풀링 |
+| `image-assets.md`, `texture-atlas-and-sprite-pass.md`, `atlas-build-pipeline.md` | 이미지 디코드 계약 / 아틀라스 런타임·`SpriteDraw`·scissor / `tools/atlas_pack` v1 |
+| `animation-design.md` | 2D/3D 애니메이션 통합 설계(2D 프레임 애니메이션 = 설계만) |
+| `shader-pipeline.md` | 셰이더 로딩·핫리로드 |
+| `loading-and-streaming.md` | 로딩 커튼·비동기 에셋 — 설계만(`GameState::Title` 은 현재 `Menu`) |
+
+**3D 그래픽 / 디펜스 (별도 씬 — 서큘러와 무관, `SCENE SELECT` 로 진입)**
+
+| 문서 | 내용 |
+|---|---|
+| `demo-scene.md`, `synopsis.md` | 씬 선택(`DemoScene` 열거형: CharacterDemo·DefenseCombat·ShadowShowcase·EffectsTest·Circular) / 3D 디펜스 시놉시스 |
+| `defense-combat-design.md`, `horde-design.md` | 무한 웨이브 디펜스(전투 60초/정비 60초, 무기 5종) 구현 완료 / 좀비 호드(설계만) |
+| `instanced-rendering.md` | 수천 개체 인스턴스드 렌더(+FBX 크라우드, 1클립 VAT) 구현 |
+| `model-animation-research.md` | FBX/스키닝(CPU 스키닝, GPU 스키닝은 설계만) |
+| `toon-rendering.md`, `toon-fresnel-research.md`, `lighting.md`, `light-types-design.md`, `msaa.md`, `shadows.md` | 셀·아웃라인·프레넬 / 조명 / 포인트·스팟(설계만) / AA / 2캐스케이드 그림자 |
+| `particle-system-research.md`, `post-process-gbuffer-research.md` | 3D 파티클(`ParticlePass3D`) / 포스트프로세스·G-버퍼·SSAO |
 
 ## 설계 원칙 — 최우선 (모든 신규/수정 코드에 적용)
 
 객체지향 설계와 SOLID를 다른 모든 작업보다 우선한다. 아래 "최우선 작업"도 이 원칙을 지키는 방식으로 구현한다.
 
 - **SRP (단일 책임)** — 클래스 하나는 변경 이유가 하나여야 한다. 예전 `main.cpp`의 `Game` god class는 `platform::Win32Window` · `input::InputState` · `game::Simulation` · `game::SnapshotBuilder` · `game::Application`(조립·조율만)으로 분해됨. `main.cpp`는 진입점 한 함수. 새 코드도 이 경계를 지킨다.
-- **OCP (개방-폐쇄)** — 기존 타입 수정 없이 확장 가능해야 한다. 위젯은 `Widget` 상속으로 추가한다. 렌더러가 `snapshot.playerX/Y`처럼 특정 게임 개념을 하드코딩하지 않게 하고, 그릴 대상은 스냅샷의 균일한 primitive 배열(`Quad`/`SpriteDraw`)로만 받는다.
+- **OCP (개방-폐쇄)** — 기존 타입 수정 없이 확장 가능해야 한다. 위젯은 `Widget` 상속으로 추가한다. 렌더러가 `snapshot.playerX/Y`처럼 특정 게임 개념을 하드코딩하지 않게 하고, 그릴 대상은 스냅샷의 균일한 primitive 배열(`Quad`/`SpriteDraw`)로만 받는다. **종류가 늘어나는 것(몹 행동·스폰 패턴·무기 효과·스테이지 흐름)은 열거+레지스트리 또는 인터페이스+테이블 — 종류별 if 사슬 금지.**
 - **LSP (리스코프 치환)** — `Widget` 파생 타입은 기반 계약(로컬 좌표 사용, 이벤트 소비 시 `true` 반환, `parentOrigin` 기준 배치)을 어기지 않는다.
 - **ISP (인터페이스 분리)** — 크고 뚱뚱한 인터페이스를 만들지 않는다. `docs/ui-architecture.md`의 `UIRenderer`(DrawFilledRect/DrawText/PushClipRect만)가 목표 형태다. 위젯에 렌더 백엔드 전체를 노출하지 않는다.
 - **DIP (의존성 역전)** — 상위 모듈은 구현이 아니라 추상에 의존한다. `game::Application`은 `render::IRenderer`(`Start/SetFrameSettings/Submit/Resize/Stop`)에만 의존하고, `main.cpp`만 `Dx11Renderer` 구상 타입을 안다 → DX12 교체 시 `main.cpp` 한 줄. `platform::Win32Window`는 `IWindowEventSink`로 이벤트를 되돌려주고 `Application`이 그것을 구현한다. `Simulation`은 `InputState`를 모르고 `PlayerIntent` 값을 받는다. UI가 `Quad` 방출에만 의존하는 것도 같은 원칙.
@@ -63,7 +120,7 @@ C++20 / Win32 / DirectX 11 기반 2D 게임 엔진 뼈대. 이 파일은 세션�
 
 ### 다음 후보
 
-**단일 소스는 `docs/roadmap.md`** — 여기 별도 목록을 유지하지 않는다(두 곳이 따로 갱신되며 드리프트난 전례가 있었음). "다음에 뭘"은 그 문서의 §1 현재 상태 표 + §3 우선순위 표를 본다.
+**단일 소스는 `docs/roadmap.md`** — 여기 별도 목록을 유지하지 않는다(두 곳이 따로 갱신되며 드리프트난 전례가 있었음). "다음에 뭘"은 그 문서의 §1 현재 상태 표 + §3 우선순위 표를 본다. 서큘러는 `circular-design.md` "현재 위치"와 `roadmap.md` "서큘러 트랙".
 
 ## 알려진 소소한 이슈
 
@@ -72,14 +129,16 @@ C++20 / Win32 / DirectX 11 기반 2D 게임 엔진 뼈대. 이 파일은 세션�
 - ~~`IDXGIFactory::MakeWindowAssociation` 미호출~~ — 완료. `DXGI_MWA_NO_ALT_ENTER`로 Alt+Enter를 앱이 소유.
 - 스왑 효과가 레거시 `DXGI_SWAP_EFFECT_DISCARD`. Win10+는 `FLIP_DISCARD` 권장 — SpriteBatch 단계에서 함께 전환.
 - 메인 스레드가 `ParallelFor(...).Wait()`로 매 프레임 완전 블록. 시뮬/렌더 파이프라이닝·더블 버퍼링 없음.
-- UI 클리핑(`PushClipRect`) 미구현. `TextLine`이 창 밖으로 넘칠 수 있음. `Measure`/`Arrange`/`VerticalStack`은 여전히 미구현(좌표를 손으로 배치). 화면 전환(`UIScreen`)은 이제 구현됨 — `UIContext::SetScreen`/`SetOverlay`, `docs/scene-flow-design.md`.
+- UI 폰트는 5×7 비트맵(A-Z, 0-9, `: - . %` 만) — **한글 불가**. 라벨은 영문·숫자. 글리프 아틀라스(`docs/texture-atlas-and-sprite-pass.md` §1.3)가 선행 조건.
+- UI 클리핑(`PushClipRect`) 미구현. `TextLine`이 창 밖으로 넘칠 수 있음. `Measure`/`Arrange`/`VerticalStack`은 여전히 미구현(좌표를 손으로 배치, 기존 화면은 1280×720 고정 좌표 — HUD 는 앵커/스케일이 필요, `circular-design.md` §7.3). 화면 전환(`UIScreen`)은 구현됨 — `UIContext::SetScreen`/`SetOverlay`, `docs/scene-flow-design.md`.
 - `ui::Slider`에 진짜 입력 캡처가 없다 — 드래그 종료(`PointerUp`)가 형제 위젯에 먼저 소비되면 그 프레임엔 드래그가 안 풀릴 수 있음(수직 스택처럼 위젯이 안 겹치면 발생 안 함). `docs/ui-architecture.md` "각 위젯의 책임" 참고.
-- 설정 항목 중 볼륨(마스터/음악/효과음)은 이제 `AudioEngine` 에 실제로 적용된다(`docs/audio-design.md`). 마우스 감도/반전은 마우스 카메라(`Simulation::UpdateCameraLook`)가 있는데도 아직 안 읽음(자기 `kMouseSensitivity` 상수만 씀) — 값만 저장된다. `docs/game-settings.md` §1.
+- 버튼 콜백 안에서 자기 오버레이/화면을 지우면 호출 중인 위젯이 파괴된다 — 레벨업 모달처럼 **선택만 기록하고 다음 프레임에 적용**한다(`Application::ServiceLevelUp`).
+- 설정 항목 중 볼륨(마스터/음악/효과음)은 `AudioEngine` 에 실제로 적용된다(`docs/audio-design.md`). 마우스 감도/반전은 마우스 카메라(`Simulation::UpdateCameraLook`)가 있는데도 아직 안 읽음(자기 `kMouseSensitivity` 상수만 씀) — 값만 저장된다. `docs/game-settings.md` §1.
 - `InputState`: 한 프레임 안에서 같은 키가 down→up 하면 `KeyPressed`/`KeyReleased` 둘 다 참(의도됨), 단 최종 held 상태만 다음 프레임에 남는다.
 - **캐릭터 애니메이션은 GPU 스키닝이 아니라 CPU 스키닝이다.** `ModelMeshPass3D`가 매 프레임 본 팔레트로 LBS를 CPU에서 계산해 DYNAMIC 정점 버퍼에 `Map/Unmap`. 셰이더(`cel.hlsl`/`outline.hlsl`)엔 스킨 관련 코드가 전혀 없다 — `assets/shaders/`에 bone/skin 관련 HLSL 없음(확인됨). GPU 스킨(새 `SkinnedMeshPass3D` + `StructuredBuffer` 본 팔레트, `docs/model-animation-research.md` §5.2)은 여전히 설계만이고, 인스턴스를 여럿(각자 다른 애니메이션) 세우려면 그게 필요하다. 실제 구현은 §5.2a.
 
 ## 코드 스타일
 
-- 네임스페이스 `engine::core` / `engine::render` / `engine::ui`.
+- 네임스페이스 `engine::core` / `engine::render` / `engine::ui`(게임 코드는 `engine::game`).
 - 멤버 변수 `m_camelCase`, 타입 `PascalCase`, 지역/파라미터 `camelCase`.
 - 주석은 "왜"를 적는다. 주변 코드의 주석 밀도에 맞춘다. README·docs는 한국어+영어 혼용.

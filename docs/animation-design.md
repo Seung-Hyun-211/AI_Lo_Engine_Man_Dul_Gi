@@ -41,6 +41,15 @@ anim/
 
 ## 2. 2D 애니메이션 (스프라이트 프레임) — 신규 설계
 
+### 현재 상태 — 색 변화 애니메이션 테스트 (서큘러)
+
+프레임 애니메이션이 아직 없어서 서큘러 씬은 **색 변화로 "애니 상태 → 화면" 배선만 먼저 검증**한다:
+`SnapshotBuilder::BuildCircularScene`이 몹 상태(`MobState` Seek/Windup/Charge)와 시간·슬롯 인덱스 해시로
+색을 계산하고(Seek = 두 붉은 색 사이 호흡, Windup = 주황/흰 깜빡임, Charge = 주황), 플레이어는 밝기를 미세하게
+진동시킨다. **몹별 애니 상태를 저장하지 않는다**(인덱스 해시 위상). 스프라이트 애니가 들어오면 이 색 계산 자리가
+uv 사각형 선택(`SpriteAnimator`)으로 바뀐다 — 몹은 수천 마리라 개별 객체 대신 `MobField`에 `animTime`/`clip`
+SoA 필드를 추가하는 방식([circular-art-guide.md](circular-art-guide.md) §6 — 서큘러 애니메이션 설계·이름 규칙, 로드맵 M7).
+
 ### 전제 조건
 
 현재 2D 렌더는 단색 `Quad`만 있고(`render/r2d/Sprite2D.h`), 텍스처 `SpriteDraw`(atlas id + uv rect)는 아직 없다(커맨드 플레이북 #3, 로드맵 2/3단계). **이 설계는 그 위에 얹힌다** — `SpriteDraw`가 없는 상태에서 프레임 애니메이션은 그릴 대상이 없다. 순서는 §5 참조.
