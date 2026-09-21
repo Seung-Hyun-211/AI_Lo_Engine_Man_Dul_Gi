@@ -107,6 +107,7 @@
     <ClInclude Include="src\game\CharacterAnimationState.h" />
     <ClInclude Include="src\game\Card.h" />
     <ClInclude Include="src\game\CircularBalance.h" />
+    <ClInclude Include="src\game\Stats.h" />
     <ClInclude Include="src\game\CircularConfig.h" />
     <ClInclude Include="src\game\CrowdConfig.h" />
     <ClInclude Include="src\game\LevelUpScreen.h" />

@@ -16,7 +16,9 @@ namespace engine::game
     // for the clicked option's index - the caller must NOT clear the overlay
     // from inside it (that destroys the very button that is calling); record
     // the pick and resolve it after event handling (Application does this).
+    // `title` lets the character-select modal reuse the same layout.
     [[nodiscard]] std::unique_ptr<ui::Widget> BuildLevelUpScreen(
         const std::vector<std::string>& labels,
-        std::function<void(std::size_t)> onChoose);
+        std::function<void(std::size_t)> onChoose,
+        const std::string& title = "LEVEL UP - PICK ONE");
 }

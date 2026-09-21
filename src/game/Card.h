@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "game/Stats.h"
+
 // Card / stat data for the 2D "Circular" scene (docs/circular-design.md §2/§3).
 // Pure data + tiny evaluators - no simulation state, no 3D dependency. Adding
 // a card = one CardDef row here + (only if it needs a brand-new behaviour) one
@@ -84,17 +86,32 @@ namespace engine::game
         float        cooldownLeft{ 0.0f };
     };
 
-    // Growth that is not a card (docs §3): plain multipliers on the player.
-    enum class PlayerStat : std::uint8_t { MoveSpeed, XpGain };
-
-    struct PlayerStats
+    // Growth that is not a weapon (docs §3): a stat card piles `amount` onto one
+    // stat - `multiplicative` = a fraction of the final value (0.10 = +10%),
+    // otherwise a flat add in the stat's own unit. Simulation::RecomputeStats
+    // turns the picked cards into StatModifiers (game/Stats.h).
+    struct StatCardDef
     {
-        float moveSpeedMul{ 1.0f };
-        float xpGainMul{ 1.0f };
+        const char* label;          // level-up button text (font: A-Z 0-9 : - . %)
+        StatId      stat;
+        bool        multiplicative;
+        float       amount;
     };
 
+    inline constexpr std::array<StatCardDef, 9> kStatCards{ {
+        { "MOVE SPEED",    StatId::MoveSpeed,    true,  0.10f },
+        { "XP GAIN",       StatId::XpGain,       true,  0.15f },
+        { "ATTACK SPEED",  StatId::AttackSpeed,  true,  0.08f },
+        { "ATTACK SIZE",   StatId::AttackSize,   true,  0.10f },
+        { "WEAPON DAMAGE", StatId::WeaponDamage, true,  0.10f },
+        { "VIT",           StatId::Vit,          false, 2.0f  },
+        { "INT",           StatId::Int,          false, 2.0f  },
+        { "COR",           StatId::Cor,          false, 2.0f  },
+        { "AGI",           StatId::Agi,          false, 2.0f  },
+    } };
+
     // One option in the level-up modal. `id` = kCardDefs index for the card
-    // types, PlayerStat for Stat.
+    // types, kStatCards index for Stat.
     struct LevelChoice
     {
         enum class Type : std::uint8_t { NewCard, UpgradeCard, Stat };

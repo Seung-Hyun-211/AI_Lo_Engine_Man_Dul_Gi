@@ -40,6 +40,9 @@ namespace engine::game
         // runs zero fixed steps, so it is latched via Simulation::QueueJump().
     };
 
+    // What the Circular player is doing this step (docs/circular-design.md §2.2).
+    enum class PlayerMotion : std::uint8_t { Idle, Walk, Run, Dash };
+
     // Demo particle: advects at constant velocity, wraps at world edges.
     struct Particle
     {
@@ -79,16 +82,26 @@ namespace engine::game
         float      warnTotal{ 1.0f };
     };
 
-    // A short-lived attack-pulse glow at `pos` (docs/circular-design.md §7
-    // option A) - render-only, ages out the same way TracerLine does further
-    // down. SnapshotBuilder turns each into a render::EffectInstance for
-    // EffectPass2D.
+    // PULSE's range marker: a plain yellow disc at `pos` that is on for `life`
+    // seconds after each cast, so it blinks at the weapon's cooldown. Render-only
+    // (no effect pass - the Circular scene has no effects for now); ages out the
+    // same way TracerLine does further down.
     struct HitFlash
     {
         math::Vec2 pos{};
         float ageLeft{ 0.0f };
-        float life{ 1.0f };   // ageLeft/life -> 1 (just spawned) .. 0 (about to vanish)
-        float radius{ 24.0f };   // glow radius, px (a pulse card's range, or a small spot for a bolt hit)
+        float life{ 1.0f };
+        float radius{ 24.0f };   // px - the pulse's actual range
+    };
+
+    // A thrown BOLT: a red square that flies straight to where its target was,
+    // damages the first mob it touches and is consumed. Gone after `rangeLeft` px.
+    struct Projectile
+    {
+        math::Vec2 pos{};
+        math::Vec2 vel{};
+        float damage{ 0.0f };
+        float rangeLeft{ 0.0f };
     };
 
 #if defined(ENGINE_WITH_3D)
@@ -260,7 +273,10 @@ namespace engine::game
         static constexpr int kObstacleCount = 3;
 
         static constexpr float kHitFlashLife = 0.18f;             // seconds an attack glow stays visible
-        static constexpr float kBoltHitFlashRadius = 22.0f;       // px, the small glow on each bolt target
+        static constexpr float kBoltSpeed = 720.0f;               // px/s of a thrown BOLT
+        static constexpr float kBoltSize = 12.0f;                // px, side of the red square
+        static constexpr float kBoltHitReach = 6.0f;             // px added to a mob's radius for the touch test (one step is speed/60 = 12 px, so keep radius + reach above that)
+        static constexpr std::size_t kMaxProjectiles = 512;
 
 #if defined(ENGINE_WITH_3D)
         // Demo character controller (docs/demo-scene.md). Metres / seconds.
@@ -508,6 +524,7 @@ namespace engine::game
         [[nodiscard]] const MobField& Mobs() const { return m_mobs; }
         [[nodiscard]] int MobKillCount() const { return m_mobKillCount; }
         [[nodiscard]] const std::vector<HitFlash>& HitFlashes() const { return m_hitFlashes; }
+        [[nodiscard]] const std::vector<Projectile>& Projectiles() const { return m_projectiles; }
         [[nodiscard]] const ChargeZone& ChargeZoneState() const { return m_chargeZone; }
 
         // Progression / deck (docs/circular-design.md §2/§3/§10) - Circular only.
@@ -524,7 +541,24 @@ namespace engine::game
         [[nodiscard]] const BalanceLoadReport& BalanceReport() const { return m_balanceReport; }
         [[nodiscard]] float RunTime() const { return m_circularTime; }   // seconds since this run started
         [[nodiscard]] const std::vector<CardInstance>& Deck() const { return m_deck; }
-        [[nodiscard]] const PlayerStats& Stats() const { return m_stats; }
+        [[nodiscard]] const StatBlock& Stats() const { return m_stats; }
+
+        // Movement / stamina (docs/circular-design.md §2.2). The dash is an edge
+        // like the 3D jump: latch it here so a press on a frame that runs zero
+        // fixed steps is not lost. Consumed (granted or refused) by the next step.
+        void QueueDash() { m_dashQueued = true; }
+        [[nodiscard]] PlayerMotion Motion() const { return m_motion; }
+        [[nodiscard]] float Stamina() const { return m_stamina; }
+        [[nodiscard]] float StaminaFraction() const;             // 0..1 of stamina_max
+        [[nodiscard]] bool RunLocked() const { return m_runLocked; }   // ran dry, waiting to recover
+        [[nodiscard]] bool PlayerInvulnerable() const { return m_dashTimeLeft > 0.0f; }   // dash i-frames [확정]
+        [[nodiscard]] int DashChain() const { return m_dashChain; }
+
+        // Characters (docs/circular-design.md §2.3). SelectCharacter starts a
+        // fresh run as that character (index into Balance().characters).
+        [[nodiscard]] const CharacterDef& Character() const;
+        [[nodiscard]] std::size_t CharacterIndex() const { return m_characterIndex; }
+        void SelectCharacter(std::size_t index);
 
         // Level-up modal contract. Simulation freezes (Step early-outs) while
         // LevelUpPending(); Application shows the options, then calls
@@ -580,6 +614,13 @@ namespace engine::game
         // baseline only. Resets mob field/timers/kill count/hit flashes to a
         // fresh run; called by both EnterScene() definitions below.
         void ResetCircularScene();
+        // Circular player movement for one fixed step: run / dash / stamina
+        // (docs §2.2). Replaces the plain walk used by the other scenes.
+        void StepCircularPlayer(float fixedDelta, const PlayerIntent& intent);
+        [[nodiscard]] float DashCostNow() const;
+        // Re-evaluates m_stats from the character's start values + the picked
+        // stat cards. Called on run start, level-up pick and balance reload.
+        void RecomputeStats();
         // Marks the red landing square, then - warnSeconds later - launches the
         // picked mobs at it (kChargePattern). Called from StepCircularScene.
         void StepChargePattern(float fixedDelta, math::Vec2 playerCenter);
@@ -591,6 +632,8 @@ namespace engine::game
         // Ticks every card's cooldown and runs the ones that expired; returns
         // how many mobs the whole deck killed this step (for kills/XP).
         std::uint32_t StepCards(float fixedDelta, math::Vec2 playerCenter);
+        // Flies every thrown BOLT one step and applies damage on touch; returns kills.
+        std::uint32_t StepProjectiles(float fixedDelta);
         // The effect switch (docs §2 "효과 태그 테이블"). Returns kills.
         std::uint32_t ExecuteCard(const CardInstance& card, math::Vec2 playerCenter);
         // Converts kills into XP and, when a threshold is crossed, arms the
@@ -707,8 +750,22 @@ namespace engine::game
         std::uint32_t m_chargePatternCount{ 0 };   // salt for MobField::BeginWindup's subset hash
         int m_mobKillCount{ 0 };
         std::vector<HitFlash> m_hitFlashes;
+        std::vector<Projectile> m_projectiles;
         std::vector<CardInstance> m_deck;          // <= kProgression.maxDeckSlots; slot index is the identity
-        PlayerStats m_stats;
+        StatBlock m_stats;                         // evaluated numbers (RecomputeStats); consumers read by StatId
+        StatModifiers m_cardMods;                  // level-up stat cards picked this run (character start values are added on top)
+        std::size_t m_characterIndex{ 0 };         // into m_balance.characters; survives F5/F6, changed by SelectCharacter
+        PlayerMotion m_motion{ PlayerMotion::Idle };
+        float m_stamina{ 0.0f };
+        float m_staminaRegenDelay{ 0.0f };         // s left before regen may start
+        bool  m_runLocked{ false };                // ran dry: no running until stamina recovers to run_resume_stamina
+        bool  m_dashQueued{ false };
+        float m_dashTimeLeft{ 0.0f };              // > 0 while dashing = invulnerable
+        float m_dashCooldownLeft{ 0.0f };
+        int   m_dashChain{ 0 };                    // dashes inside the current chain window
+        float m_dashChainTimer{ 0.0f };
+        math::Vec2 m_dashDir{ 1.0f, 0.0f };
+        math::Vec2 m_lastMoveDir{ 1.0f, 0.0f };    // screen-space; dash direction when there is no input
         int m_level{ 1 };
         float m_xp{ 0.0f };
         bool m_levelUpPending{ false };

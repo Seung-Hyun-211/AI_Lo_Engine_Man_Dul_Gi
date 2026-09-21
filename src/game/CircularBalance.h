@@ -1,9 +1,13 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include "game/Stats.h"
 
 // Designer-tunable numbers for the Circular scene - mob stats, spawn pacing,
 // XP per level - loaded from CSV files under assets/data/circular/
@@ -21,6 +25,34 @@ namespace engine::game
         float maxAlive{ 0.0f };         // soft cap on live mobs (clamped to MobField capacity)
     };
 
+    // player.csv (key,value) - movement / stamina numbers (docs/circular-design.md §2.2).
+    // Stat multipliers (move_speed, stamina_*, dash_*) from stats.csv apply on top.
+    struct PlayerTuning
+    {
+        float walkSpeed{ 300.0f };          // px/s
+        float runMul{ 1.6f };               // speed x while running
+        float runCostPerSec{ 15.0f };       // stamina/s while running
+        float runResumeStamina{ 10.0f };    // after running dry, run is locked until stamina reaches this
+        float dashSpeedMul{ 3.5f };         // speed x during the dash
+        float dashDuration{ 0.18f };        // s of dash movement = s of invulnerability
+        float dashCost{ 30.0f };            // stamina per dash (before chain penalty / dash_cost_mul)
+        float dashCooldown{ 0.5f };         // s between dash starts (x dash_cooldown_mul)
+        float dashChainWindow{ 2.0f };      // s: another dash inside this window counts as a chain
+        float dashChainPenalty{ 0.5f };     // extra cost fraction per earlier dash in the chain
+        float staminaRegenPerSec{ 30.0f };
+        float staminaRegenDelay{ 0.8f };    // s after the last spend before regen starts
+    };
+
+    // characters.csv - one row = one playable character (docs/circular-design.md §2.3).
+    struct CharacterDef
+    {
+        std::string id;
+        std::string name;                    // ASCII: the HUD font has no Hangul yet
+        StatId      mainStat{ StatId::Vit }; // one of the four base stats
+        std::array<float, kBaseStatCount> start{};   // starting vit / int / cor / agi
+        std::uint8_t startWeapon{ 0 };       // index into kCardDefs
+    };
+
     struct CircularBalance
     {
         // balance.csv (key,value)
@@ -36,6 +68,10 @@ namespace engine::game
 
         // spawn_curve.csv: sorted by time, linearly interpolated, last row held
         std::vector<SpawnPoint> spawnCurve;
+
+        PlayerTuning player;                          // player.csv
+        StatDefTable stats{ kStatDefs };              // stats.csv overlays the defaults in Stats.h
+        std::vector<CharacterDef> characters;         // characters.csv (never empty after Defaults/Load)
 
         struct SpawnRate
         {
@@ -66,7 +102,7 @@ namespace engine::game
     };
 
     // Resets `out` to Defaults() and overlays balance.csv / levels.csv /
-    // spawn_curve.csv from `directory` (resolved with core::ResolveAsset).
+    // spawn_curve.csv / player.csv / stats.csv / characters.csv from `directory` (resolved with core::ResolveAsset).
     // `hardMaxAlive` = MobField capacity; a spawn_curve max_alive above it is
     // clamped with a warning.
     BalanceLoadReport LoadCircularBalance(CircularBalance& out, std::size_t hardMaxAlive,

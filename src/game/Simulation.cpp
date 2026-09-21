@@ -101,6 +101,8 @@ namespace engine::game
         m_particles.resize(kParticleCount);
         SeedParticles();
         LayOutObstacles();
+        RecomputeStats();   // built-in defaults until the Circular scene loads its CSVs
+        m_stamina = m_stats[StatId::StaminaMax];
 #if defined(ENGINE_WITH_3D)
         SpawnActors();
 #endif
@@ -291,19 +293,31 @@ namespace engine::game
         m_chargePatternCount = 0;
         m_mobKillCount = 0;
         m_hitFlashes.clear();
-        // Fresh run: one starting card (PULSE, the old demo attack), base
-        // stats, level 1. The RNG is reseeded so a run replays identically
-        // given identical input - level-up options are the only <random> use.
+        m_projectiles.clear();
+        // Fresh run: the chosen character's start weapon, no stat cards, level 1.
+        // The RNG is reseeded so a run replays identically given identical
+        // input - level-up options are the only <random> use.
+        ReloadBalance();   // every entry picks up CSV edits - no rebuild, no app restart
         m_deck.clear();
-        m_deck.push_back({ 0, 1, 0.0f });
-        m_stats = {};
+        m_deck.push_back({ Character().startWeapon, 1, 0.0f });
+        m_cardMods = {};
+        RecomputeStats();
         m_level = 1;
         m_xp = 0.0f;
         m_levelUpPending = false;
         m_levelChoices.clear();
         m_rng.seed(kProgression.rngSeed);
         m_circularTime = 0.0f;
-        ReloadBalance();   // every entry picks up CSV edits - no rebuild, no app restart
+        m_motion = PlayerMotion::Idle;
+        m_stamina = m_stats[StatId::StaminaMax];
+        m_staminaRegenDelay = 0.0f;
+        m_runLocked = false;
+        m_dashQueued = false;
+        m_dashTimeLeft = 0.0f;
+        m_dashCooldownLeft = 0.0f;
+        m_dashChain = 0;
+        m_dashChainTimer = 0.0f;
+        m_lastMoveDir = { 1.0f, 0.0f };
         // Re-centre the player - a re-entry after a previous run should not
         // resume wherever that run left off.
         m_player = { static_cast<float>(m_worldWidth) * 0.5f - kPlayerSize * 0.5f,
@@ -313,6 +327,119 @@ namespace engine::game
     void Simulation::ReloadBalance()
     {
         m_balanceReport = LoadCircularBalance(m_balance, m_mobs.Capacity());
+        if (m_characterIndex >= m_balance.characters.size()) m_characterIndex = 0;
+        RecomputeStats();   // stats.csv / characters.csv edits apply mid-run (F5)
+    }
+
+    const CharacterDef& Simulation::Character() const
+    {
+        return m_balance.characters[m_characterIndex < m_balance.characters.size() ? m_characterIndex : 0];
+    }
+
+    void Simulation::SelectCharacter(std::size_t index)
+    {
+        m_characterIndex = index < m_balance.characters.size() ? index : 0;
+        ResetCircularScene();
+    }
+
+    void Simulation::RecomputeStats()
+    {
+        StatModifiers mods = m_cardMods;
+        const CharacterDef& character = Character();
+        for (std::size_t i = 0; i < kBaseStatCount; ++i) mods.add[i] += character.start[i];
+        m_stats = ComputeStats(m_balance.stats, mods);
+        if (m_stamina > m_stats[StatId::StaminaMax]) m_stamina = m_stats[StatId::StaminaMax];
+    }
+
+    float Simulation::StaminaFraction() const
+    {
+        const float max = m_stats[StatId::StaminaMax];
+        return max > 0.0f ? math::Clamp(m_stamina / max, 0.0f, 1.0f) : 0.0f;
+    }
+
+    float Simulation::DashCostNow() const
+    {
+        const PlayerTuning& t = m_balance.player;
+        // Each earlier dash still inside the chain window adds chainPenalty (x the
+        // stat that skills use to soften it) to the price - spamming the dash
+        // must cost more per metre than just running (docs §2.2 [확정]).
+        const float chain = 1.0f + t.dashChainPenalty * m_stats[StatId::DashChainPenaltyMul] * static_cast<float>(m_dashChain);
+        return t.dashCost * m_stats[StatId::DashCostMul] * chain;
+    }
+
+    void Simulation::StepCircularPlayer(float dt, const PlayerIntent& intent)
+    {
+        const PlayerTuning& t = m_balance.player;
+
+        // intent.move.y is forward-positive (W = +1, shared with the 3D
+        // actors), but this 2D player lives in screen space where y grows
+        // downward - flip it or W walks down the screen.
+        const math::Vec2 moveIntent = math::Normalized(intent.move);
+        const math::Vec2 direction{ moveIntent.x, -moveIntent.y };
+        const bool moving = direction.x != 0.0f || direction.y != 0.0f;
+        if (moving) m_lastMoveDir = direction;
+
+        m_dashCooldownLeft = std::max(0.0f, m_dashCooldownLeft - dt);
+        m_staminaRegenDelay = std::max(0.0f, m_staminaRegenDelay - dt);
+        if (m_dashChainTimer > 0.0f)
+        {
+            m_dashChainTimer -= dt;
+            if (m_dashChainTimer <= 0.0f) m_dashChain = 0;
+        }
+
+        // Dash request: granted only when idle-of-dash, off cooldown and the
+        // stamina covers the whole price (no partial dashes). Either way the
+        // queued press is spent.
+        if (m_dashQueued)
+        {
+            m_dashQueued = false;
+            const float cost = DashCostNow();
+            if (m_dashTimeLeft <= 0.0f && m_dashCooldownLeft <= 0.0f && m_stamina >= cost)
+            {
+                m_stamina -= cost;
+                m_dashDir = moving ? direction : m_lastMoveDir;
+                m_dashTimeLeft = t.dashDuration;
+                m_dashCooldownLeft = t.dashCooldown * m_stats[StatId::DashCooldownMul];
+                ++m_dashChain;
+                m_dashChainTimer = t.dashChainWindow;
+                m_staminaRegenDelay = t.staminaRegenDelay;
+            }
+        }
+
+        const float walk = t.walkSpeed * m_stats[StatId::MoveSpeed];
+        math::Vec2 velocityDir = direction;
+        float speed = walk;
+        if (m_dashTimeLeft > 0.0f)
+        {
+            m_motion = PlayerMotion::Dash;
+            velocityDir = m_dashDir;
+            speed = walk * t.dashSpeedMul;
+            m_dashTimeLeft -= dt;
+        }
+        else
+        {
+            if (m_runLocked && m_stamina >= t.runResumeStamina) m_runLocked = false;
+            if (intent.run && moving && !m_runLocked && m_stamina > 0.0f)
+            {
+                m_motion = PlayerMotion::Run;
+                speed = walk * t.runMul;
+                m_stamina -= t.runCostPerSec * dt;
+                m_staminaRegenDelay = t.staminaRegenDelay;
+                if (m_stamina <= 0.0f) { m_stamina = 0.0f; m_runLocked = true; }
+            }
+            else
+            {
+                m_motion = moving ? PlayerMotion::Walk : PlayerMotion::Idle;
+            }
+        }
+
+        if (m_motion != PlayerMotion::Run && m_motion != PlayerMotion::Dash && m_staminaRegenDelay <= 0.0f)
+            m_stamina += t.staminaRegenPerSec * m_stats[StatId::StaminaRegen] * dt;
+        m_stamina = std::min(m_stamina, m_stats[StatId::StaminaMax]);
+
+        m_player = m_player + velocityDir * (speed * dt);
+        m_player.x = math::Clamp(m_player.x, 0.0f, std::max(0.0f, static_cast<float>(m_worldWidth) - kPlayerSize));
+        m_player.y = math::Clamp(m_player.y, 0.0f, std::max(0.0f, static_cast<float>(m_worldHeight) - kPlayerSize));
     }
 
     void Simulation::RestartCircularRun()
@@ -356,7 +483,8 @@ namespace engine::game
         StepChargePattern(fixedDelta, playerCenter);
         m_mobs.Step(m_jobs, playerCenter, m_balance.mobSpeed, fixedDelta);
 
-        AwardKills(StepCards(fixedDelta, playerCenter));
+        const std::uint32_t cardKills = StepCards(fixedDelta, playerCenter);
+        AwardKills(cardKills + StepProjectiles(fixedDelta));
 
         // Swap-remove expired hit flashes (same idiom as elsewhere in this file, e.g. tracers).
         for (std::size_t i = 0; i < m_hitFlashes.size(); )
@@ -374,8 +502,29 @@ namespace engine::game
         {
             card.cooldownLeft -= fixedDelta;
             if (card.cooldownLeft > 0.0f) continue;
-            card.cooldownLeft = CardCooldown(kCardDefs[card.defIndex], card.level);
+            // attack_speed is a rate: 1.25 = a 20% shorter cooldown.
+            card.cooldownLeft = CardCooldown(kCardDefs[card.defIndex], card.level) / std::max(m_stats[StatId::AttackSpeed], 0.05f);
             kills += ExecuteCard(card, playerCenter);
+        }
+        return kills;
+    }
+
+    std::uint32_t Simulation::StepProjectiles(float fixedDelta)
+    {
+        std::uint32_t kills = 0;
+        const float reach = m_balance.mobRadius + kBoltHitReach;
+        for (std::size_t i = 0; i < m_projectiles.size(); )
+        {
+            Projectile& bolt = m_projectiles[i];
+            bolt.pos = bolt.pos + bolt.vel * fixedDelta;
+            bolt.rangeLeft -= kBoltSpeed * fixedDelta;
+
+            math::Vec2 hit;
+            std::uint32_t hitCount = 0;
+            kills += m_mobs.DamageNearest(bolt.pos, reach, bolt.damage, 1, &hit, hitCount);
+            const bool spent = hitCount > 0 || bolt.rangeLeft <= 0.0f;
+            if (spent) { m_projectiles[i] = m_projectiles.back(); m_projectiles.pop_back(); }
+            else ++i;
         }
         return kills;
     }
@@ -383,8 +532,10 @@ namespace engine::game
     std::uint32_t Simulation::ExecuteCard(const CardInstance& card, math::Vec2 playerCenter)
     {
         const CardDef& def = kCardDefs[card.defIndex];
-        const float damage = CardDamage(def, card.level);
-        const float range = CardRange(def, card.level);
+        // Weapons read the stat block by id (docs §2.6): damage x weapon_damage,
+        // range x attack_size, bolt targets + extra_projectiles.
+        const float damage = CardDamage(def, card.level) * m_stats[StatId::WeaponDamage];
+        const float range = CardRange(def, card.level) * m_stats[StatId::AttackSize];
 
         switch (def.effect)
         {
@@ -396,13 +547,21 @@ namespace engine::game
         }
         case CardEffect::NearestBolt:
         {
-            math::Vec2 hits[kMaxBoltTargets];
-            std::uint32_t hitCount = 0;
-            const std::uint32_t kills = m_mobs.DamageNearest(
-                playerCenter, range, damage, static_cast<std::uint32_t>(CardTargets(def, card.level)), hits, hitCount);
-            for (std::uint32_t i = 0; i < hitCount; ++i)
-                m_hitFlashes.push_back({ hits[i], kHitFlashLife, kHitFlashLife, kBoltHitFlashRadius });
-            return kills;
+            // Throws one projectile at each of the nearest targets; the damage
+            // lands when a projectile touches a mob (StepProjectiles), not now.
+            math::Vec2 aim[kMaxBoltTargets];
+            std::uint32_t found = 0;
+            const int targets = std::min(CardTargets(def, card.level) + static_cast<int>(m_stats[StatId::ExtraProjectiles]),
+                                         kMaxBoltTargets);
+            m_mobs.FindNearest(playerCenter, range, static_cast<std::uint32_t>(targets), aim, found);
+            for (std::uint32_t i = 0; i < found && m_projectiles.size() < kMaxProjectiles; ++i)
+            {
+                const math::Vec2 toTarget = aim[i] - playerCenter;
+                const math::Vec2 dir = math::Normalized(toTarget);
+                if (dir.x == 0.0f && dir.y == 0.0f) continue;   // target exactly on the player: nothing to aim along
+                m_projectiles.push_back({ playerCenter, dir * kBoltSpeed, damage, range });
+            }
+            return 0;
         }
         }
         return 0;
@@ -417,7 +576,7 @@ namespace engine::game
     {
         if (kills == 0) return;
         m_mobKillCount += static_cast<int>(kills);
-        m_xp += static_cast<float>(kills) * m_balance.mobXp * m_stats.xpGainMul;
+        m_xp += static_cast<float>(kills) * m_balance.mobXp * m_stats[StatId::XpGain];
         CheckLevelUp();
     }
 
@@ -461,8 +620,8 @@ namespace engine::game
         }
 
         std::vector<LevelChoice> pool = std::move(cardOptions);
-        pool.push_back({ LevelChoice::Type::Stat, static_cast<std::uint8_t>(PlayerStat::MoveSpeed) });
-        pool.push_back({ LevelChoice::Type::Stat, static_cast<std::uint8_t>(PlayerStat::XpGain) });
+        for (std::size_t i = 0; i < kStatCards.size(); ++i)
+            pool.push_back({ LevelChoice::Type::Stat, static_cast<std::uint8_t>(i) });
         std::shuffle(pool.begin(), pool.end(), m_rng);
         for (const LevelChoice& choice : pool)
         {
@@ -489,11 +648,14 @@ namespace engine::game
             break;
         }
         case LevelChoice::Type::Stat:
-            if (choice.id == static_cast<std::uint8_t>(PlayerStat::MoveSpeed))
-                std::snprintf(text, sizeof(text), "MOVE SPEED UP %d%%", static_cast<int>(kProgression.moveSpeedStep * 100.0f + 0.5f));
+        {
+            const StatCardDef& stat = kStatCards[choice.id];
+            if (stat.multiplicative)
+                std::snprintf(text, sizeof(text), "%s UP %d%%", stat.label, static_cast<int>(stat.amount * 100.0f + 0.5f));
             else
-                std::snprintf(text, sizeof(text), "XP GAIN UP %d%%", static_cast<int>(kProgression.xpGainStep * 100.0f + 0.5f));
+                std::snprintf(text, sizeof(text), "%s UP %d", stat.label, static_cast<int>(stat.amount + 0.5f));
             break;
+        }
         }
         return text;
     }
@@ -511,9 +673,13 @@ namespace engine::game
             for (CardInstance& card : m_deck) if (card.defIndex == choice.id) ++card.level;
             break;
         case LevelChoice::Type::Stat:
-            if (choice.id == static_cast<std::uint8_t>(PlayerStat::MoveSpeed)) m_stats.moveSpeedMul += kProgression.moveSpeedStep;
-            else m_stats.xpGainMul += kProgression.xpGainStep;
+        {
+            const StatCardDef& stat = kStatCards[choice.id];
+            const std::size_t statIndex = static_cast<std::size_t>(stat.stat);
+            (stat.multiplicative ? m_cardMods.mul : m_cardMods.add)[statIndex] += stat.amount;
+            RecomputeStats();
             break;
+        }
         }
         m_levelUpPending = false;
         m_levelChoices.clear();
@@ -598,18 +764,29 @@ namespace engine::game
 
         // Level-up modal is open (or about to be): the whole Circular world
         // freezes, including the clock, until ChooseLevelUpOption resumes it.
-        if (m_demoScene == DemoScene::Circular && m_levelUpPending) return;
+        if (m_demoScene == DemoScene::Circular && m_levelUpPending)
+        {
+            m_dashQueued = false;   // a press made while the modal opened must not fire after it
+            return;
+        }
 
         m_elapsed += fixedDelta;
 
         // intent.move.y is forward-positive (W = +1, shared with the 3D
         // actors), but this 2D player lives in screen space where y grows
         // downward - flip it or W walks down the screen.
-        const math::Vec2 moveIntent = math::Normalized(intent.move);
-        const math::Vec2 direction{ moveIntent.x, -moveIntent.y };
-        m_player = m_player + direction * (kPlayerSpeed * m_stats.moveSpeedMul * fixedDelta);
-        m_player.x = math::Clamp(m_player.x, 0.0f, std::max(0.0f, static_cast<float>(m_worldWidth) - kPlayerSize));
-        m_player.y = math::Clamp(m_player.y, 0.0f, std::max(0.0f, static_cast<float>(m_worldHeight) - kPlayerSize));
+        if (m_demoScene == DemoScene::Circular)
+        {
+            StepCircularPlayer(fixedDelta, intent);
+        }
+        else
+        {
+            const math::Vec2 moveIntent = math::Normalized(intent.move);
+            const math::Vec2 direction{ moveIntent.x, -moveIntent.y };
+            m_player = m_player + direction * (kPlayerSpeed * fixedDelta);
+            m_player.x = math::Clamp(m_player.x, 0.0f, std::max(0.0f, static_cast<float>(m_worldWidth) - kPlayerSize));
+            m_player.y = math::Clamp(m_player.y, 0.0f, std::max(0.0f, static_cast<float>(m_worldHeight) - kPlayerSize));
+        }
 
         // Benchmark stub for the JobSystem contiguous-range contract: the full
         // 20k particles advect every step even though the snapshot draws a

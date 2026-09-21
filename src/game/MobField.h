@@ -74,6 +74,12 @@ namespace engine::game
         std::uint32_t DamageNearest(math::Vec2 center, float range, float amount, std::uint32_t count,
                                     math::Vec2* hitOut, std::uint32_t& hitCount);
 
+        // Same search as DamageNearest but changes nothing: writes the positions
+        // of the `count` (<= 8) nearest live mobs within `range` (nearest first)
+        // to out[0..found). Used to aim projectiles. Main thread only.
+        void FindNearest(math::Vec2 center, float range, std::uint32_t count,
+                         math::Vec2* out, std::uint32_t& found) const;
+
         // Charge pattern, step 1 (docs/circular-design.md "돌진 패턴"): freezes
         // a deterministic subset of Seek mobs into Windup. Eligible = outside
         // `exclude` and at least `minDistance` from `center`; `fraction` of
@@ -106,6 +112,9 @@ namespace engine::game
         [[nodiscard]] const std::vector<std::uint32_t>& ActiveIndices() const { return m_active; }
 
     private:
+        // Shared scan: indices of the nearest `count` (<= 8) mobs within `range`, nearest first.
+        void CollectNearest(math::Vec2 center, float range, std::uint32_t count,
+                            std::uint32_t* idxOut, std::uint32_t& found) const;
         // O(1) swap-remove out of the active list, same idiom as
         // core::ObjectPool::Release. Index must currently be live; a stale
         // or already-dead index is a no-op (safe to call twice).

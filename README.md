@@ -31,7 +31,7 @@ src/
     shader/ShaderLibrary.* assets/shaders/*.hlsl 컴파일·캐시·핫리로드  → docs/shader-pipeline.md
     Dx11Renderer.*         렌더 스레드. device/swapchain/depth + ShaderLibrary 소유. 패스 목록 실행
     r2d/Sprite2D.h, QuadPass2D.*   [2D] 스크린 공간 Quad, 깊이 off, straight-alpha
-    r2d/EffectPass2D.*     [2D] 절차적 글로우(가산, 화면공간) — 서큘러 힛플래시  → docs/circular-design.md §7
+    r2d/EffectPass2D.*     [2D] 절차적 글로우(가산, 화면공간) — (서큘러 씬에서는 사용 안 함 — 이펙트 전부 제거)  → docs/circular-design.md §7
     r3d/Lighting.h, FrameConstants.h  [3D] key + ambient 조명, Frame cbuffer  → docs/lighting.md
     r3d/Scene3D.h, MeshPass3D.*    [3D] 깊이 테스트, 원근 카메라, 내장 큐브·평면
     r3d/ModelMeshPass3D.*          [3D] FBX 셀 셰이딩 + 아웃라인 + 크리즈 라인 + TGA  → docs/toon-rendering.md
@@ -52,7 +52,8 @@ src/
     SnapshotBuilder.*      Simulation + UIContext → RenderSnapshot
     Application.*           조립·프레임 지휘. IWindowEventSink 구현
     MobField.*             [서큘러] 몹 스웜 SoA (스폰·추적·범위 데미지·돌진 상태)  → docs/circular-design.md
-    Card.h                 [서큘러] 무기 정의 테이블(CardDef) + 소지 무기(CardInstance) + PlayerStats(장신구 임시)
+    Card.h                 [서큘러] 무기 정의 테이블(CardDef) + 소지 무기(CardInstance) + 스탯 카드(kStatCards, 장신구 임시)
+    Stats.h                [서큘러] 능력치 체계 — StatId(기초 4 + 파생), StatBlock, ComputeStats
     CircularConfig.h       [서큘러] 컴파일 타임 기본값 (몹·진행·돌진 패턴)
     CircularBalance.*      [서큘러] CSV 밸런스 로더/평가기  → docs/circular-balance.md
     LevelUpScreen.*        [서큘러] 레벨업 3택 모달 UI ([살] — 기초 설계 밖)

@@ -128,17 +128,16 @@ namespace engine::game
         return static_cast<std::uint32_t>(m_deadScratch.size());
     }
 
-    std::uint32_t MobField::DamageNearest(math::Vec2 center, float range, float amount, std::uint32_t count,
-                                          math::Vec2* hitOut, std::uint32_t& hitCount)
+    void MobField::CollectNearest(math::Vec2 center, float range, std::uint32_t count,
+                                  std::uint32_t* idxOut, std::uint32_t& found) const
     {
         constexpr std::uint32_t kMaxTargets = 8;
         if (count > kMaxTargets) count = kMaxTargets;
-        hitCount = 0;
-        if (count == 0) return 0;
+        found = 0;
+        if (count == 0) return;
 
         struct Candidate { float distSq; std::uint32_t idx; };
         Candidate best[kMaxTargets];
-        std::uint32_t found = 0;
         const float rangeSq = range * range;
 
         for (const std::uint32_t idx : m_active)
@@ -163,16 +162,31 @@ namespace engine::game
             }
         }
 
+        for (std::uint32_t i = 0; i < found; ++i) idxOut[i] = best[i].idx;
+    }
+
+    void MobField::FindNearest(math::Vec2 center, float range, std::uint32_t count,
+                               math::Vec2* out, std::uint32_t& found) const
+    {
+        std::uint32_t idx[8];
+        CollectNearest(center, range, count, idx, found);
+        for (std::uint32_t i = 0; i < found; ++i) out[i] = { m_posX[idx[i]], m_posY[idx[i]] };
+    }
+
+    std::uint32_t MobField::DamageNearest(math::Vec2 center, float range, float amount, std::uint32_t count,
+                                          math::Vec2* hitOut, std::uint32_t& hitCount)
+    {
+        std::uint32_t idx[8];
+        CollectNearest(center, range, count, idx, hitCount);
+
         m_deadScratch.clear();
-        for (std::uint32_t i = 0; i < found; ++i)
+        for (std::uint32_t i = 0; i < hitCount; ++i)
         {
-            const std::uint32_t idx = best[i].idx;
-            hitOut[i] = { m_posX[idx], m_posY[idx] };
-            m_health[idx] -= amount;
-            if (m_health[idx] <= 0.0f) m_deadScratch.push_back(idx);
+            hitOut[i] = { m_posX[idx[i]], m_posY[idx[i]] };
+            m_health[idx[i]] -= amount;
+            if (m_health[idx[i]] <= 0.0f) m_deadScratch.push_back(idx[i]);
         }
-        hitCount = found;
-        for (const std::uint32_t idx : m_deadScratch) Kill(idx);   // after the scan, as in DamageInRadius
+        for (const std::uint32_t dead : m_deadScratch) Kill(dead);   // after the scan, as in DamageInRadius
         return static_cast<std::uint32_t>(m_deadScratch.size());
     }
 

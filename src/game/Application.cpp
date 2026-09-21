@@ -112,6 +112,7 @@ namespace engine::game
                 // (docs/time-design.md). Per-actor local scale is separate.
                 const int steps = m_timestep.Advance(delta * m_globalTimeScale);
                 ServiceLevelUp();
+                ServiceCharacterSelect();
 
                 // The world only advances in-game, and not while Settings (or
                 // any future modal) sits on top of it - both read as "paused".
@@ -200,6 +201,10 @@ namespace engine::game
                     }
                     }   // ActiveScene() != DemoScene::Circular
 #endif
+                    // Circular dash (docs/circular-design.md §2.2): Space is a press
+                    // edge, latched so a zero-step frame does not drop it.
+                    if (m_simulation.ActiveScene() == DemoScene::Circular && m_input.KeyPressed(VK_SPACE))
+                        m_simulation.QueueDash();
                     if (steps > 0)
                     {
                         for (int step = 0; step < steps; ++step)
@@ -323,6 +328,9 @@ namespace engine::game
         m_ui.ClearOverlay();
         m_ui.SetScreen(nullptr);   // no in-game widgets: the HUD is drawn by SnapshotBuilder, Settings opens on ESC
         m_window.SetPointerLocked(true);   // mouse-look / centre-locked cursor
+        m_characterSelectOpen = false;
+        m_pendingCharacter.reset();
+        if (scene == DemoScene::Circular) OpenCharacterSelect();   // pick who to play; the run waits behind the modal
         // Demo hook (docs/audio-design.md §4/§5): exercises the streaming music
         // path end-to-end. blip.wav is a placeholder loop - swap for a real
         // track when one exists, the call site does not change.
@@ -363,6 +371,39 @@ namespace engine::game
         // Also covers "Settings was open when the level-up armed": the modal
         // waits until that overlay closes, then appears.
         if (m_simulation.LevelUpPending() && !m_ui.HasOverlay()) OpenLevelUp();
+    }
+
+    void Application::ServiceCharacterSelect()
+    {
+        if (m_state != GameState::InGame || m_simulation.ActiveScene() != DemoScene::Circular)
+        {
+            m_pendingCharacter.reset();
+            m_characterSelectOpen = false;
+            return;
+        }
+        if (!m_pendingCharacter) return;
+        m_simulation.SelectCharacter(*m_pendingCharacter);   // fresh run as that character
+        m_pendingCharacter.reset();
+        m_characterSelectOpen = false;
+        m_ui.ClearOverlay();
+        m_window.SetPointerLocked(true);
+        LogBalanceReport();
+    }
+
+    void Application::OpenCharacterSelect()
+    {
+        std::vector<std::string> labels;
+        for (const CharacterDef& character : m_simulation.Balance().characters)
+        {
+            char text[96];
+            std::snprintf(text, sizeof(text), "%s - MAIN %s", character.name.c_str(),
+                          kStatDefs[static_cast<std::size_t>(character.mainStat)].label);
+            labels.emplace_back(text);
+        }
+        m_window.SetPointerLocked(false);
+        m_characterSelectOpen = true;
+        m_ui.SetOverlay(BuildLevelUpScreen(labels, [this](std::size_t index) { m_pendingCharacter = index; },
+                                           "SELECT CHARACTER"));
     }
 
     void Application::LogBalanceReport() const
@@ -449,6 +490,15 @@ namespace engine::game
         {
             // Esc must not dismiss the level-up modal - a pick is mandatory.
             if (m_levelUpOverlayOpen) return;
+            if (m_characterSelectOpen)
+            {
+                // Keep the current character/run and go back to playing.
+                m_characterSelectOpen = false;
+                m_pendingCharacter.reset();
+                m_ui.ClearOverlay();
+                m_window.SetPointerLocked(true);
+                return;
+            }
             if (m_ui.HasOverlay()) CloseSettings();
             else if (m_state == GameState::InGame) OpenSettings();
             return;   // consumed by the menu, not gameplay
@@ -458,11 +508,18 @@ namespace engine::game
         // assets/data/circular/*.csv and keeps the run going, F6 re-reads and
         // restarts the run from zero. Not while the level-up modal is up.
         if (down && (virtualKey == VK_F5 || virtualKey == VK_F6) && m_state == GameState::InGame &&
-            m_simulation.ActiveScene() == DemoScene::Circular && !m_levelUpOverlayOpen)
+            m_simulation.ActiveScene() == DemoScene::Circular && !m_levelUpOverlayOpen && !m_characterSelectOpen)
         {
             if (virtualKey == VK_F5) m_simulation.ReloadBalance();
             else m_simulation.RestartCircularRun();
             LogBalanceReport();
+            return;
+        }
+        // F7: pick a different character (starts a fresh run once one is chosen).
+        if (down && virtualKey == VK_F7 && m_state == GameState::InGame &&
+            m_simulation.ActiveScene() == DemoScene::Circular && !m_ui.HasOverlay())
+        {
+            OpenCharacterSelect();
             return;
         }
 

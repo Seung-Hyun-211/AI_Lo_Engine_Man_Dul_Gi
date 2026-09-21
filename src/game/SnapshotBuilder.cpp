@@ -724,24 +724,41 @@ namespace engine::game
 
             // Player: always screen-centred by construction (toScreen(playerCenter) == screenCenter).
             // Gentle brightness pulse - the same colour-cycling animation test as the mobs.
+            // Motion tint (placeholder until sprites): dash = pale + translucent
+            // (the i-frames), run = greener, else the base blue.
             const float playerPulse = 0.85f + 0.15f * std::sin(time * 5.0f);
+            math::Color playerColor{ 0.20f * playerPulse, 0.75f * playerPulse, 1.0f * playerPulse, 1.0f };
+            if (simulation.Motion() == PlayerMotion::Dash) playerColor = { 0.90f, 0.95f, 1.0f, 0.55f };
+            else if (simulation.Motion() == PlayerMotion::Run) playerColor = { 0.30f, 0.95f, 0.70f, 1.0f };
             snapshot.worldQuads.push_back({ screenCenter.x - Simulation::kPlayerSize * 0.5f,
                                             screenCenter.y - Simulation::kPlayerSize * 0.5f,
                                             Simulation::kPlayerSize, Simulation::kPlayerSize,
-                                            0.20f * playerPulse, 0.75f * playerPulse, 1.0f * playerPulse, 1.0f });
+                                            playerColor.r, playerColor.g, playerColor.b, playerColor.a });
 
-            // Attack-pulse hit flashes -> EffectPass2D (docs/circular-design.md §7).
+            // PULSE range: a flat yellow disc, on for a moment after each cast so
+            // it blinks with the weapon's cooldown. No effect pass - quads only
+            // (the disc is stacked horizontal strips; the world has no circle primitive).
+            constexpr float kStripHeight = 4.0f;
             for (const HitFlash& flash : simulation.HitFlashes())
             {
-                const float t = flash.life > 0.0f ? math::Clamp(flash.ageLeft / flash.life, 0.0f, 1.0f) : 0.0f;
-                const math::Vec2 screenPos = toScreen(flash.pos);
-                render::EffectInstance effect{};
-                effect.x = screenPos.x;
-                effect.y = screenPos.y;
-                effect.radius = flash.radius;
-                effect.colorRgba = PackRgba(1.0f, 0.85f, 0.35f, t * 0.55f);   // fades out, does not shrink
-                effect.seed = flash.pos.x * 0.013f + flash.pos.y * 0.017f;   // deterministic per-flash blob variation
-                snapshot.worldEffects.push_back(effect);
+                const math::Vec2 c = toScreen(flash.pos);
+                for (float dy = -flash.radius; dy < flash.radius; dy += kStripHeight)
+                {
+                    const float midY = dy + kStripHeight * 0.5f;
+                    const float halfWidth = std::sqrt(std::max(0.0f, flash.radius * flash.radius - midY * midY));
+                    if (halfWidth <= 0.0f) continue;
+                    snapshot.worldQuads.push_back({ c.x - halfWidth, c.y + dy, halfWidth * 2.0f, kStripHeight,
+                                                    1.0f, 0.90f, 0.10f, 0.35f });
+                }
+            }
+
+            // BOLT: red squares in flight.
+            for (const Projectile& bolt : simulation.Projectiles())
+            {
+                const math::Vec2 p = toScreen(bolt.pos);
+                snapshot.worldQuads.push_back({ p.x - Simulation::kBoltSize * 0.5f, p.y - Simulation::kBoltSize * 0.5f,
+                                                Simulation::kBoltSize, Simulation::kBoltSize,
+                                                1.0f, 0.05f, 0.05f, 1.0f });
             }
         }
 
@@ -1116,22 +1133,57 @@ namespace engine::game
             std::snprintf(tuning, sizeof(tuning), "T %d   RATE %d   CAP %d   XP %d OF %d",
                           static_cast<int>(simulation.RunTime()), static_cast<int>(rate.perSecond + 0.5f), rate.maxAlive,
                           static_cast<int>(simulation.XpCurrent()), static_cast<int>(needed + 0.5f));
+
+            // Stat readout (stand-in for the HUD.png status popup): the base four
+            // and the derived numbers weapons / movement / dash read.
+            const StatBlock& stats = simulation.Stats();
+            char baseStats[96];
+            std::snprintf(baseStats, sizeof(baseStats), "%s   VIT %d   INT %d   COR %d   AGI %d",
+                          simulation.Character().name.c_str(),
+                          static_cast<int>(stats[StatId::Vit] + 0.5f), static_cast<int>(stats[StatId::Int] + 0.5f),
+                          static_cast<int>(stats[StatId::Cor] + 0.5f), static_cast<int>(stats[StatId::Agi] + 0.5f));
+            char derived[128];
+            std::snprintf(derived, sizeof(derived), "SPD %d%%   ATK SPD %d%%   SIZE %d%%   DMG %d%%   PROJ %d   DASH COST %d",
+                          static_cast<int>(stats[StatId::MoveSpeed] * 100.0f + 0.5f),
+                          static_cast<int>(stats[StatId::AttackSpeed] * 100.0f + 0.5f),
+                          static_cast<int>(stats[StatId::AttackSize] * 100.0f + 0.5f),
+                          static_cast<int>(stats[StatId::WeaponDamage] * 100.0f + 0.5f),
+                          static_cast<int>(stats[StatId::ExtraProjectiles]),
+                          static_cast<int>(simulation.Balance().player.dashCost * stats[StatId::DashCostMul] + 0.5f));
+
             char status[96];
             const BalanceLoadReport& report = simulation.BalanceReport();
             if (report.Clean())
-                std::snprintf(status, sizeof(status), "BALANCE OK   F5 RELOAD   F6 RESTART");
+                std::snprintf(status, sizeof(status), "BALANCE OK   F5 RELOAD   F6 RESTART   F7 CHARACTER");
             else
                 std::snprintf(status, sizeof(status), "BALANCE %d ERR %d WARN - SEE OUTPUT   F5 RELOAD",
                               report.errors, report.warnings);
             constexpr float smallScale = 1.5f;
             const float smallGlyph = 6.0f * smallScale;
             const float lineH = 7.0f * smallScale + 6.0f;
-            const float baseY = static_cast<float>(viewportHeight) - 2.0f * lineH - 8.0f;
-            const char* lines[2] = { tuning, status };
-            const ui::Color lineColor[2] = { { 0.85f, 0.95f, 0.85f, 1.0f },
-                                             report.Clean() ? ui::Color{ 0.60f, 0.85f, 0.60f, 1.0f }
-                                                            : ui::Color{ 1.0f, 0.55f, 0.45f, 1.0f } };
-            for (int i = 0; i < 2; ++i)
+            constexpr int kLineCount = 4;
+            const float baseY = static_cast<float>(viewportHeight) - static_cast<float>(kLineCount) * lineH - 8.0f;
+            const char* lines[kLineCount] = { tuning, baseStats, derived, status };
+            const ui::Color lineColor[kLineCount] = { { 0.85f, 0.95f, 0.85f, 1.0f },
+                                                      { 1.0f, 0.90f, 0.55f, 1.0f },
+                                                      { 0.85f, 0.85f, 1.0f, 1.0f },
+                                                      report.Clean() ? ui::Color{ 0.60f, 0.85f, 0.60f, 1.0f }
+                                                                     : ui::Color{ 1.0f, 0.55f, 0.45f, 1.0f } };
+
+            // Stamina bar (HUD.png top-left has one; the full layout is a later
+            // milestone, so this is a plain bar under the XP strip). Orange while
+            // running dry / locked, pale while the dash i-frames are active.
+            constexpr float barX = 16.0f, barY = 20.0f, barW = 240.0f, barH = 14.0f;
+            const float staminaFraction = simulation.StaminaFraction();
+            ui::Color barColor{ 0.35f, 0.90f, 0.40f, 0.95f };
+            if (simulation.PlayerInvulnerable()) barColor = { 0.85f, 0.95f, 1.0f, 0.95f };
+            else if (simulation.RunLocked() || staminaFraction < 0.2f) barColor = { 1.0f, 0.60f, 0.20f, 0.95f };
+            ui::DrawRect(snapshot.uiQuads, { barX - 2.0f, barY - 2.0f, barW + 4.0f, barH + 4.0f }, { 0.0f, 0.0f, 0.0f, 0.55f });
+            ui::DrawRect(snapshot.uiQuads, { barX, barY, barW * staminaFraction, barH }, barColor);
+            char staminaText[32];
+            std::snprintf(staminaText, sizeof(staminaText), "STAMINA %d", static_cast<int>(simulation.Stamina() + 0.5f));
+            ui::DrawText(snapshot.uiQuads, staminaText, { barX + 4.0f, barY + barH + 6.0f }, 1.5f, { 0.85f, 1.0f, 0.85f, 1.0f });
+            for (int i = 0; i < kLineCount; ++i)
             {
                 const float w = static_cast<float>(std::strlen(lines[i])) * smallGlyph;
                 const float ly = baseY + static_cast<float>(i) * lineH;

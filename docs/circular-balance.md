@@ -1,6 +1,6 @@
 # 서큘러 밸런싱 환경 (CSV) — 몹 수 · 경험치 · 레벨
 
-**상태: 구현 완료.** 숫자를 코드가 아니라 CSV 세 개로 뺐고, 게임 안에서 F5로 다시 읽고, 창 없이 결과를
+**상태: 구현 완료.** 숫자를 코드가 아니라 CSV 여섯 개(몹/레벨/스폰 곡선 + **M1: 플레이어 이동·능력치·캐릭터**)로 뺐고, 게임 안에서 F5로 다시 읽고, 창 없이 결과를
 뽑는 시뮬레이터가 있다. 게임 설계(기초 설계 기반: 무기·XP·레벨업·스폰 패턴 등)는 [circular-design.md](circular-design.md), 앞으로 늘릴 표는 이 문서 맨 아래 "확장 계획".
 
 ## 한눈에
@@ -10,6 +10,9 @@ assets/data/circular/
   balance.csv      key,value,note            몹 HP·속도·크기·XP, 스폰 거리, 레벨표 밖 성장률
   levels.csv       level,xp_to_next,note     레벨별 필요 XP (1,2,3… 빈틈 없이)
   spawn_curve.csv  time_sec,spawns_per_sec,max_alive   런 시간별 초당 스폰 수 · 살아있는 몹 상한
+  player.csv       key,value                 걷기/달리기/대쉬/스태미너 수치 (설계 §2.2)
+  stats.csv        stat_id,base_value,min,max,from_vit,from_int,from_cor,from_agi   능력치 정의·기초 4스텟 계수 (설계 §2.6)
+  characters.csv   id,name,main_stat,start_vit..start_agi,start_weapon   플레이어블 캐릭터 (설계 §2.3)
 
 game/CircularBalance.{h,cpp}   CSV → CircularBalance (몹/레벨/스폰 곡선 평가기)
 core/CsvFile.{h,cpp}           범용 CSV 리더 (BOM·CRLF·따옴표·# 주석)
@@ -65,8 +68,9 @@ tools/run_balance_sim.bat      빌드 + 실행 한 방
 1. 게임 실행 → 곧장 Circular (타이틀 없음. 씬에 들어올 때마다 CSV 를 새로 읽는다 — ESC → 설정 → SCENE SELECT → CIRCULAR 로 다시 들어오면 재로드).
 2. 다른 창에서 CSV 편집·저장 → 게임에서 **F5** = 다시 읽기(런 유지: 새 스폰은 새 HP/크기, 속도·XP표·스폰 곡선은
    즉시), **F6** = 다시 읽고 런 처음부터.
-3. 화면 왼쪽 아래 두 줄이 현재 값을 보여준다: `T 42  RATE 100  CAP 4096  XP 12 OF 41`(런 시계, 지금 적용 중인
-   스폰 곡선 값, 현재 레벨 XP) / `BALANCE OK` 또는 `BALANCE n ERR m WARN - SEE OUTPUT`.
+3. 화면 왼쪽 아래 네 줄이 현재 값을 보여준다: ① `T 42  RATE 100  CAP 4096  XP 12 OF 41`(런 시계, 지금 적용 중인
+   스폰 곡선 값, 현재 레벨 XP) ② 캐릭터 이름 + 기초 4스텟 ③ 파생 능력치(이동/공속/크기/피해/투사체/대쉬 소모)
+   ④ `BALANCE OK` 또는 `BALANCE n ERR m WARN - SEE OUTPUT`. 왼쪽 위에는 스태미너 바.
 4. 오류·경고 상세는 Visual Studio **Output 창**(`[balance] ...` 줄)에 나온다. F5 로 디버깅 중이 아니면 안 보이니,
    그땐 B 의 시뮬레이터로 확인.
 
@@ -89,6 +93,36 @@ tools\run_balance_sim.bat --seconds 300 --interval 10
   옵션(없으면 첫 옵션)"을 고른다. 돌진 패턴은 돌아가지만 피해가 없다. 곡선의 **모양**을 잡는 도구지 실제
   난이도 판정 도구가 아니다 — 최종 감각은 A 로 직접 플레이.
 
+### player.csv — key,value (M1)
+
+| key | 기본 | 뜻 |
+|---|---|---|
+| `walk_speed` | 300 | 걷기 px/s (× `move_speed` 스탯) |
+| `run_mul` / `run_cost_per_sec` | 1.6 / 15 | 달리기 배율 / 초당 스태미너 소모 |
+| `run_resume_stamina` | 10 | 바닥나서 잠긴 달리기가 다시 풀리는 스태미너 |
+| `dash_speed_mul` / `dash_duration` | 3.5 / 0.18 | 대쉬 속도 배율 / 지속(=무적) 시간 s |
+| `dash_cost` / `dash_cooldown` | 30 / 0.5 | 대쉬 소모 / 대쉬 시작 간 최소 간격 s |
+| `dash_chain_window` / `dash_chain_penalty` | 2.0 / 0.5 | 이 창(s) 안의 연속 대쉬마다 소모 +50% |
+| `stamina_regen_per_sec` / `stamina_regen_delay` | 30 / 0.8 | 초당 회복 / 마지막 소모 후 회복 시작까지 s |
+
+최대 스태미너는 여기 없고 `stats.csv` 의 `stamina_max`(민첩 계수 포함). **"달리기 ≪ 대쉬, 연타하면 손해" [확정]** 을 깨지 않게 조정할 것 — 기준: 스태미너당 이동 효율이 달리기(12.0) > 대쉬(4.5) > 연속 3번째(2.25) 순서([circular-design.md](circular-design.md) §2.2 표).
+
+### stats.csv — 능력치 정의 (M1)
+
+`stat_id` 만 필수, 나머지 열은 비우면 코드 기본값. `기초 = (base_value + 가산) × (1 + 배율)`,
+`파생 = (base_value + Σ from_x × 기초 스텟 x + 가산) × (1 + 배율)`, 결과는 `min..max` 로 잘림. 가산·배율은 캐릭터
+시작값(`characters.csv`)과 레벨업 스탯 카드에서 온다. `min > max` 행은 오류로 건너뜀, 모르는 `stat_id` 는 경고.
+현재 소비되는 능력치: `attack_speed, weapon_damage, attack_size, extra_projectiles, move_speed, xp_gain, stamina_max,
+stamina_regen, dash_cost_mul, dash_chain_penalty_mul, dash_cooldown_mul`. 나머지(`luck, max_hp, crit_*` …)는 값만 있고 시스템 대기.
+새 능력치 = `Stats.h` 의 `StatId` + `kStatDefs` 한 줄씩 + 이 CSV 한 행.
+
+### characters.csv — 플레이어블 캐릭터 (M1)
+
+`id,name,main_stat,start_vit,start_int,start_cor,start_agi,start_weapon` 전부 필수. `main_stat` = `vit|int|cor|agi`,
+`start_*` ≥ 0(주력에 가장 높게), `start_weapon` = `Card.h` 무기 이름(`PULSE`/`BOLT`, 대소문자 무시), `name` 은 ASCII(HUD
+폰트에 한글 없음). 중복 id/모르는 무기/잘못된 값은 그 행만 오류로 건너뛰고, 유효 행이 하나도 없으면 내장 4종. 게임에서는 **F7**
+로 캐릭터 선택 모달을 열어 확인한다(고르면 새 런). 능력치 결과는 화면 왼쪽 아래 두 번째·세 번째 줄에 나온다.
+
 ### 튜닝 레시피
 
 | 하고 싶은 것 | 어디를 |
@@ -99,10 +133,13 @@ tools\run_balance_sim.bat --seconds 300 --interval 10
 | 화면이 몹으로 터진다 | `spawn_curve.csv` `max_alive` 낮추기 (또는 `spawns_per_sec`) |
 | 몹이 너무 단단하다/무르다 | `balance.csv` `mob_health` (무기 데미지는 `game/Card.h` `kCardDefs`) |
 | 킬 보상 자체를 키우기 | `balance.csv` `mob_xp` |
+| 달리기/대쉬 감각, 스태미너 | `player.csv` (최대치는 `stats.csv` `stamina_max`) |
+| 캐릭터 성격(주력 스텟 강조) | `characters.csv` `start_*`, 스텟 → 효과 계수는 `stats.csv` `from_*` |
+| 무기가 강해지는 정도(공속/피해/크기/투사체) | `stats.csv` 계수, 레벨업 스탯 카드 크기는 `Card.h` `kStatCards` |
 
 ### 새 밸런스 항목 추가하기
 
-- **스칼라 하나**: `CircularBalance` 에 필드 + `Defaults()` 에 기본값 + `LoadCircularBalance` 의 `entries[]` 에 한 줄
+- **스칼라 하나**: `CircularBalance` 에 필드 + `Defaults()` 에 기본값 + `LoadCircularBalance` 해당 파일 블록의 `KvEntry entries[]` 에 한 줄(새 `key,value` 파일이면 `LoadKeyValueFile` 호출 블록 하나)
   (key 이름·최소값). 쓰는 곳은 `m_balance.<필드>`.
 - **표 하나(예: 웨이브별 몹 타입)**: `CircularBalance` 에 `std::vector<Row>` + 새 CSV + 로더에 블록 하나(`levels.csv`
   블록을 복제). `Simulation` 은 `m_balance` 만 읽는다.
@@ -117,6 +154,7 @@ tools\run_balance_sim.bat --seconds 300 --interval 10
 - `max_alive` 를 `MobField` capacity(4096) 이상으로 쓰지 말 것 — 잘리고 경고만 난다. 더 필요하면
   `kActiveMob.capacity` 를 올리고 다시 빌드.
 - 시뮬레이터 결과를 "밸런스 완료"의 근거로 삼지 말 것(위 한계).
+- 시뮬레이터의 대역 플레이어는 이동/대쉬를 하지 않는다 — 이동·스태미너 수치(`player.csv`)는 게임에서 직접 확인.
 
 ## 설계 메모
 
@@ -135,19 +173,16 @@ tools\run_balance_sim.bat --seconds 300 --interval 10
 
 기준 문서 [# Circular 기초 설계.md](<# Circular 기초 설계.md>) 와 [circular-design.md](circular-design.md) 를 위반하지 않는 범위에서,
 **테이블로 설정한다**는 기초 설계 원칙(스폰 패턴의 숫자·속도·모양은 테이블)을 CSV 로 이어 간다. 아래는 **예정(❌)** 이고,
-현재 구현된 것은 위 세 파일(`balance`/`levels`/`spawn_curve`)뿐이다. 태그는 [circular-design.md](circular-design.md) §0 와 같다.
+현재 구현된 것은 위 여섯 파일(`balance`/`levels`/`spawn_curve` + M1 의 `player`/`stats`/`characters`)뿐이다. 태그는 [circular-design.md](circular-design.md) §0 와 같다.
 
 | 파일 (예정) | 한 행 = | 열(제안) [살] | 기초 설계 근거 | 단계 |
 |---|---|---|---|---|
-| `player.csv` | 이동/스태미너 설정 1세트(키-값) | `walk_speed, run_mult, run_drain, dash_mult, dash_sec, dash_cost, dash_cooldown, dash_invuln_sec, dash_chain_window, dash_chain_penalty, stamina_max, stamina_regen, regen_delay` | B-규칙 + **[확정]** 달리기 ≪ 대쉬, 연타 시 손해, 대쉬 무적 | M1 |
-| `characters.csv` | 플레이어블 1명 | `id, name, portrait, main_stat(vit\|int\|cor\|agi), start_vit, start_int, start_cor, start_agi, start_weapon, ultimate_kills, ultimate_id(미정)` | B-캐릭터 + **[확정]** 캐릭터별 주력 스텟 | M1 |
 | `mobs.csv` | 몹 1종 | `id, name, class, biome, health, speed, radius, contact_damage, xp, range, projectile, telegraph_sec, zone_radius` | B-적(근접·탱커·원거리·마법) | M3 |
 | `spawn_patterns.csv` | 스폰 패턴 1개 | `pattern_id, kind(oneway\|enclose\|lines_alt), mob, count, speed, shape(arrow\|rect\|line), width, spacing, direction, interval, telegraph_sec` | B-스폰(숫자·속도·모양은 테이블) | M4 |
 | `stage_timeline.csv` | 시간표 1칸 | `timeline_id, time_sec, pattern_id` | B-스폰 + B-스테이지 | M4 |
 | `weapons.csv` | 무기 1종(현재 `kCardDefs`) | `id, effect, cooldown, damage, range, base_targets, max_level(=5), damage_per_level, range_per_level, cooldown_scale, levels_per_extra_target, overflow_stat, overflow_value` | B-규칙(소지 무기) + **[확정]** 최대 레벨 5, 오버플로우 | M5 |
 | `accessories.csv` | 장신구 1종(능력치 가산/배율 목록) | `id, name, stat, add, mul, max_level(=5)` (여러 능력치면 여러 행) | B-UI(소지 장신구) + **[확정]** 슬롯 6 | M5 |
 | `stages.csv` | 스테이지 1개(20행) | `stage_no, biome, flow, survive_sec(=90), mob_pool, timeline_id, boss_pool` — **`arena` 열 없음: 무한 필드 [확정]** | B-스테이지, B-적(보스) + **[확정]** 90초 버티기 | M6 |
-| `stats.csv` | 능력치 1개 | `stat_id, name_ko, kind(base\|derived), base_value, min, max, from_vit, from_int, from_cor, from_agi, display_order` | **[확정]** 기초 4스텟(체력·지력·오염·민첩) + 행운·공격 크기·추가 투사체·공격속도 등([circular-design.md](circular-design.md) §2.6) | M1 |
 | `bosses.csv` | 보스 1체 | `boss_id, name, biome, health, phases, pattern_ids` — **바이옴당 2~3행 [확정]**, 이름·능력 [미정], 왕국 성에 `왕의 기사` [기초] | B-적(보스) + **[확정]** 컨셉별 2~3개 | M6 |
 | `nodes.csv` | 마계숲 라운드 후보 가중치 | `node_type(battle\|rest\|shop\|event), weight, min_stage, max_stage` — **휴식·상점·이벤트 [확정]** | B-스테이지(마계숲 선택지) | M6 |
 | `rest.csv` / `shop.csv` / `events.csv` | 노드 세부 | 내용 **[미정]** (휴식 효과·상점 진열/가격·이벤트 종류) — 파일만 예약 | 위 노드 | M6 |

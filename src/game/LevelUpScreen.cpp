@@ -6,7 +6,8 @@ namespace engine::game
 {
     std::unique_ptr<ui::Widget> BuildLevelUpScreen(
         const std::vector<std::string>& labels,
-        std::function<void(std::size_t)> onChoose)
+        std::function<void(std::size_t)> onChoose,
+        const std::string& title)
     {
         constexpr float kButtonHeight = 52.0f;
         constexpr float kButtonGap = 12.0f;
@@ -18,10 +19,10 @@ namespace engine::game
         // Same fixed-layout convention as the other screens (1280x720 design space).
         panel->SetBounds({ (1280.0f - kPanelWidth) * 0.5f, (720.0f - panelHeight) * 0.5f, kPanelWidth, panelHeight });
 
-        auto title = std::make_unique<ui::TextLine>("LEVEL UP - PICK ONE");
-        title->SetBounds({ 16.0f, 16.0f, 0.0f, 0.0f });
-        title->pixelScale = 2.0f;
-        panel->AddChild(std::move(title));
+        auto titleLine = std::make_unique<ui::TextLine>(title);
+        titleLine->SetBounds({ 16.0f, 16.0f, 0.0f, 0.0f });
+        titleLine->pixelScale = 2.0f;
+        panel->AddChild(std::move(titleLine));
 
         float y = kHeader;
         for (std::size_t i = 0; i < labels.size(); ++i)

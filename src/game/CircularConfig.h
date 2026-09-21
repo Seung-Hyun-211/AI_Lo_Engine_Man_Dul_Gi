@@ -34,15 +34,13 @@ namespace engine::game
         float         baseXp;           // level 1 -> 2
         float         xpGrowth;         // multiplier per level
         int           maxDeckSlots;     // docs §2: 6~8
-        int           choiceCount;      // options offered per level-up
-        float         moveSpeedStep;    // stat card: added to moveSpeedMul
-        float         xpGainStep;       // stat card: added to xpGainMul
-        std::uint32_t rngSeed;          // level-up option RNG; fixed so runs replay the same given the same inputs
+        int           choiceCount;      // options offered per level-up (stat cards live in Card.h kStatCards)
+        std::uint32_t rngSeed;         // level-up option RNG; fixed so runs replay the same given the same inputs
     };
 
     inline constexpr ProgressionConfig kProgression{
         /*baseXp*/ 30.0f, /*xpGrowth*/ 1.35f, /*maxDeckSlots*/ 6, /*choiceCount*/ 3,
-        /*moveSpeedStep*/ 0.10f, /*xpGainStep*/ 0.15f, /*rngSeed*/ 0x51C0FFEEu };
+        /*rngSeed*/ 0x51C0FFEEu };
 
     // Telegraphed charge pattern (docs/circular-design.md "돌진 패턴"): a red
     // square is marked where the player stands, the chosen mobs freeze and

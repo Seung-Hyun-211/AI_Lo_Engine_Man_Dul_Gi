@@ -91,6 +91,12 @@ namespace engine::game
         // button's onClick would destroy the caller mid-call.
         void ServiceLevelUp();
         void OpenLevelUp();
+        // Character-select modal (docs/circular-design.md §2.3): opens on entering
+        // Circular and on F7; a pick starts a fresh run as that character. Same
+        // deferred-pick pattern as the level-up modal. Esc closes it and keeps
+        // the current run/character.
+        void ServiceCharacterSelect();
+        void OpenCharacterSelect();
         // Writes the last CSV balance load (docs/circular-balance.md) to the
         // debugger Output window: one line per problem, plus a summary.
         void LogBalanceReport() const;
@@ -136,5 +142,7 @@ namespace engine::game
         std::optional<SIZE> m_pendingResize;
         std::optional<std::size_t> m_pendingLevelChoice;   // set by the level-up modal's button, consumed by ServiceLevelUp
         bool m_levelUpOverlayOpen{ false };                // the current overlay IS the level-up modal (Esc must not close it)
+        std::optional<std::size_t> m_pendingCharacter;     // set by the character-select modal's button, consumed by ServiceCharacterSelect
+        bool m_characterSelectOpen{ false };               // the current overlay IS the character-select modal
     };
 }

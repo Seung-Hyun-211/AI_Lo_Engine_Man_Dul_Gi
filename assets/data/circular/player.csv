@@ -1,0 +1,19 @@
+# Circular scene - player movement / stamina (docs/circular-design.md 2.2, docs/circular-balance.md).
+# key,value. Missing or bad rows keep the built-in default. F5 reloads, F6 restarts the run.
+# Stat multipliers from stats.csv (move_speed, stamina_regen, dash_cost_mul, dash_chain_penalty_mul, dash_cooldown_mul) apply on top;
+# the stamina cap is the stamina_max stat.
+# Rule [confirmed]: running << dash in cost, and spamming the dash must be worse than running
+# (px gained per stamina: run 12.0 > dash 4.5 > 3rd chained dash 2.25 with these numbers).
+key,value
+walk_speed,300
+run_mul,1.6
+run_cost_per_sec,15
+run_resume_stamina,10
+dash_speed_mul,3.5
+dash_duration,0.18
+dash_cost,30
+dash_cooldown,0.5
+dash_chain_window,2.0
+dash_chain_penalty,0.5
+stamina_regen_per_sec,30
+stamina_regen_delay,0.8
