@@ -34,6 +34,11 @@
 // Simulation::Step sub-call.
 namespace engine::game
 {
+    // Per-mob behaviour. Seek = chase the player (default); Windup = frozen
+    // and flashing until LaunchCharge; Charge = straight-line dash that ends
+    // back in Seek when its timer runs out.
+    enum class MobState : std::uint8_t { Seek = 0, Windup = 1, Charge = 2 };
+
     class MobField final : private core::NonCopyable
     {
     public:
@@ -61,6 +66,27 @@ namespace engine::game
         // caller can award kills/XP without a second pass.
         std::uint32_t DamageInRadius(math::Vec2 center, float radius, float amount);
 
+        // Applies `amount` damage to the `count` (<= 8) live mobs nearest to
+        // `center` within `range` (a single-target/multi-target card). Writes
+        // each hit mob's position to hitOut[0..hitCount) for the caller's
+        // visuals. Linear scan with a small sorted candidate list, like
+        // DamageInRadius. Main thread only. Returns how many mobs it killed.
+        std::uint32_t DamageNearest(math::Vec2 center, float range, float amount, std::uint32_t count,
+                                    math::Vec2* hitOut, std::uint32_t& hitCount);
+
+        // Charge pattern, step 1 (docs/circular-design.md "돌진 패턴"): freezes
+        // a deterministic subset of Seek mobs into Windup. Eligible = outside
+        // `exclude` and at least `minDistance` from `center`; `fraction` of
+        // those are picked by a slot-index hash salted with `salt` (no RNG -
+        // same deterministic convention as the spawn angle), so the subset
+        // differs pattern to pattern. Main thread only. Returns the count.
+        std::uint32_t BeginWindup(math::Vec2 center, const math::Rect& exclude,
+                                  float minDistance, float fraction, std::uint32_t salt);
+
+        // Step 2: every Windup mob dashes straight at `target` (direction
+        // fixed now, not re-aimed) at `speed` for `duration` seconds.
+        void LaunchCharge(math::Vec2 target, float speed, float duration);
+
         // Empties the field back to "all slots free" (scene reset).
         void Clear();
 
@@ -76,6 +102,7 @@ namespace engine::game
         [[nodiscard]] const std::vector<float>& PosY() const { return m_posY; }
         [[nodiscard]] const std::vector<float>& Radius() const { return m_radius; }
         [[nodiscard]] const std::vector<float>& Health() const { return m_health; }
+        [[nodiscard]] MobState State(std::uint32_t index) const { return static_cast<MobState>(m_state[index]); }
         [[nodiscard]] const std::vector<std::uint32_t>& ActiveIndices() const { return m_active; }
 
     private:
@@ -88,6 +115,8 @@ namespace engine::game
         std::vector<float>         m_velX, m_velY;
         std::vector<float>         m_health;
         std::vector<float>         m_radius;
+        std::vector<std::uint8_t>  m_state;       // MobState per slot
+        std::vector<float>         m_stateTimer;  // seconds left in Charge
         std::vector<std::uint8_t>  m_slotActive;  // per slot 0/1
         std::vector<std::uint32_t> m_activePos;   // slot index -> its position in m_active (valid while active)
         std::vector<std::uint32_t> m_active;      // dense live-slot indices

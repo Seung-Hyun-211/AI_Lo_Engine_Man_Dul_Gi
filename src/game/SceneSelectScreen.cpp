@@ -1,56 +1,19 @@
-#include "game/TitleScreen.h"
+#include "game/SceneSelectScreen.h"
 
 #include <utility>
 
 namespace engine::game
 {
-    std::unique_ptr<ui::Widget> BuildTitleScreen(
-        std::function<void()> onStart,
-        std::function<void()> onOpenItems,
-        std::function<void()> onOpenSettings,
-        std::function<void()> onQuit)
-    {
-        auto panel = std::make_unique<ui::UIWindow>();
-        panel->SetBounds({ 480, 232, 320, 288 });
-
-        auto title = std::make_unique<ui::TextLine>("AI LO ENGINE");
-        title->SetBounds({ 16, 16, 0, 0 });
-        title->pixelScale = 2.0f;
-        panel->AddChild(std::move(title));
-
-        auto start = std::make_unique<ui::Button>("START");
-        start->SetBounds({ 16, 56, 288, 42 });
-        start->onClick = std::move(onStart);
-        panel->AddChild(std::move(start));
-
-        auto items = std::make_unique<ui::Button>("ITEMS");
-        items->SetBounds({ 16, 108, 288, 42 });
-        items->onClick = std::move(onOpenItems);
-        panel->AddChild(std::move(items));
-
-        auto settings = std::make_unique<ui::Button>("SETTINGS");
-        settings->SetBounds({ 16, 160, 288, 42 });
-        settings->onClick = std::move(onOpenSettings);
-        panel->AddChild(std::move(settings));
-
-        auto quit = std::make_unique<ui::Button>("QUIT");
-        quit->SetBounds({ 16, 212, 288, 42 });
-        quit->onClick = std::move(onQuit);
-        panel->AddChild(std::move(quit));
-
-        return panel;
-    }
-
     std::unique_ptr<ui::Widget> BuildSceneSelectScreen(
         std::function<void()> onCircular,
         std::function<void()> onDefenseCombat,
         std::function<void()> onCharacterDemo,
         std::function<void()> onShadowShowcase,
         std::function<void()> onEffectsTest,
-        std::function<void()> onBack)
+        std::function<void()> onSettings,
+        std::function<void()> onQuit)
     {
         auto panel = std::make_unique<ui::UIWindow>();
-        panel->SetBounds({ 440, 170, 400, 400 });
 
         auto title = std::make_unique<ui::TextLine>("SELECT SCENE");
         title->SetBounds({ 16, 16, 0, 0 });
@@ -60,7 +23,7 @@ namespace engine::game
         // Rows stack top-down at a fixed cursor instead of hardcoded Y
         // offsets, so an empty callback (a scene not built into this
         // configuration) just skips its row and the rest re-flow upward -
-        // e.g. a 2D-only build only ever passes onCircular and onBack.
+        // e.g. a 2D-only build only ever passes onCircular + the tail rows.
         float y = 56.0f;
         constexpr float kRowHeight = 52.0f;   // 42 button + 10 gap
         const auto addButton = [&](const char* label, std::function<void()> onClick)
@@ -78,8 +41,12 @@ namespace engine::game
         addButton("CHARACTER DEMO", std::move(onCharacterDemo));
         addButton("SHADOW SHOWCASE", std::move(onShadowShowcase));
         addButton("EFFECTS TEST", std::move(onEffectsTest));
-        addButton("BACK", std::move(onBack));
+        addButton("SETTINGS", std::move(onSettings));
+        addButton("QUIT", std::move(onQuit));
 
+        // Size to the rows actually added and centre in the 1280x720 design space.
+        const float height = y + 6.0f;
+        panel->SetBounds({ 440.0f, (720.0f - height) * 0.5f, 400.0f, height });
         return panel;
     }
 }

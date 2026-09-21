@@ -2,6 +2,8 @@
 
 #include "core/JobSystem.h"
 #include "core/NonCopyable.h"
+#include "game/Card.h"
+#include "game/CircularBalance.h"
 #include "game/CircularConfig.h"
 #include "game/MobField.h"
 #include "math/Math.h"
@@ -10,6 +12,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <random>
+#include <string>
 #include <vector>
 
 #if defined(ENGINE_WITH_3D)
@@ -61,6 +65,20 @@ namespace engine::game
 #endif
     };
 
+    // The red landing square of the Circular charge pattern (kChargePattern,
+    // docs/circular-design.md "돌진 패턴"). `active` from marking until the
+    // charge launches; warnLeft/warnTotal give SnapshotBuilder the fade-in
+    // progress. Render + pattern-scheduler state only - the frozen/charging
+    // mobs themselves live in MobField.
+    struct ChargeZone
+    {
+        bool       active{ false };
+        math::Vec2 center{};
+        float      halfSize{ 0.0f };
+        float      warnLeft{ 0.0f };
+        float      warnTotal{ 1.0f };
+    };
+
     // A short-lived attack-pulse glow at `pos` (docs/circular-design.md §7
     // option A) - render-only, ages out the same way TracerLine does further
     // down. SnapshotBuilder turns each into a render::EffectInstance for
@@ -70,6 +88,7 @@ namespace engine::game
         math::Vec2 pos{};
         float ageLeft{ 0.0f };
         float life{ 1.0f };   // ageLeft/life -> 1 (just spawned) .. 0 (about to vanish)
+        float radius{ 24.0f };   // glow radius, px (a pulse card's range, or a small spot for a bolt hit)
     };
 
 #if defined(ENGINE_WITH_3D)
@@ -240,15 +259,8 @@ namespace engine::game
         static constexpr std::size_t kParticleCount = 20'000;
         static constexpr int kObstacleCount = 3;
 
-        // Circular scene demo "card" (docs/circular-design.md §10 step 1 -
-        // real cards/decks are a later step; this is the minimum that proves
-        // MobField::DamageInRadius + the hit-flash -> EffectInstance pipeline
-        // end to end). A fixed-radius pulse around the player on its own
-        // cooldown, auto-firing exactly like every real card eventually will.
-        static constexpr float kCircularAttackInterval = 0.6f;   // seconds between pulses
-        static constexpr float kCircularAttackRadius = 120.0f;   // pixels
-        static constexpr float kCircularAttackDamage = 12.0f;
-        static constexpr float kHitFlashLife = 0.18f;             // seconds a pulse glow stays visible
+        static constexpr float kHitFlashLife = 0.18f;             // seconds an attack glow stays visible
+        static constexpr float kBoltHitFlashRadius = 22.0f;       // px, the small glow on each bolt target
 
 #if defined(ENGINE_WITH_3D)
         // Demo character controller (docs/demo-scene.md). Metres / seconds.
@@ -496,6 +508,32 @@ namespace engine::game
         [[nodiscard]] const MobField& Mobs() const { return m_mobs; }
         [[nodiscard]] int MobKillCount() const { return m_mobKillCount; }
         [[nodiscard]] const std::vector<HitFlash>& HitFlashes() const { return m_hitFlashes; }
+        [[nodiscard]] const ChargeZone& ChargeZoneState() const { return m_chargeZone; }
+
+        // Progression / deck (docs/circular-design.md §2/§3/§10) - Circular only.
+        [[nodiscard]] int PlayerLevel() const { return m_level; }
+        [[nodiscard]] float XpCurrent() const { return m_xp; }
+        [[nodiscard]] float XpNeeded() const;   // to reach the next level
+
+        // CSV balance (docs/circular-balance.md). Loaded on every Circular
+        // scene entry; ReloadBalance re-reads the files mid-run (F5) and keeps
+        // the run going, RestartCircularRun reloads and starts a fresh run (F6).
+        void ReloadBalance();
+        void RestartCircularRun();
+        [[nodiscard]] const CircularBalance& Balance() const { return m_balance; }
+        [[nodiscard]] const BalanceLoadReport& BalanceReport() const { return m_balanceReport; }
+        [[nodiscard]] float RunTime() const { return m_circularTime; }   // seconds since this run started
+        [[nodiscard]] const std::vector<CardInstance>& Deck() const { return m_deck; }
+        [[nodiscard]] const PlayerStats& Stats() const { return m_stats; }
+
+        // Level-up modal contract. Simulation freezes (Step early-outs) while
+        // LevelUpPending(); Application shows the options, then calls
+        // ChooseLevelUpOption(index) with the picked one, which applies it and
+        // resumes (or, if XP already covers another level, re-arms pending).
+        [[nodiscard]] bool LevelUpPending() const { return m_levelUpPending; }
+        [[nodiscard]] std::size_t LevelUpChoiceCount() const { return m_levelChoices.size(); }
+        [[nodiscard]] std::string LevelUpChoiceLabel(std::size_t index) const;
+        void ChooseLevelUpOption(std::size_t index);
 
 #if defined(ENGINE_WITH_3D)
         // The player is actor 0; these stay as thin accessors so the snapshot
@@ -542,11 +580,24 @@ namespace engine::game
         // baseline only. Resets mob field/timers/kill count/hit flashes to a
         // fresh run; called by both EnterScene() definitions below.
         void ResetCircularScene();
+        // Marks the red landing square, then - warnSeconds later - launches the
+        // picked mobs at it (kChargePattern). Called from StepCircularScene.
+        void StepChargePattern(float fixedDelta, math::Vec2 playerCenter);
         // Spawns mobs onto a ring around the player, steers the mob field
-        // toward the player (MobField::Step), fires the demo attack pulse
-        // (kCircularAttackInterval) and ages out hit flashes. Called from
-        // Step() when m_demoScene == DemoScene::Circular.
+        // toward the player (MobField::Step), ticks the deck, awards XP and
+        // ages out hit flashes. Called from Step() when m_demoScene ==
+        // DemoScene::Circular.
         void StepCircularScene(float fixedDelta);
+        // Ticks every card's cooldown and runs the ones that expired; returns
+        // how many mobs the whole deck killed this step (for kills/XP).
+        std::uint32_t StepCards(float fixedDelta, math::Vec2 playerCenter);
+        // The effect switch (docs §2 "효과 태그 테이블"). Returns kills.
+        std::uint32_t ExecuteCard(const CardInstance& card, math::Vec2 playerCenter);
+        // Converts kills into XP and, when a threshold is crossed, arms the
+        // level-up (RollLevelUpChoices + m_levelUpPending).
+        void AwardKills(std::uint32_t kills);
+        void CheckLevelUp();
+        void RollLevelUpChoices();
 #if defined(ENGINE_WITH_3D)
         void SpawnActors();
         void SpawnSimAgents();
@@ -646,10 +697,23 @@ namespace engine::game
         // --- Circular scene (docs/circular-design.md) - 2D baseline, no
         // ENGINE_WITH_3D dependency ---
         MobField m_mobs{ kActiveMob.capacity };
-        float m_mobSpawnTimer{ 0.0f };
+        CircularBalance m_balance{ CircularBalance::Defaults() };   // CSV overlay lands here (ReloadBalance)
+        BalanceLoadReport m_balanceReport;
+        float m_circularTime{ 0.0f };              // run clock: drives the spawn curve; frozen with the world
+        float m_mobSpawnBudget{ 0.0f };            // fractional mobs owed; >=1 spawns one (rate can exceed 1 per step)
+        std::uint32_t m_mobSpawnCounter{ 0 };      // total spawned this run - drives the golden-angle ring position
+        ChargeZone m_chargeZone;
+        float m_chargePatternTimer{ 0.0f };        // counts down to the next marking while no zone is active
+        std::uint32_t m_chargePatternCount{ 0 };   // salt for MobField::BeginWindup's subset hash
         int m_mobKillCount{ 0 };
-        float m_circularAttackCooldown{ 0.0f };
         std::vector<HitFlash> m_hitFlashes;
+        std::vector<CardInstance> m_deck;          // <= kProgression.maxDeckSlots; slot index is the identity
+        PlayerStats m_stats;
+        int m_level{ 1 };
+        float m_xp{ 0.0f };
+        bool m_levelUpPending{ false };
+        std::vector<LevelChoice> m_levelChoices;   // valid while m_levelUpPending
+        std::mt19937 m_rng{ kProgression.rngSeed };   // first <random> use in the engine (docs §3) - level-up options only
 
 #if defined(ENGINE_WITH_3D)
         std::vector<Actor> m_actors;               // [0] = player; [1..] = local-time-scale demo (scene 1)

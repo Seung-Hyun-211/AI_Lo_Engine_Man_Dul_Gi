@@ -1,0 +1,10 @@
+# Circular scene - scalar balance values (docs/circular-balance.md).
+# key,value,note   - only key and value are read; note is for you.
+# F5 in-game reloads this file (new spawns use the new hp/radius; speed applies to everyone).
+key,value,note
+mob_health,20,HP of every newly spawned mob
+mob_speed,90,px per second toward the player (player walks 300)
+mob_radius,10,px - collision and drawn half-size
+mob_xp,1,XP per kill (before the player's XP GAIN multiplier)
+spawn_radius,640,px from the player where mobs appear (off-screen)
+xp_growth_after_table,1.35,past the last levels.csv row each level needs this many times more XP

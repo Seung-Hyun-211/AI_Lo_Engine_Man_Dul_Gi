@@ -1,0 +1,24 @@
+# Circular scene - XP needed to leave each level (docs/circular-balance.md).
+# level must run 1,2,3... with no gaps. Past the last row the need keeps growing by
+# xp_growth_after_table (balance.csv), so you only have to write the levels you tune by hand.
+level,xp_to_next,note
+1,30,
+2,41,
+3,55,
+4,74,
+5,100,
+6,135,
+7,182,
+8,245,
+9,331,
+10,447,
+11,603,
+12,814,
+13,1099,
+14,1484,
+15,2004,
+16,2705,
+17,3651,
+18,4929,
+19,6655,
+20,8984,

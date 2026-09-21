@@ -1,0 +1,14 @@
+# Circular scene - spawn pacing over one run (docs/circular-balance.md).
+# time_sec = seconds since the run started (must strictly increase). Between rows the
+# values are linearly interpolated; after the last row the last values hold.
+# spawns_per_sec = mobs created per second. max_alive = spawning pauses while this many are alive
+# (the engine hard cap is 4096 = MobField capacity in CircularConfig.h).
+#
+# Flat test setup (100 per second, no soft cap):
+time_sec,spawns_per_sec,max_alive
+0,100,4096
+# Example ramp - delete the row above and uncomment these to try it:
+# 0,10,300
+# 60,40,1000
+# 180,100,2500
+# 300,150,4096

@@ -182,12 +182,12 @@ namespace engine::game
         panel->AddChild(std::move(close));
         y += 54.0f;
 
-        // Move between test scenes (docs/demo-scene.md "씬 선택") without
-        // quitting the app - drops back to the title's scene-select screen.
-        auto exitToTitle = std::make_unique<ui::Button>("EXIT TO TITLE");
-        exitToTitle->SetBounds({ 16, y, 528, 44 });
-        exitToTitle->onClick = std::move(actions.onExitToTitle);
-        panel->AddChild(std::move(exitToTitle));
+        // Move between scenes (docs/demo-scene.md "씬 선택") without quitting
+        // the app - leaves the current scene for the scene-select menu.
+        auto sceneSelect = std::make_unique<ui::Button>("SCENE SELECT");
+        sceneSelect->SetBounds({ 16, y, 528, 44 });
+        sceneSelect->onClick = std::move(actions.onSceneSelect);
+        panel->AddChild(std::move(sceneSelect));
 
         return panel;
     }

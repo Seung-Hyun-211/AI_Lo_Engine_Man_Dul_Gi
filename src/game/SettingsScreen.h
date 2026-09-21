@@ -23,7 +23,7 @@ namespace engine::game
         std::function<void()> onResolutionChanged;
         std::function<void()> onFrameRateChanged;
         std::function<void()> onClose;
-        std::function<void()> onExitToTitle;   // leave the current test scene, back to Title's scene-select
+        std::function<void()> onSceneSelect;   // leave the current scene for the scene-select menu
     };
 
     [[nodiscard]] std::unique_ptr<ui::Widget> BuildSettingsScreen(core::Settings& settings, SettingsScreenActions actions);

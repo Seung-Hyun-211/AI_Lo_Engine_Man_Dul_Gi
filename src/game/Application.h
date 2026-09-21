@@ -11,7 +11,6 @@
 #include "math/Math.h"
 #include "platform/Win32Window.h"
 #include "render/IRenderer.h"
-#include "render/r2d/TextureAtlas.h"
 #include "ui/UI.h"
 
 #include <Windows.h>
@@ -21,14 +20,15 @@
 
 namespace engine::game
 {
-    // The player's persona through the app: Title (menu, no simulation) or
-    // InGame (the demo world stepping). Settings is not a state of its own -
+    // The player's persona through the app: Menu (the scene-select screen, no
+    // simulation) or InGame (a scene stepping) - there is no title screen; Run()
+    // boots straight into InGame(Circular). Settings is not a state of its own -
     // it's a modal UIContext overlay reachable from either (docs/scene-flow-design.md),
     // so adding it didn't need a third enumerator. Extend here (Loading,
     // Paused, Result, ...) the same way if a real game needs more states.
     enum class GameState
     {
-        Title,
+        Menu,     // the scene-select menu - no simulation step
         InGame,
     };
 
@@ -75,16 +75,25 @@ namespace engine::game
         [[nodiscard]] PlayerIntent BuildPlayerIntent() const;
 
         // Scene transitions: swap the UIContext's screen and update m_state.
-        void EnterTitle();
-        // Title's "START" leads here - a menu screen (not gameplay) listing
-        // the runtime-selectable Simulation::DemoScene values.
+        // The scene-select menu (not gameplay) listing the runtime-selectable
+        // Simulation::DemoScene values. Reached from Settings' "SCENE SELECT"
+        // button and after a DefenseCombat loss; the app itself boots past it,
+        // straight into Circular.
         void EnterSceneSelect();
         void EnterInGame(DemoScene scene);
-        // Menu-side screen (not gameplay): the ScrollList item demo.
-        void EnterItems();
         // Settings overlay: layered on top of whichever screen is active.
         void OpenSettings();
         void CloseSettings();
+        // Circular level-up modal (docs/circular-design.md): resolves a pick
+        // the UI recorded last frame, then opens the modal whenever the
+        // simulation is waiting on one. The pick is deferred (not applied in
+        // the button callback) because clearing the overlay from inside its own
+        // button's onClick would destroy the caller mid-call.
+        void ServiceLevelUp();
+        void OpenLevelUp();
+        // Writes the last CSV balance load (docs/circular-balance.md) to the
+        // debugger Output window: one line per problem, plus a summary.
+        void LogBalanceReport() const;
         // The two Settings fields with an effect outside the Settings struct
         // itself; everything else SettingsScreen mutates directly (see there).
         // Pushes both vsync and the frame-rate cap together - they're one
@@ -106,13 +115,9 @@ namespace engine::game
         ui::UIContext m_ui;
         Simulation m_simulation;
         SnapshotBuilder m_snapshotBuilder;
-        // Resident UI atlas manifest (name -> uv). The matching page pixels are
-        // loaded by SpritePass2D on the render thread; this CPU side is read by
-        // the snapshot builder to resolve named sprites.
-        render::AtlasIndex m_uiAtlas;
         core::FrameClock m_clock;
         core::FixedTimestep m_timestep;
-        GameState m_state{ GameState::Title };
+        GameState m_state{ GameState::Menu };
         float m_globalTimeScale{ 1.0f };
         float m_fpsSmoothed{ 0.0f };   // EMA of 1/delta, shown top-right
         // Demo: auto-fire one crowd explosion this many seconds into a session.
@@ -129,5 +134,7 @@ namespace engine::game
         // (only the main thread talks to the renderer; only the render thread
         // calls ResizeBuffers).
         std::optional<SIZE> m_pendingResize;
+        std::optional<std::size_t> m_pendingLevelChoice;   // set by the level-up modal's button, consumed by ServiceLevelUp
+        bool m_levelUpOverlayOpen{ false };                // the current overlay IS the level-up modal (Esc must not close it)
     };
 }

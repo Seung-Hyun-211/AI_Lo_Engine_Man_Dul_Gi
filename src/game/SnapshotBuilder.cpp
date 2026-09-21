@@ -644,40 +644,6 @@ namespace engine::game
         // set true to bring it back.
         constexpr bool kDrawLegacy2D = false;
 
-        // Temporary: exercises the SpritePass2D path end to end (white-sprite
-        // solid rect, two atlas sprites, one scissor-clipped). Replaced by real
-        // widget output once ui::DrawList lands.
-        void BuildDemoUiSprites(std::vector<render::SpriteDraw>& out, const render::AtlasIndex* atlas)
-        {
-            // Solid panel via the built-in white texture (atlasId 0).
-            render::SpriteDraw panel{};
-            panel.x = 24.0f; panel.y = 300.0f; panel.width = 320.0f; panel.height = 176.0f;
-            panel.r = 0.10f; panel.g = 0.13f; panel.b = 0.20f; panel.a = 0.92f;
-            out.push_back(panel);
-
-            if (atlas == nullptr || !atlas->Loaded()) return;
-
-            auto place = [&](const char* name, float x, float y, float size, math::Rect clip)
-            {
-                const render::SpriteRect* r = atlas->Find(name);
-                if (r == nullptr) return;
-                render::SpriteDraw s{};
-                s.x = x; s.y = y; s.width = size; s.height = size;
-                s.u0 = r->u0; s.v0 = r->v0; s.u1 = r->u1; s.v1 = r->v1;
-                s.atlasId = atlas->AtlasId();
-                s.clip = clip;
-                out.push_back(s);
-            };
-
-            // Sprite names come from tools/atlas_pack (file stems under
-            // assets/src/ui/); see assets/atlas/ui.atlas.
-            place("icon_play", 44.0f, 320.0f, 96.0f, {});                    // unclipped
-            place("icon_settings", 160.0f, 320.0f, 96.0f, {});              // unclipped
-            // Same sprite again, scissored to a rect that cuts it in half -
-            // proves RSSetScissorRects.
-            place("icon_play", 44.0f, 430.0f, 96.0f, { 24.0f, 430.0f, 320.0f, 40.0f });
-        }
-
         // 2D "Circular" scene (docs/circular-design.md): mob swarm + player,
         // camera-follow. The player stays screen-centred and the world
         // scrolls under it - computed here on the main thread since Quad/
@@ -695,23 +661,74 @@ namespace engine::game
                 + math::Vec2{ Simulation::kPlayerSize * 0.5f, Simulation::kPlayerSize * 0.5f };
             const auto toScreen = [&](math::Vec2 world) { return world - playerCenter + screenCenter; };
 
+            const float time = simulation.ElapsedTime();
+
+            // Charge-pattern landing square (kChargePattern): red, fading in as
+            // the charge nears, drawn first so mobs and the player sit on top.
+            const ChargeZone& zone = simulation.ChargeZoneState();
+            if (zone.active)
+            {
+                const float progress = math::Clamp(1.0f - zone.warnLeft / zone.warnTotal, 0.0f, 1.0f);
+                const float pulse = 0.5f + 0.5f * std::sin(time * 14.0f);
+                const math::Vec2 topLeft = toScreen({ zone.center.x - zone.halfSize, zone.center.y - zone.halfSize });
+                const float side = zone.halfSize * 2.0f;
+                snapshot.worldQuads.push_back({ topLeft.x, topLeft.y, side, side,
+                                                1.0f, 0.10f, 0.08f, 0.10f + 0.25f * progress + 0.10f * pulse * progress });
+                constexpr float border = 4.0f;   // outline so the edge reads even at low fill alpha
+                const float edgeA = 0.55f + 0.35f * progress;
+                snapshot.worldQuads.push_back({ topLeft.x, topLeft.y, side, border, 1.0f, 0.15f, 0.10f, edgeA });
+                snapshot.worldQuads.push_back({ topLeft.x, topLeft.y + side - border, side, border, 1.0f, 0.15f, 0.10f, edgeA });
+                snapshot.worldQuads.push_back({ topLeft.x, topLeft.y, border, side, 1.0f, 0.15f, 0.10f, edgeA });
+                snapshot.worldQuads.push_back({ topLeft.x + side - border, topLeft.y, border, side, 1.0f, 0.15f, 0.10f, edgeA });
+            }
+
+            // Mob colours double as the colour-cycling animation test (no
+            // sprites yet, docs/circular-design.md §7/C4): Seek breathes
+            // between two reds on a per-mob phase, Windup blinks orange/white,
+            // Charge is solid orange. Phase = hash of the slot index, so no
+            // per-mob animation state is stored.
             const MobField& mobs = simulation.Mobs();
             const std::vector<float>& mobX = mobs.PosX();
             const std::vector<float>& mobY = mobs.PosY();
             const std::vector<float>& mobRadius = mobs.Radius();
+            const float cullX = static_cast<float>(viewportWidth) * 0.5f + 32.0f;
+            const float cullY = static_cast<float>(viewportHeight) * 0.5f + 32.0f;
+            const bool blinkOn = std::sin(time * 24.0f) > 0.0f;
             for (const std::uint32_t idx : mobs.ActiveIndices())
             {
                 const math::Vec2 screenPos = toScreen({ mobX[idx], mobY[idx] });
+                if (std::fabs(screenPos.x - screenCenter.x) > cullX || std::fabs(screenPos.y - screenCenter.y) > cullY)
+                    continue;   // off-screen (spawn ring is 640px out) - nothing to draw
+
+                float r, g, b;
+                switch (mobs.State(idx))
+                {
+                case MobState::Windup:
+                    if (blinkOn) { r = 1.00f; g = 0.85f; b = 0.60f; } else { r = 1.00f; g = 0.15f; b = 0.10f; }
+                    break;
+                case MobState::Charge:
+                    r = 1.00f; g = 0.60f; b = 0.10f;
+                    break;
+                default:
+                {
+                    const float phase = static_cast<float>(((idx * 2654435761u) >> 16) & 0xffffu) * (6.2831853f / 65535.0f);
+                    const float t = 0.5f + 0.5f * std::sin(time * 6.0f + phase);
+                    r = 0.55f + 0.40f * t; g = 0.18f + 0.17f * t; b = 0.24f + 0.18f * t;
+                    break;
+                }
+                }
                 const float d = mobRadius[idx] * 2.0f;
                 snapshot.worldQuads.push_back({ screenPos.x - mobRadius[idx], screenPos.y - mobRadius[idx], d, d,
-                                                0.75f, 0.25f, 0.30f, 1.0f });
+                                                r, g, b, 1.0f });
             }
 
             // Player: always screen-centred by construction (toScreen(playerCenter) == screenCenter).
+            // Gentle brightness pulse - the same colour-cycling animation test as the mobs.
+            const float playerPulse = 0.85f + 0.15f * std::sin(time * 5.0f);
             snapshot.worldQuads.push_back({ screenCenter.x - Simulation::kPlayerSize * 0.5f,
                                             screenCenter.y - Simulation::kPlayerSize * 0.5f,
                                             Simulation::kPlayerSize, Simulation::kPlayerSize,
-                                            0.20f, 0.75f, 1.0f, 1.0f });
+                                            0.20f * playerPulse, 0.75f * playerPulse, 1.0f * playerPulse, 1.0f });
 
             // Attack-pulse hit flashes -> EffectPass2D (docs/circular-design.md §7).
             for (const HitFlash& flash : simulation.HitFlashes())
@@ -721,7 +738,7 @@ namespace engine::game
                 render::EffectInstance effect{};
                 effect.x = screenPos.x;
                 effect.y = screenPos.y;
-                effect.radius = Simulation::kCircularAttackRadius;
+                effect.radius = flash.radius;
                 effect.colorRgba = PackRgba(1.0f, 0.85f, 0.35f, t * 0.55f);   // fades out, does not shrink
                 effect.seed = flash.pos.x * 0.013f + flash.pos.y * 0.017f;   // deterministic per-flash blob variation
                 snapshot.worldEffects.push_back(effect);
@@ -871,7 +888,6 @@ namespace engine::game
                                                  const ui::UIContext& ui,
                                                  int viewportWidth,
                                                  int viewportHeight,
-                                                 const render::AtlasIndex* uiAtlas,
                                                  float fps) const
     {
         render::RenderSnapshot snapshot{};
@@ -925,7 +941,6 @@ namespace engine::game
         }
 
         ui.Build(snapshot.uiQuads, static_cast<float>(viewportWidth), static_cast<float>(viewportHeight));
-        BuildDemoUiSprites(snapshot.uiSprites, uiAtlas);
 
 #if defined(ENGINE_WITH_3D)
         // Wave-loop readout (docs/defense-combat-design.md §0/§0.1): a plain
@@ -1069,6 +1084,61 @@ namespace engine::game
             ui::DrawRect(snapshot.uiQuads, { x - 8.0f, y - 4.0f, width + 16.0f, 7.0f * scale + 8.0f },
                          { 0.0f, 0.0f, 0.0f, 0.45f });
             ui::DrawText(snapshot.uiQuads, text, { x, y }, scale, { 1.0f, 0.95f, 0.35f, 1.0f });
+
+            // Level + XP bar (full-width strip at the very top) and the deck
+            // line under the mob counter: "PULSE 3  BOLT 1".
+            const float needed = simulation.XpNeeded();
+            const float xpFraction = needed > 0.0f ? math::Clamp(simulation.XpCurrent() / needed, 0.0f, 1.0f) : 0.0f;
+            const float viewW = static_cast<float>(viewportWidth);
+            ui::DrawRect(snapshot.uiQuads, { 0.0f, 0.0f, viewW, 8.0f }, { 0.0f, 0.0f, 0.0f, 0.55f });
+            ui::DrawRect(snapshot.uiQuads, { 0.0f, 0.0f, viewW * xpFraction, 8.0f }, { 0.35f, 0.85f, 1.0f, 0.95f });
+
+            char deck[128];
+            int used = std::snprintf(deck, sizeof(deck), "LV %d", simulation.PlayerLevel());
+            for (const CardInstance& card : simulation.Deck())
+            {
+                if (used < 0 || used >= static_cast<int>(sizeof(deck))) break;
+                used += std::snprintf(deck + used, sizeof(deck) - static_cast<std::size_t>(used), "   %s %d",
+                                      kCardDefs[card.defIndex].name, card.level);
+            }
+            const float deckWidth = static_cast<float>(std::strlen(deck)) * glyph;
+            const float deckX = (viewW - deckWidth) * 0.5f;
+            const float deckY = y + 7.0f * scale + 14.0f;
+            ui::DrawRect(snapshot.uiQuads, { deckX - 8.0f, deckY - 4.0f, deckWidth + 16.0f, 7.0f * scale + 8.0f },
+                         { 0.0f, 0.0f, 0.0f, 0.45f });
+            ui::DrawText(snapshot.uiQuads, deck, { deckX, deckY }, scale, { 0.55f, 0.90f, 1.0f, 1.0f });
+
+            // Balancing readout, bottom-left (docs/circular-balance.md): the run
+            // clock, the spawn-curve values in effect right now, and the CSV
+            // load state - so an edit + F5 can be checked without leaving the game.
+            const CircularBalance::SpawnRate rate = simulation.Balance().SpawnAt(simulation.RunTime());
+            char tuning[96];
+            std::snprintf(tuning, sizeof(tuning), "T %d   RATE %d   CAP %d   XP %d OF %d",
+                          static_cast<int>(simulation.RunTime()), static_cast<int>(rate.perSecond + 0.5f), rate.maxAlive,
+                          static_cast<int>(simulation.XpCurrent()), static_cast<int>(needed + 0.5f));
+            char status[96];
+            const BalanceLoadReport& report = simulation.BalanceReport();
+            if (report.Clean())
+                std::snprintf(status, sizeof(status), "BALANCE OK   F5 RELOAD   F6 RESTART");
+            else
+                std::snprintf(status, sizeof(status), "BALANCE %d ERR %d WARN - SEE OUTPUT   F5 RELOAD",
+                              report.errors, report.warnings);
+            constexpr float smallScale = 1.5f;
+            const float smallGlyph = 6.0f * smallScale;
+            const float lineH = 7.0f * smallScale + 6.0f;
+            const float baseY = static_cast<float>(viewportHeight) - 2.0f * lineH - 8.0f;
+            const char* lines[2] = { tuning, status };
+            const ui::Color lineColor[2] = { { 0.85f, 0.95f, 0.85f, 1.0f },
+                                             report.Clean() ? ui::Color{ 0.60f, 0.85f, 0.60f, 1.0f }
+                                                            : ui::Color{ 1.0f, 0.55f, 0.45f, 1.0f } };
+            for (int i = 0; i < 2; ++i)
+            {
+                const float w = static_cast<float>(std::strlen(lines[i])) * smallGlyph;
+                const float ly = baseY + static_cast<float>(i) * lineH;
+                ui::DrawRect(snapshot.uiQuads, { 8.0f, ly - 3.0f, w + 12.0f, 7.0f * smallScale + 6.0f },
+                             { 0.0f, 0.0f, 0.0f, 0.45f });
+                ui::DrawText(snapshot.uiQuads, lines[i], { 14.0f, ly }, smallScale, lineColor[i]);
+            }
         }
 
         // Frame-rate readout, top-right, over every screen.

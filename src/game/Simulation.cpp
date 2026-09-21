@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <optional>
 
 namespace engine::game
@@ -283,52 +284,79 @@ namespace engine::game
     void Simulation::ResetCircularScene()
     {
         m_mobs.Clear();
-        m_mobSpawnTimer = 0.0f;
+        m_mobSpawnBudget = 0.0f;
+        m_mobSpawnCounter = 0;
+        m_chargeZone = {};
+        m_chargePatternTimer = kChargePattern.firstDelaySeconds;
+        m_chargePatternCount = 0;
         m_mobKillCount = 0;
-        m_circularAttackCooldown = 0.0f;
         m_hitFlashes.clear();
+        // Fresh run: one starting card (PULSE, the old demo attack), base
+        // stats, level 1. The RNG is reseeded so a run replays identically
+        // given identical input - level-up options are the only <random> use.
+        m_deck.clear();
+        m_deck.push_back({ 0, 1, 0.0f });
+        m_stats = {};
+        m_level = 1;
+        m_xp = 0.0f;
+        m_levelUpPending = false;
+        m_levelChoices.clear();
+        m_rng.seed(kProgression.rngSeed);
+        m_circularTime = 0.0f;
+        ReloadBalance();   // every entry picks up CSV edits - no rebuild, no app restart
         // Re-centre the player - a re-entry after a previous run should not
         // resume wherever that run left off.
         m_player = { static_cast<float>(m_worldWidth) * 0.5f - kPlayerSize * 0.5f,
                      static_cast<float>(m_worldHeight) * 0.5f - kPlayerSize * 0.5f };
     }
 
+    void Simulation::ReloadBalance()
+    {
+        m_balanceReport = LoadCircularBalance(m_balance, m_mobs.Capacity());
+    }
+
+    void Simulation::RestartCircularRun()
+    {
+        ResetCircularScene();   // reloads the balance itself
+    }
+
     void Simulation::StepCircularScene(float fixedDelta)
     {
+        m_circularTime += fixedDelta;
         const math::Vec2 playerCenter = m_player + math::Vec2{ kPlayerSize * 0.5f, kPlayerSize * 0.5f };
 
         // Spawn: a steady trickle onto a ring around the player so mobs
         // always approach from off-screen, capped by MobField's fixed
         // capacity (docs/circular-design.md §1/§9 "2D 몹 스폰/충돌/HP").
-        m_mobSpawnTimer -= fixedDelta;
-        if (m_mobSpawnTimer <= 0.0f && !m_mobs.Full())
+        // The rate can exceed one mob per fixed step (100/s vs 60 steps/s), so
+        // fractional spawns accumulate in a budget instead of a per-spawn timer.
+        // Rate and soft live-mob cap come from spawn_curve.csv at the run clock.
+        const CircularBalance::SpawnRate spawnRate = m_balance.SpawnAt(m_circularTime);
+        m_mobSpawnBudget += spawnRate.perSecond * fixedDelta;
+        while (m_mobSpawnBudget >= 1.0f)
         {
-            m_mobSpawnTimer = kActiveMob.spawnIntervalSeconds;
-            // Deterministic angle from the elapsed clock - same no-<random>
-            // convention as SeedAgent's spread (a spawn a frame apart lands
-            // at a different angle without needing an RNG).
-            const float angle = std::fmod(m_elapsed * 53.17f, 6.2831853f);
+            if (m_mobs.Full() || static_cast<int>(m_mobs.LiveCount()) >= spawnRate.maxAlive)
+            {
+                m_mobSpawnBudget = 0.0f;   // don't bank a burst to dump the moment a slot frees
+                break;
+            }
+            m_mobSpawnBudget -= 1.0f;
+            // Deterministic angle - same no-<random> convention as SeedAgent's
+            // spread. Golden-angle stepping per spawn (not the elapsed clock)
+            // so several mobs spawned in the same step land apart. double for
+            // the multiply: the counter grows without bound and float would
+            // lose the fractional turn.
+            const float angle = static_cast<float>(
+                std::fmod(static_cast<double>(m_mobSpawnCounter++) * 2.399963229728653, 6.283185307179586));
             const math::Vec2 spawnPos = playerCenter
-                + math::Vec2{ std::cos(angle), std::sin(angle) } * kActiveMob.spawnRadius;
-            m_mobs.Spawn(spawnPos, kActiveMob.health, kActiveMob.radius);
+                + math::Vec2{ std::cos(angle), std::sin(angle) } * m_balance.spawnRadius;
+            m_mobs.Spawn(spawnPos, m_balance.mobHealth, m_balance.mobRadius);
         }
 
-        m_mobs.Step(m_jobs, playerCenter, kActiveMob.speed, fixedDelta);
+        StepChargePattern(fixedDelta, playerCenter);
+        m_mobs.Step(m_jobs, playerCenter, m_balance.mobSpeed, fixedDelta);
 
-        // Demo "card" (docs/circular-design.md §10 step 1 - real cards are a
-        // later step): a fixed-radius pulse on its own cooldown, auto-firing
-        // like every real card will. Proves MobField::DamageInRadius + the
-        // hit-flash -> EffectInstance pipeline end to end without the deck/
-        // slot system that doc still defers.
-        m_circularAttackCooldown -= fixedDelta;
-        if (m_circularAttackCooldown <= 0.0f)
-        {
-            m_circularAttackCooldown = kCircularAttackInterval;
-            const std::uint32_t killed =
-                m_mobs.DamageInRadius(playerCenter, kCircularAttackRadius, kCircularAttackDamage);
-            m_mobKillCount += static_cast<int>(killed);
-            m_hitFlashes.push_back({ playerCenter, kHitFlashLife, kHitFlashLife });
-        }
+        AwardKills(StepCards(fixedDelta, playerCenter));
 
         // Swap-remove expired hit flashes (same idiom as elsewhere in this file, e.g. tracers).
         for (std::size_t i = 0; i < m_hitFlashes.size(); )
@@ -337,6 +365,190 @@ namespace engine::game
             if (m_hitFlashes[i].ageLeft <= 0.0f) { m_hitFlashes[i] = m_hitFlashes.back(); m_hitFlashes.pop_back(); }
             else ++i;
         }
+    }
+
+    std::uint32_t Simulation::StepCards(float fixedDelta, math::Vec2 playerCenter)
+    {
+        std::uint32_t kills = 0;
+        for (CardInstance& card : m_deck)
+        {
+            card.cooldownLeft -= fixedDelta;
+            if (card.cooldownLeft > 0.0f) continue;
+            card.cooldownLeft = CardCooldown(kCardDefs[card.defIndex], card.level);
+            kills += ExecuteCard(card, playerCenter);
+        }
+        return kills;
+    }
+
+    std::uint32_t Simulation::ExecuteCard(const CardInstance& card, math::Vec2 playerCenter)
+    {
+        const CardDef& def = kCardDefs[card.defIndex];
+        const float damage = CardDamage(def, card.level);
+        const float range = CardRange(def, card.level);
+
+        switch (def.effect)
+        {
+        case CardEffect::RadialPulse:
+        {
+            const std::uint32_t kills = m_mobs.DamageInRadius(playerCenter, range, damage);
+            m_hitFlashes.push_back({ playerCenter, kHitFlashLife, kHitFlashLife, range });
+            return kills;
+        }
+        case CardEffect::NearestBolt:
+        {
+            math::Vec2 hits[kMaxBoltTargets];
+            std::uint32_t hitCount = 0;
+            const std::uint32_t kills = m_mobs.DamageNearest(
+                playerCenter, range, damage, static_cast<std::uint32_t>(CardTargets(def, card.level)), hits, hitCount);
+            for (std::uint32_t i = 0; i < hitCount; ++i)
+                m_hitFlashes.push_back({ hits[i], kHitFlashLife, kHitFlashLife, kBoltHitFlashRadius });
+            return kills;
+        }
+        }
+        return 0;
+    }
+
+    float Simulation::XpNeeded() const
+    {
+        return m_balance.XpForLevel(m_level);
+    }
+
+    void Simulation::AwardKills(std::uint32_t kills)
+    {
+        if (kills == 0) return;
+        m_mobKillCount += static_cast<int>(kills);
+        m_xp += static_cast<float>(kills) * m_balance.mobXp * m_stats.xpGainMul;
+        CheckLevelUp();
+    }
+
+    void Simulation::CheckLevelUp()
+    {
+        if (m_levelUpPending) return;
+        const float needed = XpNeeded();
+        if (m_xp < needed) return;
+        m_xp -= needed;
+        ++m_level;
+        RollLevelUpChoices();
+        m_levelUpPending = true;
+    }
+
+    void Simulation::RollLevelUpChoices()
+    {
+        std::vector<LevelChoice> cardOptions;
+        for (std::size_t i = 0; i < kCardDefs.size(); ++i)
+        {
+            const auto owned = std::find_if(m_deck.begin(), m_deck.end(),
+                [i](const CardInstance& c) { return c.defIndex == i; });
+            if (owned != m_deck.end())
+            {
+                if (owned->level < kCardDefs[i].maxLevel)
+                    cardOptions.push_back({ LevelChoice::Type::UpgradeCard, static_cast<std::uint8_t>(i) });
+            }
+            else if (static_cast<int>(m_deck.size()) < kProgression.maxDeckSlots)
+            {
+                cardOptions.push_back({ LevelChoice::Type::NewCard, static_cast<std::uint8_t>(i) });
+            }
+        }
+        std::shuffle(cardOptions.begin(), cardOptions.end(), m_rng);
+
+        m_levelChoices.clear();
+        // docs §3: at least one card option whenever one exists, so a level-up
+        // never offers only stat cards while the deck could still grow.
+        if (!cardOptions.empty())
+        {
+            m_levelChoices.push_back(cardOptions.front());
+            cardOptions.erase(cardOptions.begin());
+        }
+
+        std::vector<LevelChoice> pool = std::move(cardOptions);
+        pool.push_back({ LevelChoice::Type::Stat, static_cast<std::uint8_t>(PlayerStat::MoveSpeed) });
+        pool.push_back({ LevelChoice::Type::Stat, static_cast<std::uint8_t>(PlayerStat::XpGain) });
+        std::shuffle(pool.begin(), pool.end(), m_rng);
+        for (const LevelChoice& choice : pool)
+        {
+            if (static_cast<int>(m_levelChoices.size()) >= kProgression.choiceCount) break;
+            m_levelChoices.push_back(choice);
+        }
+    }
+
+    std::string Simulation::LevelUpChoiceLabel(std::size_t index) const
+    {
+        if (index >= m_levelChoices.size()) return {};
+        const LevelChoice& choice = m_levelChoices[index];
+        char text[64];
+        switch (choice.type)
+        {
+        case LevelChoice::Type::NewCard:
+            std::snprintf(text, sizeof(text), "NEW CARD: %s", kCardDefs[choice.id].name);
+            break;
+        case LevelChoice::Type::UpgradeCard:
+        {
+            int level = 1;
+            for (const CardInstance& card : m_deck) if (card.defIndex == choice.id) level = card.level;
+            std::snprintf(text, sizeof(text), "%s: LV %d TO %d", kCardDefs[choice.id].name, level, level + 1);
+            break;
+        }
+        case LevelChoice::Type::Stat:
+            if (choice.id == static_cast<std::uint8_t>(PlayerStat::MoveSpeed))
+                std::snprintf(text, sizeof(text), "MOVE SPEED UP %d%%", static_cast<int>(kProgression.moveSpeedStep * 100.0f + 0.5f));
+            else
+                std::snprintf(text, sizeof(text), "XP GAIN UP %d%%", static_cast<int>(kProgression.xpGainStep * 100.0f + 0.5f));
+            break;
+        }
+        return text;
+    }
+
+    void Simulation::ChooseLevelUpOption(std::size_t index)
+    {
+        if (!m_levelUpPending || index >= m_levelChoices.size()) return;
+        const LevelChoice choice = m_levelChoices[index];
+        switch (choice.type)
+        {
+        case LevelChoice::Type::NewCard:
+            m_deck.push_back({ choice.id, 1, 0.0f });
+            break;
+        case LevelChoice::Type::UpgradeCard:
+            for (CardInstance& card : m_deck) if (card.defIndex == choice.id) ++card.level;
+            break;
+        case LevelChoice::Type::Stat:
+            if (choice.id == static_cast<std::uint8_t>(PlayerStat::MoveSpeed)) m_stats.moveSpeedMul += kProgression.moveSpeedStep;
+            else m_stats.xpGainMul += kProgression.xpGainStep;
+            break;
+        }
+        m_levelUpPending = false;
+        m_levelChoices.clear();
+        CheckLevelUp();   // one big XP grab can cover several levels - queue the next modal
+    }
+
+    void Simulation::StepChargePattern(float fixedDelta, math::Vec2 playerCenter)
+    {
+        constexpr ChargePatternConfig cfg = kChargePattern;
+
+        if (m_chargeZone.active)
+        {
+            m_chargeZone.warnLeft -= fixedDelta;
+            if (m_chargeZone.warnLeft <= 0.0f)
+            {
+                m_mobs.LaunchCharge(m_chargeZone.center, cfg.chargeSpeed, cfg.chargeDuration);
+                m_chargeZone.active = false;
+                m_chargePatternTimer = cfg.intervalSeconds;
+            }
+            return;
+        }
+
+        m_chargePatternTimer -= fixedDelta;
+        if (m_chargePatternTimer > 0.0f) return;
+
+        // Mark where the player stands now; the picked mobs freeze until the
+        // warning ends, then dash at this spot - moving away is the dodge.
+        m_chargeZone.active = true;
+        m_chargeZone.center = playerCenter;
+        m_chargeZone.halfSize = cfg.zoneHalfSize;
+        m_chargeZone.warnLeft = cfg.warnSeconds;
+        m_chargeZone.warnTotal = cfg.warnSeconds;
+        const math::Rect zone{ playerCenter.x - cfg.zoneHalfSize, playerCenter.y - cfg.zoneHalfSize,
+                               cfg.zoneHalfSize * 2.0f, cfg.zoneHalfSize * 2.0f };
+        m_mobs.BeginWindup(playerCenter, zone, cfg.minDistance, cfg.chargeFraction, ++m_chargePatternCount);
     }
 
     void Simulation::SetWorldSize(int width, int height)
@@ -384,10 +596,18 @@ namespace engine::game
             return;
         }
 
+        // Level-up modal is open (or about to be): the whole Circular world
+        // freezes, including the clock, until ChooseLevelUpOption resumes it.
+        if (m_demoScene == DemoScene::Circular && m_levelUpPending) return;
+
         m_elapsed += fixedDelta;
 
-        const math::Vec2 direction = math::Normalized(intent.move);
-        m_player = m_player + direction * (kPlayerSpeed * fixedDelta);
+        // intent.move.y is forward-positive (W = +1, shared with the 3D
+        // actors), but this 2D player lives in screen space where y grows
+        // downward - flip it or W walks down the screen.
+        const math::Vec2 moveIntent = math::Normalized(intent.move);
+        const math::Vec2 direction{ moveIntent.x, -moveIntent.y };
+        m_player = m_player + direction * (kPlayerSpeed * m_stats.moveSpeedMul * fixedDelta);
         m_player.x = math::Clamp(m_player.x, 0.0f, std::max(0.0f, static_cast<float>(m_worldWidth) - kPlayerSize));
         m_player.y = math::Clamp(m_player.y, 0.0f, std::max(0.0f, static_cast<float>(m_worldHeight) - kPlayerSize));
 

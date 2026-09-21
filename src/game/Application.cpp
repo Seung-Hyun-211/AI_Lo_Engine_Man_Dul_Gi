@@ -1,9 +1,8 @@
 #include "game/Application.h"
 
-#include "game/InGameHud.h"
-#include "game/InventoryScreen.h"
+#include "game/LevelUpScreen.h"
+#include "game/SceneSelectScreen.h"
 #include "game/SettingsScreen.h"
-#include "game/TitleScreen.h"
 
 #include <thread>
 #include <timeapi.h>
@@ -48,9 +47,8 @@ namespace engine::game
                                 core::kResolutionPresets[static_cast<std::size_t>(m_settings.resolutionIndex)].height })
         , m_simulation(m_jobs, m_window.Width(), m_window.Height())
     {
-        m_uiAtlas.Load("assets/atlas/ui.atlas", render::kUiAtlasId);
         ApplyVolumes();
-        EnterTitle();
+        // No screen yet: Run() enters the first scene once the window is shown.
     }
 
     int Application::Run()
@@ -62,6 +60,9 @@ namespace engine::game
                          static_cast<std::uint32_t>(m_window.Height()));
         ApplyFrameSettings();
         m_window.Show();
+        // No title screen: boot straight into the Circular scene. The other
+        // scenes are one Settings -> SCENE SELECT away.
+        EnterInGame(DemoScene::Circular);
 
         // The render thread borrows the window's HWND, so it must be stopped
         // before this function returns and the window is destroyed - including
@@ -110,6 +111,8 @@ namespace engine::game
                 // deterministic - it just runs more/fewer fixed steps this frame
                 // (docs/time-design.md). Per-actor local scale is separate.
                 const int steps = m_timestep.Advance(delta * m_globalTimeScale);
+                ServiceLevelUp();
+
                 // The world only advances in-game, and not while Settings (or
                 // any future modal) sits on top of it - both read as "paused".
                 if (m_state == GameState::InGame && !m_ui.HasOverlay())
@@ -215,10 +218,10 @@ namespace engine::game
                     // Loss condition (docs/defense-combat-design.md §0): no
                     // results screen yet (§0.3 is still design-only), so this
                     // is the bare-minimum connection - drop straight back to
-                    // the title screen the instant the objective dies.
+                    // the scene-select menu the instant the objective dies.
                     if (m_simulation.IsMatchLost())
                     {
-                        EnterTitle();
+                        EnterSceneSelect();
                     }
                     else
                     {
@@ -236,7 +239,7 @@ namespace engine::game
                 // have changed and still needs to be redrawn.
                 m_renderer.Submit(m_snapshotBuilder.Build(m_frameNumber++, m_simulation, m_ui,
                                                           m_window.Width(), m_window.Height(),
-                                                          &m_uiAtlas, m_fpsSmoothed));
+                                                          m_fpsSmoothed));
 
                 // Paced regardless of vsync: vsync only paces the render
                 // thread's Present to the display's actual refresh rate (which
@@ -279,23 +282,11 @@ namespace engine::game
         return 0;
     }
 
-    void Application::EnterTitle()
-    {
-        m_state = GameState::Title;
-        m_window.SetPointerLocked(false);
-        m_audio.StopMusic();
-        m_ui.ClearOverlay();
-        m_ui.SetScreen(BuildTitleScreen(
-            [this] { EnterSceneSelect(); },
-            [this] { EnterItems(); },
-            [this] { OpenSettings(); },
-            [this] { m_window.RequestClose(); }));
-    }
-
     void Application::EnterSceneSelect()
     {
-        m_state = GameState::Title;   // still a menu context: no simulation step
+        m_state = GameState::Menu;   // a menu context: no simulation step
         m_window.SetPointerLocked(false);
+        m_audio.StopMusic();
         m_ui.ClearOverlay();
         // Circular (docs/circular-design.md) is 2D-baseline and always
         // offered; the other four callbacks are left empty without
@@ -312,15 +303,8 @@ namespace engine::game
 #else
             nullptr, nullptr, nullptr, nullptr,
 #endif
-            [this] { EnterTitle(); }));
-    }
-
-    void Application::EnterItems()
-    {
-        m_state = GameState::Title;   // still a menu context: no simulation step
-        m_window.SetPointerLocked(false);
-        m_ui.ClearOverlay();
-        m_ui.SetScreen(BuildInventoryScreen([this] { EnterTitle(); }));
+            [this] { OpenSettings(); },
+            [this] { m_window.RequestClose(); }));
     }
 
     void Application::EnterInGame(DemoScene scene)
@@ -335,8 +319,9 @@ namespace engine::game
         // docs/defense-combat-design.md §0); for Circular it resets the mob
         // field/player (docs/circular-design.md).
         m_simulation.EnterScene(scene);
+        if (scene == DemoScene::Circular) LogBalanceReport();
         m_ui.ClearOverlay();
-        m_ui.SetScreen(BuildInGameHud([this] { OpenSettings(); }));
+        m_ui.SetScreen(nullptr);   // no in-game widgets: the HUD is drawn by SnapshotBuilder, Settings opens on ESC
         m_window.SetPointerLocked(true);   // mouse-look / centre-locked cursor
         // Demo hook (docs/audio-design.md §4/§5): exercises the streaming music
         // path end-to-end. blip.wav is a placeholder loop - swap for a real
@@ -353,8 +338,51 @@ namespace engine::game
             .onResolutionChanged = [this] { ApplyResolution(); },
             .onFrameRateChanged = [this] { ApplyFrameSettings(); },
             .onClose = [this] { CloseSettings(); },
-            .onExitToTitle = [this] { m_settings.Save(core::kSettingsFilePath); EnterTitle(); },
+            .onSceneSelect = [this] { m_settings.Save(core::kSettingsFilePath); EnterSceneSelect(); },
         }));
+    }
+
+    void Application::ServiceLevelUp()
+    {
+        if (m_state != GameState::InGame || m_simulation.ActiveScene() != DemoScene::Circular)
+        {
+            m_pendingLevelChoice.reset();
+            m_levelUpOverlayOpen = false;
+            return;
+        }
+
+        if (m_pendingLevelChoice)
+        {
+            m_simulation.ChooseLevelUpOption(*m_pendingLevelChoice);
+            m_pendingLevelChoice.reset();
+            m_levelUpOverlayOpen = false;
+            m_ui.ClearOverlay();
+            m_window.SetPointerLocked(true);
+        }
+
+        // Also covers "Settings was open when the level-up armed": the modal
+        // waits until that overlay closes, then appears.
+        if (m_simulation.LevelUpPending() && !m_ui.HasOverlay()) OpenLevelUp();
+    }
+
+    void Application::LogBalanceReport() const
+    {
+        const BalanceLoadReport& report = m_simulation.BalanceReport();
+        for (const std::string& message : report.messages)
+            OutputDebugStringA(("[balance] " + message + "\n").c_str());
+        OutputDebugStringA(report.Clean() ? "[balance] loaded assets/data/circular/*.csv - OK\n"
+                                          : "[balance] loaded with problems - see lines above\n");
+    }
+
+    void Application::OpenLevelUp()
+    {
+        std::vector<std::string> labels;
+        for (std::size_t i = 0; i < m_simulation.LevelUpChoiceCount(); ++i)
+            labels.push_back(m_simulation.LevelUpChoiceLabel(i));
+
+        m_window.SetPointerLocked(false);   // the modal needs the cursor
+        m_levelUpOverlayOpen = true;
+        m_ui.SetOverlay(BuildLevelUpScreen(labels, [this](std::size_t index) { m_pendingLevelChoice = index; }));
     }
 
     void Application::CloseSettings()
@@ -419,9 +447,23 @@ namespace engine::game
     {
         if (down && virtualKey == VK_ESCAPE)
         {
+            // Esc must not dismiss the level-up modal - a pick is mandatory.
+            if (m_levelUpOverlayOpen) return;
             if (m_ui.HasOverlay()) CloseSettings();
             else if (m_state == GameState::InGame) OpenSettings();
             return;   // consumed by the menu, not gameplay
+        }
+
+        // Balancing hotkeys (docs/circular-balance.md), Circular only: F5 re-reads
+        // assets/data/circular/*.csv and keeps the run going, F6 re-reads and
+        // restarts the run from zero. Not while the level-up modal is up.
+        if (down && (virtualKey == VK_F5 || virtualKey == VK_F6) && m_state == GameState::InGame &&
+            m_simulation.ActiveScene() == DemoScene::Circular && !m_levelUpOverlayOpen)
+        {
+            if (virtualKey == VK_F5) m_simulation.ReloadBalance();
+            else m_simulation.RestartCircularRun();
+            LogBalanceReport();
+            return;
         }
 
         // Demo wiring for the global time scale: PageUp / PageDown cycle
