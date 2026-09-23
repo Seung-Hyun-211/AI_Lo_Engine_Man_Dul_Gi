@@ -936,12 +936,14 @@ namespace engine::game
             }
 
             // Live projectiles at their real positions, sized by their weapon's
-            // hit_radius (x visual_scale) - the drawn square is the touch area.
-            for (const Projectile& shot : simulation.Combat().Projectiles())
+            // hit_radius (x attack_size at fire time x visual_scale) - the drawn
+            // square is the touch area. A moving area has no body of its own; its
+            // ticks show up as Outline visuals above.
+            for (const AttackInstance& shot : simulation.Combat().Instances())
             {
                 const CardDef* def = weaponOf(shot.defIndex);
-                if (def == nullptr) continue;
-                const float size = 2.0f * def->hitRadius * def->visualScale;
+                if (def == nullptr || SpecOf(def->effect).form != AttackForm::Projectile) continue;
+                const float size = 2.0f * def->hitRadius * shot.scale * def->visualScale;
                 const math::Color color = RgbColor(def->color, 1.0f);
                 const math::Vec2 pos = toScreen(shot.pos);
                 snapshot.worldQuads.push_back({ pos.x - size * 0.5f, pos.y - size * 0.5f, size, size,

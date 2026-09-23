@@ -8,6 +8,7 @@
 #include "game/Stats.h"
 #include "math/Math2D.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <random>
@@ -40,21 +41,39 @@ namespace engine::game
         float life{ 1.0f };   // ageLeft/life -> 1 (just spawned) .. 0 (about to vanish)
     };
 
-    // A real, physically-travelling shot (스태프/단검/트럼프 카드) - carries
-    // gameplay state: its own position/velocity/remaining flight distance,
-    // and it deals damage when it actually touches a mob (not on cast). What
-    // it does on contact is its weapon's EffectSpec::onHit. Bounded pool
-    // (kMaxProjectiles), swap-removed when spent.
-    struct Projectile
+    // A mob this attack already hit, and when (CircularCombat's clock).
+    struct HitMemory
     {
-        math::Vec2 pos{};
-        math::Vec2 vel{};              // px/s
-        float rangeLeft{ 0.0f };       // px budget - despawns (no hit) when this runs out
-        float damage{ 0.0f };          // the hit damage (Random: the roll's lower bound)
+        MobRef ref;
+        float time{ 0.0f };
+    };
+
+    // A live, moving attack (docs/circular-combat.md §2.2/§2.5): a projectile
+    // (스태프/단검/트럼프 카드, orbiting blades ...) or a moving area (the
+    // lurker-style spike line). Where it is comes from its weapon's path
+    // evaluated at `t` - never integrated - and every tuning number is read
+    // from the weapon row through `defIndex`; only what was fixed at fire
+    // time lives here. Bounded pool (kMaxInstances), swap-removed when done.
+    struct AttackInstance
+    {
+        static constexpr std::size_t kHitMemory = 32;   // ring: oldest hit forgotten first
+
+        std::uint8_t defIndex{ 0 };    // weapon row: form, onHit, path, sizes, colour
+        std::uint8_t piercesLeft{ 0 }; // Pierce on a range-limited path: hits left before it's spent
+        float t{ 0.0f };               // seconds since fired
+        float damage{ 0.0f };          // crit/weapon_damage applied (Random: the roll's lower bound)
         float damageMax{ 0.0f };       // Random only: the roll's upper bound
-        float explodeRadius{ 0.0f };   // Explode only: blast radius (attack_size applied)
-        std::uint8_t piercesLeft{ 0 }; // Pierce only: hits left before it's spent
-        std::uint8_t defIndex{ 0 };    // weapon row: onHit, colour, size
+        float scale{ 1.0f };           // attack_size at fire time (sizes, travel, orbit radius)
+        float range{ 0.0f };           // Straight: travel budget px (attack_size applied)
+        float theta0{ 0.0f };          // Polar: start angle, radians
+        float tickLeft{ 0.0f };        // moving Area: seconds to the next hit
+        math::Vec2 origin{};           // caster position at fire time
+        math::Vec2 dir{ 1.0f, 0.0f };  // aim at fire time (normalized)
+        math::Vec2 pos{};
+        math::Vec2 prevPos{};          // last step's pos - the swept contact runs prevPos -> pos
+        std::uint8_t memoryCount{ 0 };
+        std::uint8_t memoryNext{ 0 };
+        std::array<HitMemory, kHitMemory> memory{};
     };
 
     // What combat needs from the rest of the run for one call - values and
@@ -88,27 +107,22 @@ namespace engine::game
         static constexpr float kOutlineLife = 0.20f;        // seconds an Outline visual blinks
         static constexpr float kBoltShotSpeed = 1200.0f;    // px/s the BOLT visual travels at
         static constexpr float kBoltShotMinLife = 0.05f;    // seconds - floor so a point-blank hit still reads
-        static constexpr std::size_t kMaxProjectiles = 512;
-        static constexpr float kProjectileHitReach = 6.0f;  // px added to a mob's radius for the touch test
-        // A Piercing shot that lands a hit is nudged this far past the mob it
-        // just hit (along its own velocity) so the NEXT step's touch test
-        // doesn't immediately re-hit the same still-alive mob. [살] mitigation,
-        // not exact geometry.
-        static constexpr float kPierceClearDistance = 24.0f;
+        static constexpr std::size_t kMaxInstances = 512;
 
-        // Drops every projectile and visual (scene reset / new run).
+        // Drops every live attack and visual (scene reset / new run).
         void Reset();
 
         // One weapon whose cooldown just expired. Instant weapons damage now;
-        // projectile weapons only spawn their shot (damage lands in Step).
+        // moving ones (a path other than None) only spawn - damage lands in Step.
         CombatResult Fire(const CardInstance& card, const CombatContext& context, MobField& mobs, std::mt19937& rng);
 
-        // One fixed step: flies projectiles, applies their hits, ages visuals.
+        // One fixed step: moves every live attack along its path, applies its
+        // hits, ages visuals.
         CombatResult Step(float fixedDelta, const CombatContext& context, MobField& mobs, std::mt19937& rng);
 
         // --- reads for the snapshot builder ---
         [[nodiscard]] const std::vector<AttackVisual>& Visuals() const { return m_visuals; }
-        [[nodiscard]] const std::vector<Projectile>& Projectiles() const { return m_projectiles; }
+        [[nodiscard]] const std::vector<AttackInstance>& Instances() const { return m_instances; }
 
     private:
         // The single "damage landed" point (docs S7): kills + life_steal heal.
@@ -116,7 +130,17 @@ namespace engine::game
         // Area attack: damage everything in `shape`, leave its outline.
         CombatResult HitArea(const HitShape& shape, float damage, std::uint8_t defIndex, const StatBlock& stats, MobField& mobs);
 
+        // Spawns the moving attacks of one cast (count of them on a Polar path).
+        void SpawnMoving(const CardDef& def, const CardInstance& card, const CombatContext& context, const MobField& mobs,
+                         float damage, float damageMax, float range);
+        // Projectile contact for one step: sweep prevPos -> pos, apply onHit.
+        // Returns true when the attack is spent.
+        bool ResolveContact(AttackInstance& attack, const CardDef& def, const CombatContext& context, MobField& mobs,
+                            std::mt19937& rng, CombatResult& result);
+
+        float m_time{ 0.0f };                  // combat clock (HitMemory times)
         std::vector<AttackVisual> m_visuals;
-        std::vector<Projectile> m_projectiles;   // <= kMaxProjectiles
+        std::vector<AttackInstance> m_instances;   // <= kMaxInstances
+        std::vector<MobHit> m_touchScratch;    // reused by ResolveContact, avoids a per-step allocation
     };
 }

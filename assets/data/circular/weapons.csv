@@ -12,12 +12,20 @@
 # offered for this weapon. overflow_stat is any StatId from game/Stats.h (same names as stats.csv's stat_id).
 # color: RRGGBB placeholder colour. hit_radius: a moving attack's own radius px (projectile size; the drawn size
 # is hit shape x visual_scale). sprite / fx_hit: image prefixes for M7 (blank = plain shape).
+# Movement (docs/circular-combat.md 2.5): path none|straight|polar (blank = straight for projectiles, none otherwise),
+# anchor cast|player (polar centre), count (polar: spread evenly, + extra_projectiles), lifetime s (required for polar),
+# start_radius / radial_speed / angular_speed_deg (polar; radial_speed 0 = orbit), tick_interval (a moving area: s
+# between hits), rehit_interval (a lifetime projectile: s before the same mob can be hit again).
+# BLADE / VORTEX / SPIKE are level-up-pool-only (D5): orbit, outward spiral, lurker-style spike line.
 # PULSE/BOLT are the pre-base-design placeholders (docs 10.1) - still valid, no character starts with them anymore.
-id,name,effect,cooldown,damage,range,base_targets,max_level,damage_per_level,range_per_level,cooldown_scale,levels_per_extra_target,cone_half_angle_deg,line_half_width,projectile_speed,explode_radius,damage_max,overflow_stat,overflow_value,color,hit_radius,visual_scale,sprite,fx_hit
-pulse,PULSE,radialpulse,0.6,12,120,0,5,6,14,0.95,0,,,,,,attack_size,0.05,FFD91A,,,,
-bolt,BOLT,nearestbolt,0.9,22,320,1,5,8,20,0.93,2,,,,,,extra_projectiles,1,F21F1A,7,,,
-sword,SWORD,arcswing,0.55,14,130,0,5,7,12,0.95,0,70,,,,,attack_size,0.05,FFD91A,,,,
-whip,WHIP,lineswing,0.70,10,170,0,5,5,16,0.94,0,,28,,,,attack_size,0.05,F21F1A,,,,
-staff,STAFF,explodingbolt,0.85,16,360,0,5,6,18,0.94,0,,,620,70,,weapon_damage,0.05,FF8C26,6,,,
-dagger,DAGGER,piercingshot,0.65,24,300,2,5,6,14,0.95,3,,,900,,,crit_chance,0.02,CCCCD9,6,,,
-trump,TRUMP,randomdamageshot,0.75,6,280,0,5,3,12,0.94,0,,,760,,34,luck,2,BF59F2,6,,,
+id,name,effect,cooldown,damage,range,base_targets,max_level,damage_per_level,range_per_level,cooldown_scale,levels_per_extra_target,cone_half_angle_deg,line_half_width,projectile_speed,explode_radius,damage_max,overflow_stat,overflow_value,color,hit_radius,visual_scale,sprite,fx_hit,path,anchor,count,lifetime,start_radius,radial_speed,angular_speed_deg,tick_interval,rehit_interval
+pulse,PULSE,radialpulse,0.6,12,120,0,5,6,14,0.95,0,,,,,,attack_size,0.05,FFD91A,,,,,,,,,,,,,
+bolt,BOLT,nearestbolt,0.9,22,320,1,5,8,20,0.93,2,,,,,,extra_projectiles,1,F21F1A,7,,,,,,,,,,,,
+sword,SWORD,arcswing,0.55,14,130,0,5,7,12,0.95,0,70,,,,,attack_size,0.05,FFD91A,,,,,,,,,,,,,
+whip,WHIP,lineswing,0.70,10,170,0,5,5,16,0.94,0,,28,,,,attack_size,0.05,F21F1A,,,,,,,,,,,,,
+staff,STAFF,explodingbolt,0.85,16,360,0,5,6,18,0.94,0,,,620,70,,weapon_damage,0.05,FF8C26,6,,,,,,,,,,,,
+dagger,DAGGER,piercingshot,0.65,24,300,2,5,6,14,0.95,3,,,900,,,crit_chance,0.02,CCCCD9,6,,,,,,,,,,,,
+trump,TRUMP,randomdamageshot,0.75,6,280,0,5,3,12,0.94,0,,,760,,34,luck,2,BF59F2,6,,,,,,,,,,,,
+blade,BLADE,piercingshot,4.5,8,200,0,5,3,0,0.95,0,,,,,,attack_size,0.05,66E0FF,10,,,,polar,player,3,4,80,0,180,,0.5
+vortex,VORTEX,piercingshot,2.5,10,300,0,5,3,0,0.95,0,,,,,,extra_projectiles,1,8CFF66,10,,,,polar,cast,4,3,20,90,240,,0.5
+spike,SPIKE,radialpulse,1.6,14,360,0,5,4,20,0.95,0,,,500,,,weapon_damage,0.05,E0A060,24,,,,straight,,,,,,,0.08,

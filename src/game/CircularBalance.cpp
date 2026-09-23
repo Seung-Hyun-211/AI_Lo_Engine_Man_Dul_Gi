@@ -331,6 +331,9 @@ namespace engine::game
                 const int colorCol = table.Column("color");
                 const int spriteCol = table.Column("sprite");
                 const int fxHitCol = table.Column("fx_hit");
+                const int pathCol = table.Column("path");
+                const int anchorCol = table.Column("anchor");
+                const int countCol = table.Column("count");
 
                 bool headerOk = idCol >= 0 && nameCol >= 0 && effectCol >= 0 && cdCol >= 0 && dmgCol >= 0 && rangeCol >= 0 &&
                                 baseTargetsCol >= 0 && maxLevelCol >= 0 && dmgPerLevelCol >= 0 &&
@@ -415,6 +418,12 @@ namespace engine::game
                             { "damage_max",          &def.damageMax,        0.0f },
                             { "hit_radius",          &def.hitRadius,        0.0f },
                             { "visual_scale",        &def.visualScale,      0.0f },
+                            { "lifetime",            &def.lifetime,         0.0f },
+                            { "start_radius",        &def.startRadius,      0.0f },
+                            { "radial_speed",        &def.radialSpeed,   -1e9f },
+                            { "angular_speed_deg",   &def.angularSpeedDeg, -1e9f },
+                            { "tick_interval",       &def.tickInterval,     0.0f },
+                            { "rehit_interval",      &def.rehitInterval,    0.0f },
                         };
                         for (const Opt& opt : optional)
                         {
@@ -423,12 +432,54 @@ namespace engine::game
                             if (col < 0 || cell.empty()) continue;
                             if (!core::ParseFloat(cell, *opt.target) || *opt.target < opt.minValue)
                             {
-                                loader.Error(file, row.line, std::string(opt.label) + " must be a number >= 0 - row skipped");
+                                loader.Error(file, row.line, std::string(opt.label) + " must be a number (>= 0 unless it is a speed) - row skipped");
                                 valid = false;
                                 break;
                             }
                         }
                         if (!valid) continue;
+
+                        // Movement (docs/circular-combat.md §2.5). Blank = CardDef default.
+                        const std::string pathName = Lower(Cell(row, pathCol));
+                        if (pathName == "straight") def.path = AttackPath::Straight;
+                        else if (pathName == "polar") def.path = AttackPath::Polar;
+                        else if (!pathName.empty() && pathName != "none")
+                        {
+                            loader.Error(file, row.line, "path must be none, straight or polar - row skipped");
+                            continue;
+                        }
+                        const std::string anchorName = Lower(Cell(row, anchorCol));
+                        if (anchorName == "player") def.anchor = PathAnchor::Player;
+                        else if (!anchorName.empty() && anchorName != "cast")
+                        {
+                            loader.Error(file, row.line, "anchor must be cast or player - row skipped");
+                            continue;
+                        }
+                        const std::string countCell = Cell(row, countCol);
+                        float countF = 1.0f;
+                        if (!countCell.empty() && (!core::ParseFloat(countCell, countF) || countF < 1.0f))
+                        {
+                            loader.Error(file, row.line, "count must be a number >= 1 - row skipped");
+                            continue;
+                        }
+                        def.count = static_cast<int>(countF);
+
+                        // Combinations the combat code can't run - rejected here, not guessed at.
+                        def.effect = spec->effect;
+                        const AttackForm form = spec->form;
+                        const AttackPath path = EffectivePath(def);
+                        const char* problem = nullptr;
+                        if (form == AttackForm::Nearest && path != AttackPath::None) problem = "nearestbolt can't have a path";
+                        else if (path == AttackPath::Straight && def.projectileSpeed <= 0.0f && def.lifetime <= 0.0f)
+                            problem = "a straight path needs projectile_speed > 0 (or a lifetime)";
+                        else if (path == AttackPath::Polar && def.lifetime <= 0.0f) problem = "a polar path needs lifetime > 0";
+                        else if (form == AttackForm::Area && path != AttackPath::None && def.tickInterval <= 0.0f)
+                            problem = "a moving area needs tick_interval > 0";
+                        if (problem != nullptr)
+                        {
+                            loader.Error(file, row.line, std::string(problem) + " - row skipped");
+                            continue;
+                        }
 
                         const std::string colorCell = Cell(row, colorCol);
                         if (!colorCell.empty() && !ParseHexColor(colorCell, def.color))
