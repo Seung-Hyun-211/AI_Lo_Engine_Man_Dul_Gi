@@ -103,6 +103,58 @@ SnapshotBuilder: AttackVisual/Projectile → (아트 없음) 도형 worldQuads /
 
 적 공격은 `mobs.csv`(M3, [circular-design.md](circular-design.md) §5.3)의 `projectile`·`zone_radius`·`telegraph_sec` 열이 같은 `HitShape`/`Projectile` 로 들어간다.
 
+### 2.5 공격 움직임 패턴 — 경로 × 판정 시점 × 명중 처리
+
+지금 투사체는 "직선으로 날아가다 닿으면 처리" 한 가지뿐이다(`pos += vel·dt`). 플레이어 주위를 도는 공격, 소용돌이치며 퍼지는 공격,
+럴커처럼 한 칸씩 전진하는 공격을 **종류별 코드 없이** 만들려면 공격 하나를 세 축의 조합으로 본다.
+
+| 축 | 뜻 | 값 (열거 — 새 종류 = 열거자 + 테이블 한 항목) |
+|---|---|---|
+| **경로 `AttackPath`** | 시간 t 에 따라 도형이 어디 있나 | `Straight`(직선) · `Orbit`(원 궤도) · `Spiral`(궤도 + 반경 증가) · 이후 `Homing`·`Boomerang`·`Wave` 등 |
+| **판정 시점 `Delivery`** | 언제 판정하나 | `Continuous`(매 스텝, 지나간 구간 스윕) · `Pulsed`(`tick_interval` 마다 그 지점에서만 한 번) |
+| **명중 처리 `ProjectileKind`** | 맞았을 때 무엇을 하나 | 지금 있는 `Piercing`·`Exploding`·`Random` 그대로(§2.2) |
+
+- **경로는 위치를 적분하지 않고 식으로 계산한다**: `pos(t) = anchor + 극좌표(r(t), θ(t))`, `r(t) = start_radius + radial_speed·t`, `θ(t) = θ0 + angular_speed·t`.
+  직선은 `anchor + dir·speed·t`. 누적 오차가 없고, 같은 입력이면 같은 궤적이라 헤드리스 검증이 쉽다.
+- **`anchor`**: `Player`(매 스텝 플레이어 중심을 다시 읽음 — 플레이어를 따라다니는 궤도) / `Cast`(발사 순간 위치에 고정 — 제자리 소용돌이).
+- **여러 발**: `count` 발을 `θ0` 를 360°/count 간격으로 벌려 한 번에 만든다. `extra_projectiles` 능력치가 `count` 에 더해진다.
+- **수명**: 직선이 아닌 경로는 사거리(`rangeLeft`)가 아니라 `lifetime` 초로 끝난다(직선은 지금처럼 사거리).
+- **같은 몹 반복 타격**: 도는 공격은 같은 몹을 계속 스친다 → 몹마다 `rehit_interval` 초가 지나야 다시 맞는다.
+  W5 의 `hitSlots`(슬롯 번호 + 세대)에 "마지막으로 때린 시각"을 붙여 쓴다(관통 중복 방지와 같은 장치).
+
+**요청한 세 패턴의 조합**
+
+| 패턴 | 경로 | anchor | 판정 시점 | 판정 도형 | 주요 값 |
+|---|---|---|---|---|---|
+| 플레이어 주위를 도는 공격 | `Orbit` | `Player` | `Continuous` | 원(`hit_radius`) | `start_radius` 80, `angular_speed_deg` 180, `count` 3, `lifetime` 4, `rehit_interval` 0.5 |
+| 소용돌이치며 바깥으로 퍼지는 공격 | `Spiral` | `Cast`(또는 `Player`) | `Continuous` | 원 | `start_radius` 20, `radial_speed` 90, `angular_speed_deg` 240, `count` 4, `lifetime` 3 |
+| 럴커처럼 한 칸씩 전진하는 공격 | `Straight` | `Cast` | `Pulsed` | 원(칸마다 가시 하나) | 방향 = 가장 가까운 몹, `tick_interval` 0.08, 칸 간격 = `speed·tick_interval`(≈ 40px), `range` 360 |
+
+- 럴커 공격은 "보이지 않는 점이 직선으로 이동하고, `tick_interval` 마다 그 자리에 원 판정 + `AttackVisual`(가시 이미지) 하나를 남기는" 것이다.
+  새 개념 없이 경로 `Straight` + 판정 시점 `Pulsed` 조합이다. 칸마다 남는 가시는 §2.3 의 `AttackVisual` 이 수명을 두고 사라진다.
+- 같은 조합으로 더 만들 수 있는 것: `Orbit`+`Pulsed` = 주위를 돌며 일정 간격으로 터지는 폭탄, `Spiral`+`Pulsed`+`Exploding` = 퍼져 나가며 연속 폭발.
+- 적도 같은 구조를 쓴다(W7): 보스의 회전 탄막 = `Orbit`/`Spiral` + `team=Enemy`, 마법 몹의 전진 장판 = 럴커 조합.
+
+**데이터 흐름**
+
+```text
+weapons.csv 행: path, anchor, delivery, count, lifetime, start_radius, radial_speed, angular_speed_deg, tick_interval, rehit_interval
+      │ (로더)
+      ▼
+CardDef.motion (MotionDef 값) ──ExecuteCard──▶ count 개의 Projectile{ path, anchor, t, θ0, dir, ... }
+                                                   │ StepProjectiles: t += dt
+                                                   │   pos = kPathTable[path](motion, anchorPos, t)     ← 종류별 if 없음
+                                                   │   Continuous: 이전 pos → 새 pos 캡슐로 판정
+                                                   │   Pulsed    : tick 마다 새 pos 에서 원 판정 + AttackVisual
+                                                   ▼
+                                     명중 처리 switch(ProjectileKind) — 그대로
+```
+
+- `Projectile` 에 `MotionState{ path, anchor, t, θ0, dir, origin }` 를 붙인다(값 타입, 포인터 없음). 크기가 커지면 경로 매개변수는
+  `CardDef` 색인만 들고 표에서 읽는다(투사체 512개 × 필드 수 고려).
+- 스레드: 전부 메인(시뮬) 스레드의 `StepProjectiles` 안. 투사체 수가 늘어 병렬화하면 위치 계산만 `ParallelFor`(투사체마다 자기 칸만 씀, 규칙 6),
+  판정·피해는 그 뒤 메인에서 순차.
+
 ---
 
 ## 3. 작업 목록
@@ -120,9 +172,15 @@ SnapshotBuilder: AttackVisual/Projectile → (아트 없음) 도형 worldQuads /
 | W6 | `weapons.csv` 에 `id`·`hit_radius`·`visual_scale`·`sprite`·`fx_hit` + 로더 | P5·P6 | `assets/data/circular/weapons.csv`, `game/CircularBalance.*`, `game/Card.h` | F5 로 크기 바꾸면 판정·그림이 같이 바뀜, `circular-balance.md` 열 설명 갱신 | W3·W4, D1·D2 |
 | W7 | 적 공격이 같은 구조 재사용 — `Projectile.team`, 몹 장판 = 예고 후 `HitShape`, 플레이어 피격 + 대쉬 무적 | P9 | `game/Simulation.*`, `game/MobField.*`, `mobs.csv` | M3 의 원거리·마법 몹이 이 경로로만 공격 | W4, M3 착수 |
 | W8 | 이미지 연결 — `atlas.groups` 에 `weapon`/`fx` 그룹, `visualKey` → `SpriteDraw`(없으면 도형 폴백) | 이미지 | `assets/atlas/atlas.groups`, `render/RenderSnapshot.h`, `game/SnapshotBuilder.cpp` | 아트 1장으로 투사체 1종이 스프라이트로 보임 | W6, **M7 월드 스프라이트 경로** |
+| W10 | 경로 테이블 — `AttackPath{Straight,Orbit,Spiral}` + `MotionDef`/`MotionState`, `Projectile` 위치를 식으로 계산, `anchor`, `count`, `lifetime` | §2.5 | 새 `game/AttackMotion.h`, `game/Simulation.*`, `game/Card.h` | 기존 투사체 3종이 `Straight` 로 결과 동일(킬 수 비교), 테스트 씬에서 궤도·소용돌이가 보임 | W4 |
+| W11 | 반복 타격 간격 — `hitSlots` 에 마지막 타격 시각, `rehit_interval` | §2.5 | `game/Simulation.*` | 궤도 공격이 더미를 초당 `1/rehit_interval` 회만 때림 | W5·W10 |
+| W12 | 판정 시점 `Pulsed` — `tick_interval` 마다 원 판정 + 칸마다 `AttackVisual` (럴커) | §2.5 | `game/Simulation.*`, `game/SnapshotBuilder.cpp` | 가시가 순서대로 전진하며 칸마다 한 번씩 피해 | W3·W10 |
+| W13 | `weapons.csv` 에 움직임 열(`path, anchor, delivery, count, lifetime, start_radius, radial_speed, angular_speed_deg, tick_interval, rehit_interval`) + 예시 무기 3행(궤도·소용돌이·럴커 — 레벨업 풀에만) | §2.5 | `weapons.csv`, `game/CircularBalance.*`, `circular-balance.md` | CSV 만 고쳐 F5 로 궤도 반경·회전 속도가 바뀜 | W10~W12, D5~D7 |
 | W9 | 문서 갱신 — 이 문서 §5 를 "구현됨" 으로, `circular-design.md` §3.2·§8·현재 위치, `circular-art-guide.md`(id 열), `collider-design.md` 링크 | — | `docs/*` | `tools\check_docs.ps1` 통과 | 각 W 완료 때마다 |
 
 W1~W6 은 M3(적 종류) **전에** 하는 게 좋다 — M3 가 W7 로 같은 구조를 바로 쓴다. W8 은 M7 과 같이 간다.
+움직임 패턴(W10~W13)은 W4·W5 뒤, W7 전에 — 보스·마법 몹 공격이 같은 경로 테이블을 쓰게 하려면 먼저 있어야 한다.
+권장 순서: W0 → W1 → W2 → W3 → W4 → W5 → W10 → W11 → W12 → W6+W13(CSV 한 번에) → W7(M3) → W8(M7), W9 는 매 단계.
 
 ---
 
@@ -134,6 +192,9 @@ W1~W6 은 M3(적 종류) **전에** 하는 게 좋다 — M3 가 W7 로 같은 �
 | D2 | 판정 크기와 그림 크기 | **A**: 판정 도형이 기준, 그림은 `visual_scale` 배율(기본 1) | B: 그림 크기 따로 지정(`visual_size` px) — 어긋남 허용 |
 | D3 | 장판·스윙에 몹 반경 포함 | **A**: 포함(체감상 자연스러움, 킬 수↑ → 밸런스 재조정 필요) | B: 중심점 유지(지금 밸런스 보존) |
 | D4 | 투사체 스윕 판정 도입 시점 | **A**: W4 에서 바로(비용 작음, 미래 고속 투사체 대비) | B: 속도가 판정 지름을 넘을 때까지 보류 |
+| D5 | 움직임 패턴 무기를 기존 5종과 어떻게 두나 (기초 설계의 무기는 5종) | **A**: 새 무기 행으로 추가하되 **레벨업 풀에만**(시작 무기 아님, PULSE/BOLT 와 같은 위치) — 헌법의 5종은 그대로 | B: 새 무기 없이 기존 5종의 레벨/진화 효과로만 사용(예: 스태프 Lv5 = 소용돌이) |
+| D6 | 럴커 공격의 방향 | **A**: 가장 가까운 몹(투사체 조준과 같은 `ClosestWithin`) | B: 마지막 이동 방향(`m_lastMoveDir`, 검·채찍과 같음) |
+| D7 | 궤도 공격의 수명 | **A**: `lifetime` 후 사라지고 쿨다운마다 다시 생김(뱀서 방식, 쿨감 능력치가 의미 있음) | B: 한 번 생기면 계속 유지(쿨다운 무시) |
 
 ---
 
@@ -166,6 +227,36 @@ case CardEffect::RingBurst:
 }
 ```
 
+### 움직이는 공격 추가 (W10~W13 후) — CSV 행만
+
+기존 경로·판정 시점을 조합하면 코드 수정 없음(열은 §2.5, 빈 칸 = 기본값).
+
+```csv
+id,name,effect,...,path,anchor,delivery,count,lifetime,start_radius,radial_speed,angular_speed_deg,tick_interval,rehit_interval
+blade,BLADE,piercingshot,...,orbit,player,continuous,3,4.0,80,0,180,,0.5
+vortex,VORTEX,explodingbolt,...,spiral,cast,continuous,4,3.0,20,90,240,,0.5
+spike,SPIKE,piercingshot,...,straight,cast,pulsed,1,,,,,0.08,
+```
+
+- `effect` 는 기존 투사체 효과(`piercingshot`/`explodingbolt`/`randomdamageshot`)를 그대로 쓴다 = 명중 처리. 움직임 전용 효과를 새로 만들지 않는다.
+  `lifetime` 이 있는 경로(궤도·소용돌이)는 관통 수 대신 수명으로 끝난다(관통 수 무시, 반복 타격은 `rehit_interval`).
+
+### 새 경로 추가 (예: 부메랑)
+
+1. `AttackPath` 에 `Boomerang` 열거자.
+2. 경로 테이블에 위치 함수 한 항목 — `t` 만으로 위치를 돌려주는 순수 함수(상태 누적 금지).
+3. `weapons.csv` 의 `path` 파서에 이름 한 줄. 끝 — 판정·연출·명중 처리는 그대로 따라온다.
+
+```cpp
+// game/AttackMotion.cpp — 종류별 if 대신 표 한 줄
+math::Vec2 PathBoomerang(const MotionDef& m, const MotionState& s, math::Vec2 anchor)
+{
+    const float half = m.lifetime * 0.5f;
+    const float d = m.speed * (s.t < half ? s.t : m.lifetime - s.t);   // 갔다가 돌아옴
+    return anchor + s.dir * d;
+}
+```
+
 ### 적 공격 추가 (M3)
 
 `mobs.csv` 에 `projectile`/`zone_radius`/`telegraph_sec` 를 채우면 원거리 = `Projectile{team=Enemy}`, 마법 = 예고 후 `HitShape`.
@@ -176,5 +267,7 @@ case CardEffect::RingBurst:
 - 판정과 그림에 **다른 숫자**를 쓰지 말 것 — 그림 크기는 `HitShape` + `visual_scale` 에서만 나온다.
 - `SnapshotBuilder` 에 `if (kind == …) color = …` 식 무기별 분기를 늘리지 말 것 — 표(CSV/`visualKey`)로.
 - 무기 판정을 `CollisionWorld2D` 에 몹 4096개 콜라이더로 넣지 말 것 — `MobField` 질의가 계약이다(§2.1).
+- 움직임 패턴마다 `CardEffect`/`ProjectileKind` 를 새로 만들지 말 것 — 움직임은 `path`×`delivery` 조합, 명중 처리만 `ProjectileKind`.
+- 경로 함수에서 위치를 `pos += …` 로 누적하지 말 것 — `t` 로 계산(결정론·헤드리스 재현).
 - 판정 함수 안에서 몹을 밀거나 움직이지 말 것 — 넉백이 필요하면 판정 결과(`HitReport`)를 받아 별도 단계에서.
 - 무기 숫자를 `Card.h`/`Simulation.cpp` 에 하드코딩하지 말 것 — `kCardDefs` 는 폴백일 뿐([circular-balance.md](circular-balance.md)).
