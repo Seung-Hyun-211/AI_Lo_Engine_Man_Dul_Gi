@@ -137,6 +137,8 @@ struct RayHit3D { ColliderId id; std::uint64_t user; float distance; math::Vec3 
 - **`Step()` 과 독립** — 3 질의는 `m_colliders` 를 직접 훑는다. 레이캐스트만 쓸 거면 `Step()`(N² 쌍 검사) 안 불러도 된다.
 - **`Simulation` 연동됨** (데모 씬 2): `Simulation::UpdateCrowdQueries()` 가 **프레임당 1회**(스텝 루프 뒤) `m_collision3d.Clear()` + 크라우드 개체마다 `Collider3D`(Sphere, `user` = 풀 슬롯) `Add`, 그 뒤 플레이어 시선 레이(`RaycastClosest`, `mask = kLayerCrowd3D`)를 쏴 `LookRayResult` 에 저장 → `SnapshotBuilder` 가 디버그 레이/마커 + 피격 개체 색 하이라이트. 타워 타겟팅·지면 검사도 이 패턴.
 
+> 서큘러 무기·적 공격 판정은 이 모듈이 아니라 `MobField` 질의로 한다 — [circular-combat.md](circular-combat.md) §2.1.
+
 ## 사용 방법 (How to use)
 
 **콜라이더 붙이기 (2D)**
