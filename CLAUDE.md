@@ -64,7 +64,7 @@ C++20 / Win32 / DirectX 11 기반 2D 게임 엔진 뼈대. 이 파일은 세션�
 | `circular-design.md` | **먼저 읽기.** "현재 위치" 스냅샷, 태그 [기초]/[확정]/[살]/[미정], 격차표, 개발 순서 M1~M8, 결정 기록(§12), 종류 늘리는 법 |
 | `circular-balance.md` | 몹 수·XP·레벨·이동/스태미너·능력치·캐릭터 **CSV 밸런싱 환경**(`assets/data/circular/`, F5/F6/F7, 시뮬레이터) + 앞으로 늘릴 CSV 표 계획 |
 | `circular-art-guide.md` | **이미지 추가 절차·파일 이름 규칙·이미지 사양·애니메이션 설계** (패킹은 지금 됨, 월드 스프라이트 표시는 M7) |
-| `circular-combat.md` | 무기·적 공격의 **판정 도형·연출·CSV** 를 한 구조로 묶는 설계 작업 목록 + 움직임 패턴(궤도·소용돌이·럴커 = 경로×판정 시점 조합)(W0~W13, 결정 대기 D1~D7) — 구현 전 |
+| `circular-combat.md` | 무기·적 공격 구조 = **효과(형태·도형) × 경로(직선·극좌표)**, 판정·연출 공용 `HitShape`, `CircularCombat` 분리, CSV 열 정의, SOLID·KISS·DRY 검사표. 결정 D1~D7 확정(전부 A), 작업 W1~W16 — 구현 전 |
 
 **엔진 공통**
 
@@ -100,13 +100,17 @@ C++20 / Win32 / DirectX 11 기반 2D 게임 엔진 뼈대. 이 파일은 세션�
 
 ## 설계 원칙 — 최우선 (모든 신규/수정 코드에 적용)
 
-객체지향 설계와 SOLID를 다른 모든 작업보다 우선한다. 아래 "최우선 작업"도 이 원칙을 지키는 방식으로 구현한다.
+**SOLID · KISS · DRY** 를 다른 모든 작업보다 우선한다. 아래 "최우선 작업"도 이 원칙을 지키는 방식으로 구현한다.
+설계·구조를 제안하거나 고칠 때는 이 세 가지로 **스스로 검사**하고, 위반·예외는 그 설계 문서에 표로 남긴다(예: `docs/circular-combat.md` §1.3·§1.4).
 
 - **SRP (단일 책임)** — 클래스 하나는 변경 이유가 하나여야 한다. 예전 `main.cpp`의 `Game` god class는 `platform::Win32Window` · `input::InputState` · `game::Simulation` · `game::SnapshotBuilder` · `game::Application`(조립·조율만)으로 분해됨. `main.cpp`는 진입점 한 함수. 새 코드도 이 경계를 지킨다.
 - **OCP (개방-폐쇄)** — 기존 타입 수정 없이 확장 가능해야 한다. 위젯은 `Widget` 상속으로 추가한다. 렌더러가 `snapshot.playerX/Y`처럼 특정 게임 개념을 하드코딩하지 않게 하고, 그릴 대상은 스냅샷의 균일한 primitive 배열(`Quad`/`SpriteDraw`)로만 받는다. **종류가 늘어나는 것(몹 행동·스폰 패턴·무기 효과·스테이지 흐름)은 열거+레지스트리 또는 인터페이스+테이블 — 종류별 if 사슬 금지.**
 - **LSP (리스코프 치환)** — `Widget` 파생 타입은 기반 계약(로컬 좌표 사용, 이벤트 소비 시 `true` 반환, `parentOrigin` 기준 배치)을 어기지 않는다.
 - **ISP (인터페이스 분리)** — 크고 뚱뚱한 인터페이스를 만들지 않는다. `docs/ui-architecture.md`의 `UIRenderer`(DrawFilledRect/DrawText/PushClipRect만)가 목표 형태다. 위젯에 렌더 백엔드 전체를 노출하지 않는다.
 - **DIP (의존성 역전)** — 상위 모듈은 구현이 아니라 추상에 의존한다. `game::Application`은 `render::IRenderer`(`Start/SetFrameSettings/Submit/Resize/Stop`)에만 의존하고, `main.cpp`만 `Dx11Renderer` 구상 타입을 안다 → DX12 교체 시 `main.cpp` 한 줄. `platform::Win32Window`는 `IWindowEventSink`로 이벤트를 되돌려주고 `Application`이 그것을 구현한다. `Simulation`은 `InputState`를 모르고 `PlayerIntent` 값을 받는다. UI가 `Quad` 방출에만 의존하는 것도 같은 원칙.
+- **KISS (단순하게)** — 지금 필요한 것 중 가장 단순한 구조를 고른다. 구현이 하나뿐인 곳에 인터페이스·레지스트리·설정 축을 미리 만들지 않는다(**추상은 두 번째 구현이 생길 때**). 다른 값에서 유도되는 것은 별도 축/필드로 두지 않는다(예: 판정 시점은 공격 형태가 정함, 궤도 = 반경 증가 0 인 소용돌이). "숫자에 숨은 규칙"(밀어내기 거리 같은 근사) 대신 규칙을 이름 있는 데이터로.
+- **DRY (한 곳에서만)** — 같은 **지식**(숫자·규칙·매핑)은 한 곳에만 둔다: 밸런스 숫자는 CSV, 열거 이름 매핑은 표 하나, 판정 크기와 그림 크기는 같은 값에서. 같은 뜻의 열거형 두 개·switch 안의 switch·복붙 루프(swap-remove 등)는 도우미/표로 합친다. 우연히 비슷한 코드는 합치지 않는다(뜻이 같을 때만). **문서도 DRY** — 같은 표를 여러 문서·절에 복제하지 말고 한 곳에 두고 링크한다. 허용된 예외(예: CSV 폴백 `kCardDefs`)는 예외라고 적고 함께 고친다.
+- **충돌할 때**: 가상의 미래 확장을 위한 SOLID 추상보다 KISS 가 이긴다. 단, 이미 종류가 늘어나고 있는 것(무기 효과·경로·몹 행동·스폰 패턴)은 OCP(열거+테이블)가 이긴다.
 
 추가로: `= delete`로 복사 방지, 소유권은 `unique_ptr`, raw 포인터는 비소유 관찰용, 가상 소멸자 유지, 가능한 곳에 `const`·`[[nodiscard]]`. 상속보다 합성을 우선하되 다형성이 필요한 곳(위젯, 렌더러 추상)에서는 인터페이스를 쓴다.
 
