@@ -10,7 +10,7 @@ assets/data/circular/
   balance.csv       key,value,note            몹 HP·속도·크기·XP, 스폰 거리, 레벨표 밖 성장률
   levels.csv        level,xp_to_next,note     레벨별 필요 XP (1,2,3… 빈틈 없이)
   spawn_curve.csv   time_sec,spawns_per_sec,max_alive   런 시간별 초당 스폰 수 · 살아있는 몹 상한
-  player.csv        key,value                 걷기/달리기/대쉬/스태미너 수치 (설계 §2.2)
+  player.csv        key,value                 걷기/달리기/대쉬/스태미너 수치 (설계 §2.2) + 그림·히트박스 크기
   stats.csv         stat_id,base_value,min,max,from_vit,from_int,from_cor,from_agi   능력치 정의·기초 4스텟 계수 (설계 §2.6)
   characters.csv    id,name,main_stat,start_vit..start_agi,start_weapon   플레이어블 캐릭터 (설계 §2.3)
   weapons.csv       id,name,effect,cooldown,damage,range,...,path,...   무기 10종(기초 5 + 구형 2 + 움직임 3) (열 정의 아래)
@@ -101,6 +101,8 @@ tools\run_balance_sim.bat --seconds 300 --interval 10
 | key | 기본 | 뜻 |
 |---|---|---|
 | `walk_speed` | 300 | 걷기 px/s (× `move_speed` 스탯) |
+| `sprite_width` / `sprite_height` | 64 / 128 | 플레이어 그림 크기(월드 단위). 그림은 히트박스 위에 선다(아래 변 일치, 가로 가운데) |
+| `hitbox_width` / `hitbox_height` | 48 / 48 | 플레이어 콜라이더 = 게임상 몸(이동 경계·충돌·공격 원점·몹이 쫓는 점) |
 | `run_mul` / `run_cost_per_sec` | 1.6 / 15 | 달리기 배율 / 초당 스태미너 소모 |
 | `run_resume_stamina` | 10 | 바닥나서 잠긴 달리기가 다시 풀리는 스태미너 |
 | `dash_speed_mul` / `dash_duration` | 3.5 / 0.18 | 대쉬 속도 배율 / 지속(=무적) 시간 s |
@@ -238,7 +240,7 @@ GAUNTLET/BELT).
 
 ### 공통 규칙 [살]
 
-- **id 는 소문자 영문/숫자/밑줄**(`madoknight`, `forest_imp`, `oneway_arrow_basic`). 한글 표시 이름은 `name` 열. 이미지 파일 이름이 이 id 를 그대로 쓴다([circular-art-guide.md](circular-art-guide.md) §3).
+- **id 는 소문자 영문/숫자/밑줄**(`magic_knight`, `forest_imp`, `oneway_arrow_basic`). 한글 표시 이름은 `name` 열. 이미지 파일 이름이 이 id 를 그대로 쓴다([circular-art-guide.md](circular-art-guide.md) §3).
 - **참조는 id 로만**(`stages.csv` 의 `mob_pool`, `timeline_id`, `boss_id` 등). 없는 id 참조는 **오류 행**(현재 로더의 "문제 행만 건너뛰고 보고" 규칙 그대로).
 - 새 표 = `CircularBalance` 에 `std::vector<Row>` + 로더 블록 하나(아래 "새 밸런스 항목 추가하기"의 표 방식). `Simulation` 은 `m_balance` 만 읽는다. HUD 밸런싱 줄·F5/F6·시뮬레이터는 그대로 새 표를 포함한다.
 - **[기초]·[확정] 항목(스폰 패턴 3종의 존재, 바이옴별 출현 분류, 스테이지 90초 버티기, 마계숲 노드 3종 등)을 CSV 로 뒤집을 수 있게 만들지 않는다** — CSV 는 숫자·속도·모양·개수 같은 [살] 값의 튜닝 지점이다.

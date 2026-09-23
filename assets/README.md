@@ -6,6 +6,8 @@
 assets/
   models/    FBX 모델 (테스트/데모)
   data/      디자이너가 편집하는 CSV 데이터 (data/circular = 서큘러 밸런스, docs/circular-balance.md)
+  templates/ 서큘러 그림 템플릿(실제 게임 크기 + 판정 가이드) - 이 위에 그려서 src/ 로. 패킹 안 됨 (docs/circular-art-guide.md §4.1)
+  src/       이미지 원본 → atlas/ 로 패킹 (docs/circular-art-guide.md)
 ```
 
 ## 테스트 FBX 넣는 곳

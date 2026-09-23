@@ -501,6 +501,11 @@ namespace engine::game
         // --- reads for the snapshot builder ---
         [[nodiscard]] float ElapsedTime() const { return m_elapsed; }
         [[nodiscard]] math::Vec2 PlayerPosition() const { return m_player; }
+        // The player's collider (gameplay body) and its centre. Circular: player.csv
+        // hitbox_* (the drawn sprite is bigger and stands on it). Other scenes: kPlayerSize.
+        // m_player is this box's top-left corner.
+        [[nodiscard]] math::Rect PlayerHitbox() const;
+        [[nodiscard]] math::Vec2 PlayerCenter() const;
         [[nodiscard]] bool PlayerBlocked() const { return m_playerBlocked; }
         [[nodiscard]] const std::array<math::Rect, kObstacleCount>& Obstacles() const { return m_obstacles; }
         [[nodiscard]] const std::vector<Particle>& Particles() const { return m_particles; }

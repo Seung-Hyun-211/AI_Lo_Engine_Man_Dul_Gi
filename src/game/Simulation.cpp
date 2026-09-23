@@ -331,15 +331,15 @@ namespace engine::game
         m_lastMoveDir = { 1.0f, 0.0f };
         // Re-centre the player - a re-entry after a previous run should not
         // resume wherever that run left off.
-        m_player = { kCircularView.width * 0.5f - kPlayerSize * 0.5f, kCircularView.height * 0.5f - kPlayerSize * 0.5f };
+        const PlayerTuning& body = m_balance.player;
+        m_player = { (kCircularView.width - body.hitboxWidth) * 0.5f, (kCircularView.height - body.hitboxHeight) * 0.5f };
 
         if (m_circularTestMode)
         {
             // One very tough dummy instead of the swarm (StepCircularScene
             // skips the spawn budget in test mode) - a fixed spot in front of
             // the player so a fresh run always starts facing it.
-            const math::Vec2 playerCenter = m_player + math::Vec2{ kPlayerSize * 0.5f, kPlayerSize * 0.5f };
-            m_mobs.Spawn(playerCenter + math::Vec2{ kTestDummySpawnOffset, 0.0f }, kTestDummyHealth, m_balance.mobRadius);
+            m_mobs.Spawn(PlayerCenter() + math::Vec2{ kTestDummySpawnOffset, 0.0f }, kTestDummyHealth, m_balance.mobRadius);
         }
     }
 
@@ -396,6 +396,19 @@ namespace engine::game
     {
         const float max = m_stats[StatId::StaminaMax];
         return max > 0.0f ? math::Clamp(m_stamina / max, 0.0f, 1.0f) : 0.0f;
+    }
+
+    math::Rect Simulation::PlayerHitbox() const
+    {
+        if (m_demoScene == DemoScene::Circular)
+            return { m_player.x, m_player.y, m_balance.player.hitboxWidth, m_balance.player.hitboxHeight };
+        return { m_player.x, m_player.y, kPlayerSize, kPlayerSize };
+    }
+
+    math::Vec2 Simulation::PlayerCenter() const
+    {
+        const math::Rect box = PlayerHitbox();
+        return { box.x + box.width * 0.5f, box.y + box.height * 0.5f };
     }
 
     float Simulation::PlayerHpFraction() const
@@ -491,8 +504,8 @@ namespace engine::game
         m_player = m_player + velocityDir * (speed * dt);
         // Movement box in world units (kCircularView), not the window - the
         // field must not grow or shrink with the resolution.
-        m_player.x = math::Clamp(m_player.x, 0.0f, kCircularView.width - kPlayerSize);
-        m_player.y = math::Clamp(m_player.y, 0.0f, kCircularView.height - kPlayerSize);
+        m_player.x = math::Clamp(m_player.x, 0.0f, kCircularView.width - m_balance.player.hitboxWidth);
+        m_player.y = math::Clamp(m_player.y, 0.0f, kCircularView.height - m_balance.player.hitboxHeight);
     }
 
     void Simulation::RestartCircularRun()
@@ -503,7 +516,7 @@ namespace engine::game
     void Simulation::StepCircularScene(float fixedDelta)
     {
         m_circularTime += fixedDelta;
-        const math::Vec2 playerCenter = m_player + math::Vec2{ kPlayerSize * 0.5f, kPlayerSize * 0.5f };
+        const math::Vec2 playerCenter = PlayerCenter();
 
         if (m_circularTestMode)
         {
@@ -923,8 +936,9 @@ namespace engine::game
 
         physics::Collider2D player{};
         player.shape = physics::Collider2D::Shape::Box;
-        player.center = m_player + math::Vec2{ kPlayerSize * 0.5f, kPlayerSize * 0.5f };
-        player.halfExtents = { kPlayerSize * 0.5f, kPlayerSize * 0.5f };
+        const math::Rect box = PlayerHitbox();
+        player.center = PlayerCenter();
+        player.halfExtents = { box.width * 0.5f, box.height * 0.5f };
         player.layer = kLayerPlayer;
         player.mask = kLayerObstacle;
         player.user = kPlayerUser;

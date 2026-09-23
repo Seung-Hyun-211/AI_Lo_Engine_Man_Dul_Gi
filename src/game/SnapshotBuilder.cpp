@@ -882,9 +882,13 @@ namespace engine::game
         {
             // Everything below is in world units and goes through `view` - the
             // fixed 1920x1080 world slice scaled to this window (kCircularView).
-            const math::Vec2 playerCenter = simulation.PlayerPosition()
-                + math::Vec2{ Simulation::kPlayerSize * 0.5f, Simulation::kPlayerSize * 0.5f };
-            const WorldView view = MakeCircularView(playerCenter, viewportWidth, viewportHeight);
+            // The player's sprite stands on its hitbox (bottom edges match, player.csv);
+            // the camera centres the sprite, not the hitbox, so the character reads centred.
+            const PlayerTuning& body = simulation.Balance().player;
+            const math::Rect hitbox = simulation.PlayerHitbox();
+            const math::Vec2 playerCenter = simulation.PlayerCenter();
+            const math::Vec2 spriteCenter{ playerCenter.x, hitbox.y + hitbox.height - body.spriteHeight * 0.5f };
+            const WorldView view = MakeCircularView(spriteCenter, viewportWidth, viewportHeight);
 
             const float time = simulation.ElapsedTime();
 
@@ -922,7 +926,7 @@ namespace engine::game
             const bool blinkOn = std::sin(time * 24.0f) > 0.0f;
             for (const std::uint32_t idx : mobs.ActiveIndices())
             {
-                if (std::fabs(mobX[idx] - playerCenter.x) > cullX || std::fabs(mobY[idx] - playerCenter.y) > cullY)
+                if (std::fabs(mobX[idx] - view.focus.x) > cullX || std::fabs(mobY[idx] - view.focus.y) > cullY)
                     continue;   // outside the view - nothing to draw
 
                 float r, g, b;
@@ -945,7 +949,8 @@ namespace engine::game
                 PushWorldSquare(snapshot.worldQuads, view, { mobX[idx], mobY[idx] }, mobRadius[idx] * 2.0f, { r, g, b, 1.0f });
             }
 
-            // Player: always screen-centred by construction (the view's focus).
+            // Player: the sprite rect (placeholder until art, M7) is screen-centred by
+            // construction (the view's focus); the hitbox outline shows the real collider.
             // Gentle brightness pulse - the same colour-cycling animation test as the mobs.
             // Motion tint (placeholder until sprites): dash = pale + translucent
             // (the i-frames), run = greener, else the base blue.
@@ -953,7 +958,18 @@ namespace engine::game
             math::Color playerColor{ 0.20f * playerPulse, 0.75f * playerPulse, 1.0f * playerPulse, 1.0f };
             if (simulation.Motion() == PlayerMotion::Dash) playerColor = { 0.90f, 0.95f, 1.0f, 0.55f };
             else if (simulation.Motion() == PlayerMotion::Run) playerColor = { 0.30f, 0.95f, 0.70f, 1.0f };
-            PushWorldSquare(snapshot.worldQuads, view, playerCenter, Simulation::kPlayerSize, playerColor);
+            {
+                const math::Vec2 topLeft = view.ToScreen({ spriteCenter.x - body.spriteWidth * 0.5f, spriteCenter.y - body.spriteHeight * 0.5f });
+                snapshot.worldQuads.push_back({ topLeft.x, topLeft.y, view.Size(body.spriteWidth), view.Size(body.spriteHeight),
+                                                playerColor.r, playerColor.g, playerColor.b, playerColor.a });
+                const math::Vec2 boxTopLeft = view.ToScreen({ hitbox.x, hitbox.y });
+                const float w = view.Size(hitbox.width), h = view.Size(hitbox.height), line = std::max(1.0f, view.Size(2.0f));
+                const math::Color edge{ 1.0f, 1.0f, 1.0f, 0.85f };
+                snapshot.worldQuads.push_back({ boxTopLeft.x, boxTopLeft.y, w, line, edge.r, edge.g, edge.b, edge.a });
+                snapshot.worldQuads.push_back({ boxTopLeft.x, boxTopLeft.y + h - line, w, line, edge.r, edge.g, edge.b, edge.a });
+                snapshot.worldQuads.push_back({ boxTopLeft.x, boxTopLeft.y, line, h, edge.r, edge.g, edge.b, edge.a });
+                snapshot.worldQuads.push_back({ boxTopLeft.x + w - line, boxTopLeft.y, line, h, edge.r, edge.g, edge.b, edge.a });
+            }
 
             // Attacks (docs/circular-combat.md §2.3) - every visual carries the
             // HitShape its hit used, drawn through the one drawer table, in its

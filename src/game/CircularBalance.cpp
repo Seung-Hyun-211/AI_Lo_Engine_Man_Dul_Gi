@@ -240,6 +240,10 @@ namespace engine::game
                 { "dash_chain_penalty",   &p.dashChainPenalty,   0.0f, true  },
                 { "stamina_regen_per_sec",&p.staminaRegenPerSec, 0.0f, true  },
                 { "stamina_regen_delay",  &p.staminaRegenDelay,  0.0f, true  },
+                { "sprite_width",         &p.spriteWidth,        0.0f, false },
+                { "sprite_height",        &p.spriteHeight,       0.0f, false },
+                { "hitbox_width",         &p.hitboxWidth,        0.0f, false },
+                { "hitbox_height",        &p.hitboxHeight,       0.0f, false },
             };
             LoadKeyValueFile(loader, dir, "player.csv", entries, std::size(entries));
         }
