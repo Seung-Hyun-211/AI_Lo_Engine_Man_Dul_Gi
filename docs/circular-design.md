@@ -459,6 +459,8 @@ PULSE(`RadialPulse`)와 BOLT(`NearestBolt`)는 이 5종이 구현되기 전까�
   돌진 패턴(`kChargePattern`)도 돌지 않는다(`Simulation::m_circularTestMode`) — 몹은 죽지 않는 이상 하나만 유지되고
   플레이어를 향해 Seek 는 그대로 한다(이동 대상으로도 씀). 더미가 죽으면(오버플로우가 극단적으로 쌓인 빌드 등) 즉시
   다시 스폰. HUD 상단에 주황 "TEST SCENE" 배너가 항상 떠서 실수로 진짜 런으로 착각하지 않게 한다.
+  **콜라이더 표시 ✅**: 테스트 씬에서만 모든 콜라이더를 초록 외곽선으로 그린다 — 플레이어 히트박스(48×72 상자), 몹 충돌 원, 날아가는 투사체의 판정 원
+  (`SnapshotBuilder` `DrawColliderDebug`). 공격 범위는 원래부터 판정 도형 그대로 그려진다(`AttackVisual`). 일반 게임에서는 안 보인다.
 - **SETTINGS/QUIT 버튼은 로비에서 빠졌다** — Settings 는 인게임 ESC 로만 열리고(그 안의 "LOBBY" 버튼이 로비로 돌아가는
   유일한 길), 종료는 창의 OS 닫기(X/Alt+F4)뿐이다. 그래서 `platform::Win32Window::RequestClose()` 는 **지금 호출하는 곳이
   없다**(죽은 코드가 아니라 대기 중인 플랫폼 API — §7.6 의 타이틀 "종료" 버튼이 생기면 그게 첫 호출자다).

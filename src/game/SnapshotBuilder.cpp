@@ -877,6 +877,39 @@ namespace engine::game
         // along in the snapshot and is resolved on the render thread
         // instead). MobField is SoA end to end - this reads its raw arrays
         // directly; no per-mob struct exists to copy out of.
+        // Test scene only (LOBBY -> TEST SCENE): every collider as a green
+        // outline over the art - the player's hitbox box, each mob's collision
+        // circle, each live projectile's hit circle - so what the game tests
+        // can be checked against what is drawn. Attack areas already show
+        // their exact hit shape as AttackVisual outlines.
+        void DrawColliderDebug(std::vector<render::Quad>& quads, const Simulation& simulation, const WorldView& view)
+        {
+            const math::Color color{ 0.25f, 1.0f, 0.35f, 0.9f };
+            const float line = std::max(1.0f, view.Size(2.0f));
+            const float dot = std::max(2.0f, view.Size(3.0f));
+
+            const math::Rect box = simulation.PlayerHitbox();
+            const math::Vec2 topLeft = view.ToScreen({ box.x, box.y });
+            const float w = view.Size(box.width), h = view.Size(box.height);
+            quads.push_back({ topLeft.x, topLeft.y, w, line, color.r, color.g, color.b, color.a });
+            quads.push_back({ topLeft.x, topLeft.y + h - line, w, line, color.r, color.g, color.b, color.a });
+            quads.push_back({ topLeft.x, topLeft.y, line, h, color.r, color.g, color.b, color.a });
+            quads.push_back({ topLeft.x + w - line, topLeft.y, line, h, color.r, color.g, color.b, color.a });
+
+            const MobField& mobs = simulation.Mobs();
+            for (const std::uint32_t idx : mobs.ActiveIndices())
+                DrawDottedRing(quads, view.ToScreen({ mobs.PosX()[idx], mobs.PosY()[idx] }), view.Size(mobs.Radius()[idx]), dot, color);
+
+            const std::vector<CardDef>& weapons = simulation.Balance().weapons;
+            for (const AttackInstance& attack : simulation.Combat().Instances())
+            {
+                if (attack.defIndex >= weapons.size()) continue;
+                const CardDef& def = weapons[attack.defIndex];
+                if (SpecOf(def.effect).form != AttackForm::Projectile) continue;
+                DrawDottedRing(quads, view.ToScreen(attack.pos), view.Size(def.hitRadius * attack.scale), dot, color);
+            }
+        }
+
         void BuildCircularScene(render::RenderSnapshot& snapshot, const Simulation& simulation,
                                 int viewportWidth, int viewportHeight)
         {
@@ -951,7 +984,8 @@ namespace engine::game
             }
 
             // Player: the sprite rect (placeholder until art, M7) is screen-centred by
-            // construction (the view's focus); the hitbox outline shows the real collider.
+            // construction (the view's focus). The hitbox is shown in the test scene
+            // (DrawColliderDebug).
             // Gentle brightness pulse - the same colour-cycling animation test as the mobs.
             // Motion tint (placeholder until sprites): dash = pale + translucent
             // (the i-frames), run = greener, else the base blue.
@@ -963,13 +997,6 @@ namespace engine::game
                 const math::Vec2 topLeft = view.ToScreen({ spriteCenter.x - body.spriteWidth * 0.5f, spriteCenter.y - body.spriteHeight * 0.5f });
                 snapshot.worldQuads.push_back({ topLeft.x, topLeft.y, view.Size(body.spriteWidth), view.Size(body.spriteHeight),
                                                 playerColor.r, playerColor.g, playerColor.b, playerColor.a });
-                const math::Vec2 boxTopLeft = view.ToScreen({ hitbox.x, hitbox.y });
-                const float w = view.Size(hitbox.width), h = view.Size(hitbox.height), line = std::max(1.0f, view.Size(2.0f));
-                const math::Color edge{ 1.0f, 1.0f, 1.0f, 0.85f };
-                snapshot.worldQuads.push_back({ boxTopLeft.x, boxTopLeft.y, w, line, edge.r, edge.g, edge.b, edge.a });
-                snapshot.worldQuads.push_back({ boxTopLeft.x, boxTopLeft.y + h - line, w, line, edge.r, edge.g, edge.b, edge.a });
-                snapshot.worldQuads.push_back({ boxTopLeft.x, boxTopLeft.y, line, h, edge.r, edge.g, edge.b, edge.a });
-                snapshot.worldQuads.push_back({ boxTopLeft.x + w - line, boxTopLeft.y, line, h, edge.r, edge.g, edge.b, edge.a });
             }
 
             // Attacks (docs/circular-combat.md §2.3) - every visual carries the
@@ -1017,6 +1044,8 @@ namespace engine::game
                 PushWorldSquare(snapshot.worldQuads, view, shot.pos, 2.0f * def->hitRadius * shot.scale * def->visualScale,
                                 RgbColor(def->color, 1.0f));
             }
+
+            if (simulation.IsCircularTestMode()) DrawColliderDebug(snapshot.worldQuads, simulation, view);
 
             DrawLetterbox(snapshot.worldQuads, view, viewportWidth, viewportHeight);
         }
