@@ -27,6 +27,18 @@ namespace engine::game
         /*capacity*/ 4096, /*radius*/ 10.0f, /*speed*/ 90.0f, /*health*/ 20.0f,
         /*xpValue*/ 1, /*spawnsPerSecond*/ 100.0f, /*spawnRadius*/ 640.0f };
 
+    // The world area the Circular camera always shows, in world units (the unit
+    // every speed/range/size in the CSVs uses). SnapshotBuilder scales it
+    // uniformly to fit the window (letterboxed when the aspect differs), so
+    // every resolution sees exactly the same slice of the world. The player's
+    // movement box is this same size, independent of the window.
+    struct ViewConfig
+    {
+        float width;
+        float height;
+    };
+    inline constexpr ViewConfig kCircularView{ 1920.0f, 1080.0f };
+
     // XP / level-up / deck limits (docs/circular-design.md §3/§10). XP needed
     // for level n -> n+1 is baseXp * xpGrowth^(n-1).
     struct ProgressionConfig

@@ -27,6 +27,7 @@
 | | 값 |
 |---|---|
 | 공간 | **픽셀**, 원점 **좌상단**, **+Y 아래** (Win32 클라이언트 + `quad2d.hlsl`/`sprite2d.hlsl`) |
+| 서큘러 월드 단위 | **월드 단위 = 1920×1080 화면일 때의 1px.** 카메라는 항상 월드 `kCircularView`(1920×1080, `game/CircularConfig.h`) 만큼을 보여 주고 창 크기에 맞춰 **균일 확대·축소**(비율이 다르면 레터박스) — `SnapshotBuilder` `WorldView`. 속도·사거리·크기(CSV 의 "px")는 전부 월드 단위라 해상도와 무관하다. 게임 로직에 화면 픽셀을 섞지 말 것 |
 | 색 | `math::Color` = **linear RGBA 0..1, straight(비-premultiplied) alpha** |
 | 입력 축 → 2D 이동 | `PlayerIntent.move.y` 는 3D 와 공유하는 **앞 = +** 값. 2D 플레이어(`Simulation::m_player`, 서큘러)는 `+Y 아래`라서 `Simulation::Step` 이 **한 곳에서** `-move.y` 로 뒤집는다. 다른 2D 코드는 다시 뒤집지 말 것(이중 반전 → W 가 아래로 가던 버그의 원인) |
 

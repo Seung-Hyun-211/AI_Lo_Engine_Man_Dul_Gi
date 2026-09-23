@@ -1,5 +1,6 @@
 #include "game/SnapshotBuilder.h"
 
+#include "game/CircularConfig.h"
 #include "math/Math.h"
 
 #include <algorithm>
@@ -48,6 +49,67 @@ namespace engine::game
             }
         }
 
+        // --- Circular camera (docs/circular-design.md §8) ---------------------
+        // World -> screen for the 2D scene: a fixed kCircularView-sized slice of
+        // the world centred on `focus`, scaled uniformly to fit the window, so
+        // every resolution sees the same area (bigger window = bigger, not more).
+        // When the window's aspect differs, the slice is centred and the rest
+        // is letterboxed (see DrawLetterbox).
+        struct WorldView
+        {
+            math::Vec2 focus{};          // world point at the centre of the view
+            math::Vec2 screenCenter{};
+            float scale{ 1.0f };         // screen px per world unit
+            math::Rect screenRect{};     // where the kCircularView slice lands on screen
+
+            [[nodiscard]] math::Vec2 ToScreen(math::Vec2 world) const { return (world - focus) * scale + screenCenter; }
+            [[nodiscard]] float Size(float worldLength) const { return worldLength * scale; }
+        };
+
+        WorldView MakeCircularView(math::Vec2 focus, int viewportWidth, int viewportHeight)
+        {
+            WorldView view;
+            const float vw = static_cast<float>(viewportWidth);
+            const float vh = static_cast<float>(viewportHeight);
+            view.focus = focus;
+            view.screenCenter = { vw * 0.5f, vh * 0.5f };
+            view.scale = std::min(vw / kCircularView.width, vh / kCircularView.height);
+            const float w = kCircularView.width * view.scale;
+            const float h = kCircularView.height * view.scale;
+            view.screenRect = { (vw - w) * 0.5f, (vh - h) * 0.5f, w, h };
+            return view;
+        }
+
+        // Black bars over whatever lies outside the fixed view (only when the
+        // window's aspect isn't kCircularView's) - drawn last in the world list
+        // so nothing from outside the slice shows through. HUD (uiQuads) still
+        // anchors to the full window.
+        void DrawLetterbox(std::vector<render::Quad>& quads, const WorldView& view, int viewportWidth, int viewportHeight)
+        {
+            const float vw = static_cast<float>(viewportWidth);
+            const float vh = static_cast<float>(viewportHeight);
+            const math::Rect& r = view.screenRect;
+            if (r.x > 0.5f)
+            {
+                quads.push_back({ 0.0f, 0.0f, r.x, vh, 0.0f, 0.0f, 0.0f, 1.0f });
+                quads.push_back({ r.x + r.width, 0.0f, vw - (r.x + r.width), vh, 0.0f, 0.0f, 0.0f, 1.0f });
+            }
+            if (r.y > 0.5f)
+            {
+                quads.push_back({ 0.0f, 0.0f, vw, r.y, 0.0f, 0.0f, 0.0f, 1.0f });
+                quads.push_back({ 0.0f, r.y + r.height, vw, vh - (r.y + r.height), 0.0f, 0.0f, 0.0f, 1.0f });
+            }
+        }
+
+        // A square of world-space side `worldSize` centred on `world`.
+        void PushWorldSquare(std::vector<render::Quad>& quads, const WorldView& view, math::Vec2 world, float worldSize,
+                             math::Color color)
+        {
+            const math::Vec2 p = view.ToScreen(world);
+            const float size = view.Size(worldSize);
+            quads.push_back({ p.x - size * 0.5f, p.y - size * 0.5f, size, size, color.r, color.g, color.b, color.a });
+        }
+
 
         // Dots every `spacing` px along a polyline (closed = back to the first
         // point) - the flat-shape stand-in for an outline, same look as
@@ -88,36 +150,37 @@ namespace engine::game
 
         // --- attack outlines (docs/circular-combat.md §2.3) -------------------
         // One drawer per HitShapeKind, fed the very HitShape the hit used, so the
-        // outline is the hit area (x the weapon's visual_scale). `offset` maps
-        // world to screen.
-        using OutlineDrawer = void (*)(std::vector<render::Quad>&, const HitShape&, math::Vec2 offset, float scale, math::Color);
+        // outline is the hit area (x the weapon's visual_scale, `scale`), mapped
+        // to the screen through the camera `view`.
+        constexpr float kOutlineDotWorld = 8.0f;   // dot size in world units (scales with the view like everything else)
+        using OutlineDrawer = void (*)(std::vector<render::Quad>&, const HitShape&, const WorldView& view, float scale, math::Color);
 
-        void OutlineCircle(std::vector<render::Quad>& quads, const HitShape& s, math::Vec2 offset, float scale, math::Color color)
+        void OutlineCircle(std::vector<render::Quad>& quads, const HitShape& s, const WorldView& view, float scale, math::Color color)
         {
-            DrawDottedRing(quads, s.center + offset, s.radius * scale, 8.0f, color);
+            DrawDottedRing(quads, view.ToScreen(s.center), view.Size(s.radius * scale), view.Size(kOutlineDotWorld), color);
         }
 
-        void OutlineArc(std::vector<render::Quad>& quads, const HitShape& s, math::Vec2 offset, float scale, math::Color color)
+        void OutlineArc(std::vector<render::Quad>& quads, const HitShape& s, const WorldView& view, float scale, math::Color color)
         {
-            const math::Vec2 center = s.center + offset;
+            const math::Vec2 center = view.ToScreen(s.center);
             const float facing = std::atan2(s.dir.y, s.dir.x);
             std::vector<math::Vec2> points{ center };
-            AppendArc(points, center, s.radius * scale, facing - s.halfAngle, facing + s.halfAngle, 12);
-            DrawDottedPolyline(quads, points, true, 8.0f, color);
+            AppendArc(points, center, view.Size(s.radius * scale), facing - s.halfAngle, facing + s.halfAngle, 12);
+            DrawDottedPolyline(quads, points, true, view.Size(kOutlineDotWorld), color, view.Size(18.0f));
         }
 
-        void OutlineCapsule(std::vector<render::Quad>& quads, const HitShape& s, math::Vec2 offset, float scale, math::Color color)
+        void OutlineCapsule(std::vector<render::Quad>& quads, const HitShape& s, const WorldView& view, float scale, math::Color color)
         {
-            const math::Vec2 start = s.center + offset;
-            const math::Vec2 end = start + (s.end - s.center) * scale;
-            const float width = s.radius * scale;
+            const math::Vec2 start = view.ToScreen(s.center);
+            const math::Vec2 end = start + (s.end - s.center) * (scale * view.scale);
+            const float width = view.Size(s.radius * scale);
             const math::Vec2 axis = end - start;
             const float heading = math::Length(axis) > 0.0f ? std::atan2(axis.y, axis.x) : 0.0f;
             constexpr float kHalfPi = 1.57079632679f;
             std::vector<math::Vec2> points;
             AppendArc(points, end, width, heading - kHalfPi, heading + kHalfPi, 6);           // far cap
             AppendArc(points, start, width, heading + kHalfPi, heading + 3.0f * kHalfPi, 6);  // near cap
-            DrawDottedPolyline(quads, points, true, 8.0f, color);
+            DrawDottedPolyline(quads, points, true, view.Size(kOutlineDotWorld), color, view.Size(18.0f));
         }
 
         constexpr OutlineDrawer kOutlineDrawers[] = { &OutlineCircle, &OutlineArc, &OutlineCapsule };
@@ -817,11 +880,11 @@ namespace engine::game
         void BuildCircularScene(render::RenderSnapshot& snapshot, const Simulation& simulation,
                                 int viewportWidth, int viewportHeight)
         {
-            const math::Vec2 screenCenter{ static_cast<float>(viewportWidth) * 0.5f,
-                                           static_cast<float>(viewportHeight) * 0.5f };
+            // Everything below is in world units and goes through `view` - the
+            // fixed 1920x1080 world slice scaled to this window (kCircularView).
             const math::Vec2 playerCenter = simulation.PlayerPosition()
                 + math::Vec2{ Simulation::kPlayerSize * 0.5f, Simulation::kPlayerSize * 0.5f };
-            const auto toScreen = [&](math::Vec2 world) { return world - playerCenter + screenCenter; };
+            const WorldView view = MakeCircularView(playerCenter, viewportWidth, viewportHeight);
 
             const float time = simulation.ElapsedTime();
 
@@ -832,11 +895,11 @@ namespace engine::game
             {
                 const float progress = math::Clamp(1.0f - zone.warnLeft / zone.warnTotal, 0.0f, 1.0f);
                 const float pulse = 0.5f + 0.5f * std::sin(time * 14.0f);
-                const math::Vec2 topLeft = toScreen({ zone.center.x - zone.halfSize, zone.center.y - zone.halfSize });
-                const float side = zone.halfSize * 2.0f;
+                const math::Vec2 topLeft = view.ToScreen({ zone.center.x - zone.halfSize, zone.center.y - zone.halfSize });
+                const float side = view.Size(zone.halfSize * 2.0f);
                 snapshot.worldQuads.push_back({ topLeft.x, topLeft.y, side, side,
                                                 1.0f, 0.10f, 0.08f, 0.10f + 0.25f * progress + 0.10f * pulse * progress });
-                constexpr float border = 4.0f;   // outline so the edge reads even at low fill alpha
+                const float border = view.Size(4.0f);   // outline so the edge reads even at low fill alpha
                 const float edgeA = 0.55f + 0.35f * progress;
                 snapshot.worldQuads.push_back({ topLeft.x, topLeft.y, side, border, 1.0f, 0.15f, 0.10f, edgeA });
                 snapshot.worldQuads.push_back({ topLeft.x, topLeft.y + side - border, side, border, 1.0f, 0.15f, 0.10f, edgeA });
@@ -853,14 +916,14 @@ namespace engine::game
             const std::vector<float>& mobX = mobs.PosX();
             const std::vector<float>& mobY = mobs.PosY();
             const std::vector<float>& mobRadius = mobs.Radius();
-            const float cullX = static_cast<float>(viewportWidth) * 0.5f + 32.0f;
-            const float cullY = static_cast<float>(viewportHeight) * 0.5f + 32.0f;
+            // Cull in world units against the fixed view (+ a margin for the mob's own size).
+            const float cullX = kCircularView.width * 0.5f + 32.0f;
+            const float cullY = kCircularView.height * 0.5f + 32.0f;
             const bool blinkOn = std::sin(time * 24.0f) > 0.0f;
             for (const std::uint32_t idx : mobs.ActiveIndices())
             {
-                const math::Vec2 screenPos = toScreen({ mobX[idx], mobY[idx] });
-                if (std::fabs(screenPos.x - screenCenter.x) > cullX || std::fabs(screenPos.y - screenCenter.y) > cullY)
-                    continue;   // off-screen (spawn ring is 640px out) - nothing to draw
+                if (std::fabs(mobX[idx] - playerCenter.x) > cullX || std::fabs(mobY[idx] - playerCenter.y) > cullY)
+                    continue;   // outside the view - nothing to draw
 
                 float r, g, b;
                 switch (mobs.State(idx))
@@ -879,12 +942,10 @@ namespace engine::game
                     break;
                 }
                 }
-                const float d = mobRadius[idx] * 2.0f;
-                snapshot.worldQuads.push_back({ screenPos.x - mobRadius[idx], screenPos.y - mobRadius[idx], d, d,
-                                                r, g, b, 1.0f });
+                PushWorldSquare(snapshot.worldQuads, view, { mobX[idx], mobY[idx] }, mobRadius[idx] * 2.0f, { r, g, b, 1.0f });
             }
 
-            // Player: always screen-centred by construction (toScreen(playerCenter) == screenCenter).
+            // Player: always screen-centred by construction (the view's focus).
             // Gentle brightness pulse - the same colour-cycling animation test as the mobs.
             // Motion tint (placeholder until sprites): dash = pale + translucent
             // (the i-frames), run = greener, else the base blue.
@@ -892,10 +953,7 @@ namespace engine::game
             math::Color playerColor{ 0.20f * playerPulse, 0.75f * playerPulse, 1.0f * playerPulse, 1.0f };
             if (simulation.Motion() == PlayerMotion::Dash) playerColor = { 0.90f, 0.95f, 1.0f, 0.55f };
             else if (simulation.Motion() == PlayerMotion::Run) playerColor = { 0.30f, 0.95f, 0.70f, 1.0f };
-            snapshot.worldQuads.push_back({ screenCenter.x - Simulation::kPlayerSize * 0.5f,
-                                            screenCenter.y - Simulation::kPlayerSize * 0.5f,
-                                            Simulation::kPlayerSize, Simulation::kPlayerSize,
-                                            playerColor.r, playerColor.g, playerColor.b, playerColor.a });
+            PushWorldSquare(snapshot.worldQuads, view, playerCenter, Simulation::kPlayerSize, playerColor);
 
             // Attacks (docs/circular-combat.md §2.3) - every visual carries the
             // HitShape its hit used, drawn through the one drawer table, in its
@@ -905,7 +963,6 @@ namespace engine::game
             const auto weaponOf = [&](std::uint8_t defIndex) -> const CardDef* {
                 return defIndex < weapons.size() ? &weapons[defIndex] : nullptr;   // F5 can shrink the table mid-run
             };
-            const math::Vec2 worldToScreen = screenCenter - playerCenter;
             for (const AttackVisual& visual : simulation.Combat().Visuals())
             {
                 const CardDef* def = weaponOf(visual.defIndex);
@@ -918,18 +975,15 @@ namespace engine::game
                     const float t = visual.life > 0.0f ? math::Clamp(visual.ageLeft / visual.life, 0.0f, 1.0f) : 0.0f;
                     const float blink = std::sin(visual.ageLeft * 55.0f) > 0.0f ? 1.0f : 0.35f;
                     kOutlineDrawers[static_cast<std::size_t>(visual.shape.kind)](
-                        snapshot.worldQuads, visual.shape, worldToScreen, scale, RgbColor(rgb, t * blink));
+                        snapshot.worldQuads, visual.shape, view, scale, RgbColor(rgb, t * blink));
                     break;
                 }
                 case VisualStyle::Travel:
                 {
                     // A dot flying from the capsule's start to its end over its life.
                     const float t = visual.life > 0.0f ? math::Clamp(1.0f - visual.ageLeft / visual.life, 0.0f, 1.0f) : 1.0f;
-                    const math::Vec2 pos = toScreen(visual.shape.center + (visual.shape.end - visual.shape.center) * t);
-                    const float size = 2.0f * visual.shape.radius * scale;
-                    const math::Color color = RgbColor(rgb, 1.0f);
-                    snapshot.worldQuads.push_back({ pos.x - size * 0.5f, pos.y - size * 0.5f, size, size,
-                                                    color.r, color.g, color.b, color.a });
+                    PushWorldSquare(snapshot.worldQuads, view, visual.shape.center + (visual.shape.end - visual.shape.center) * t,
+                                    2.0f * visual.shape.radius * scale, RgbColor(rgb, 1.0f));
                     break;
                 }
                 }
@@ -943,12 +997,11 @@ namespace engine::game
             {
                 const CardDef* def = weaponOf(shot.defIndex);
                 if (def == nullptr || SpecOf(def->effect).form != AttackForm::Projectile) continue;
-                const float size = 2.0f * def->hitRadius * shot.scale * def->visualScale;
-                const math::Color color = RgbColor(def->color, 1.0f);
-                const math::Vec2 pos = toScreen(shot.pos);
-                snapshot.worldQuads.push_back({ pos.x - size * 0.5f, pos.y - size * 0.5f, size, size,
-                                                color.r, color.g, color.b, color.a });
+                PushWorldSquare(snapshot.worldQuads, view, shot.pos, 2.0f * def->hitRadius * shot.scale * def->visualScale,
+                                RgbColor(def->color, 1.0f));
             }
+
+            DrawLetterbox(snapshot.worldQuads, view, viewportWidth, viewportHeight);
         }
 
 #if defined(ENGINE_WITH_3D)

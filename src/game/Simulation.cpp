@@ -331,8 +331,7 @@ namespace engine::game
         m_lastMoveDir = { 1.0f, 0.0f };
         // Re-centre the player - a re-entry after a previous run should not
         // resume wherever that run left off.
-        m_player = { static_cast<float>(m_worldWidth) * 0.5f - kPlayerSize * 0.5f,
-                     static_cast<float>(m_worldHeight) * 0.5f - kPlayerSize * 0.5f };
+        m_player = { kCircularView.width * 0.5f - kPlayerSize * 0.5f, kCircularView.height * 0.5f - kPlayerSize * 0.5f };
 
         if (m_circularTestMode)
         {
@@ -490,8 +489,10 @@ namespace engine::game
         m_playerHp = std::min(m_stats[StatId::MaxHp], m_playerHp + m_stats[StatId::HpRegen] * dt);
 
         m_player = m_player + velocityDir * (speed * dt);
-        m_player.x = math::Clamp(m_player.x, 0.0f, std::max(0.0f, static_cast<float>(m_worldWidth) - kPlayerSize));
-        m_player.y = math::Clamp(m_player.y, 0.0f, std::max(0.0f, static_cast<float>(m_worldHeight) - kPlayerSize));
+        // Movement box in world units (kCircularView), not the window - the
+        // field must not grow or shrink with the resolution.
+        m_player.x = math::Clamp(m_player.x, 0.0f, kCircularView.width - kPlayerSize);
+        m_player.y = math::Clamp(m_player.y, 0.0f, kCircularView.height - kPlayerSize);
     }
 
     void Simulation::RestartCircularRun()
