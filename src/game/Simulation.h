@@ -532,7 +532,7 @@ namespace engine::game
 
         // Player HP (docs/circular-design.md §2.6): regenerates via hp_regen and
         // is healed on kill via life_steal (both applied in StepCircularPlayer /
-        // ExecuteCard). No damage source yet (mob contact damage is M3), so it
+        // StepCombat). No damage source yet (mob contact damage is M3), so it
         // sits at max until that lands - the numbers are wired and visible now
         // so they don't need touching again when it does.
         [[nodiscard]] float PlayerHp() const { return m_playerHp; }

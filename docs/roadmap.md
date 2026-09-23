@@ -204,7 +204,7 @@ XP/레벨업 3택 모달([살])·공격 연출(전부 평면 도형, `EffectPass
 
 사용자 확정 사항(레벨업 유지, 슬롯 6/6·Lv5·오버플로우, 대쉬 무적·스태미너 규칙, 무한 필드 90초, 노드 3종, 능력치 체계 등)은 [circular-design.md](circular-design.md) §12.1, 남은 질문은 §12.3.
 
-**전투 구조 정리(M3 전에 권장)**: 판정 도형·경로(궤도·소용돌이·럴커)·연출·CSV 를 한 구조로 — 작업 W14→…→W6+W13, 결정 D1~D7 확정. [circular-combat.md](circular-combat.md) §3. 그 첫 단계(W14 `CircularCombat` 분리)는 `Simulation` god class(서큘러+3D 1946줄) 분해의 시작이기도 하다 — 나머지(스폰·레벨업·3D 디펜스) 분리는 후보로 남긴다.
+**전투 구조 ✅(2026-09-23)**: 판정 도형·경로(궤도·소용돌이·럴커)·연출·CSV 를 한 구조로 — W1~W16 구현, 남은 W7(적 공격)은 M3, W8(스프라이트)은 M7 때. [circular-combat.md](circular-combat.md) §3. W14(`CircularCombat` 분리)는 `Simulation` god class 분해의 시작이기도 하다 — 나머지(스폰·레벨업·3D 디펜스) 분리는 후보로 남긴다.
 
 ---
 

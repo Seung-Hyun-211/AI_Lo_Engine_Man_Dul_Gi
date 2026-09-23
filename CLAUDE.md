@@ -64,7 +64,7 @@ C++20 / Win32 / DirectX 11 기반 2D 게임 엔진 뼈대. 이 파일은 세션�
 | `circular-design.md` | **먼저 읽기.** "현재 위치" 스냅샷, 태그 [기초]/[확정]/[살]/[미정], 격차표, 개발 순서 M1~M8, 결정 기록(§12), 종류 늘리는 법 |
 | `circular-balance.md` | 몹 수·XP·레벨·이동/스태미너·능력치·캐릭터 **CSV 밸런싱 환경**(`assets/data/circular/`, F5/F6/F7, 시뮬레이터) + 앞으로 늘릴 CSV 표 계획 |
 | `circular-art-guide.md` | **이미지 추가 절차·파일 이름 규칙·이미지 사양·애니메이션 설계** (패킹은 지금 됨, 월드 스프라이트 표시는 M7) |
-| `circular-combat.md` | 무기·적 공격 구조 = **효과(형태·도형) × 경로(직선·극좌표)**, 판정·연출 공용 `HitShape`, `CircularCombat` 분리, CSV 열 정의, SOLID·KISS·DRY 검사표. 결정 D1~D7 확정(전부 A), 작업 W1~W16 — 구현 전 |
+| `circular-combat.md` | 무기·적 공격 구조 = **효과(형태·도형) × 경로(직선·극좌표)**, 판정·연출 공용 `HitShape`, `CircularCombat` 분리, SOLID·KISS·DRY 검사표, 사용법(열 정의는 `circular-balance.md`). 결정 D1~D7 확정(전부 A), W1~W16 구현됨(W7 적 공격 = M3, W8 스프라이트 = M7) |
 
 **엔진 공통**
 

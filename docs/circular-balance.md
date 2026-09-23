@@ -13,7 +13,7 @@ assets/data/circular/
   player.csv        key,value                 걷기/달리기/대쉬/스태미너 수치 (설계 §2.2)
   stats.csv         stat_id,base_value,min,max,from_vit,from_int,from_cor,from_agi   능력치 정의·기초 4스텟 계수 (설계 §2.6)
   characters.csv    id,name,main_stat,start_vit..start_agi,start_weapon   플레이어블 캐릭터 (설계 §2.3)
-  weapons.csv       name,effect,cooldown,damage,range,...   무기 7종(기초 5 + 구형 2) (설계 §3.2)
+  weapons.csv       id,name,effect,cooldown,damage,range,...,path,...   무기 10종(기초 5 + 구형 2 + 움직임 3) (열 정의 아래)
   accessories.csv   name,stat,multiplicative,amount,max_level   장신구 6종 (설계 §3.3)
 
 game/CircularBalance.{h,cpp}   CSV → CircularBalance (몹/레벨/스폰 곡선 평가기)
@@ -121,20 +121,47 @@ stamina_regen, dash_cost_mul, dash_chain_penalty_mul, dash_cooldown_mul`. 나머
 ### characters.csv — 플레이어블 캐릭터 (M1)
 
 `id,name,main_stat,start_vit,start_int,start_cor,start_agi,start_weapon` 전부 필수. `main_stat` = `vit|int|cor|agi`,
-`start_*` ≥ 0(주력에 가장 높게), `start_weapon` = `weapons.csv` 의 무기 이름(대소문자 무시), `name` 은 ASCII(HUD
+`start_*` ≥ 0(주력에 가장 높게), `start_weapon` = `weapons.csv` 의 무기 `id`, `name` 은 ASCII(HUD
 폰트에 한글 없음). 중복 id/모르는 무기/잘못된 값은 그 행만 오류로 건너뛰고, 유효 행이 하나도 없으면 내장 4종. 게임에서는 **F7**
 로 캐릭터 선택 모달을 열어 확인한다(고르면 새 런). 능력치 결과는 화면 왼쪽 아래 두 번째·세 번째 줄에 나온다.
 
-### weapons.csv — 무기 (M5)
+### weapons.csv — 무기 (M5 + 전투 구조 W6·W13)
 
-`name,effect,cooldown,damage,range,base_targets,max_level,damage_per_level,range_per_level,cooldown_scale,
-levels_per_extra_target` 전부 필수. `effect` = `radialpulse|nearestbolt|arcswing|lineswing|explodingbolt|
-piercingshot|randomdamageshot`(대소문자 무시 — 새 효과는 `CardEffect` 열거자 + `ExecuteCard` case 가 먼저 있어야 이 열에
-쓸 수 있다). `cone_half_angle_deg`(검)/`line_half_width`(채찍)/`projectile_speed`(스태프·단검·트럼프 카드)/
-`explode_radius`(스태프)/`damage_max`(트럼프 카드, 롤 상한)는 무기 종류별 선택 열 — 비우면 0(그 무기엔 안 씀).
-`overflow_stat`/`overflow_value`([circular-design.md](circular-design.md) §3.4 오버플로우)도 선택 열 — `overflow_stat` 이 비어 있으면 그 무기는 최대 레벨이 돼도
-오버플로우를 제안하지 않는다. `name` 이 식별자(캐릭터 시작 무기·레벨업 라벨 전부 이 이름으로 찾는다), 중복/모르는 effect/
-필수 열 파싱 실패는 그 행만 오류로 건너뛴다. 유효 행이 하나도 없으면 내장 7종(PULSE/BOLT + 기초 설계 5종).
+**열 정의는 여기 한 곳**(구조 설명은 [circular-combat.md](circular-combat.md) §2). 필수: `id,name,effect,cooldown,damage,range,
+base_targets,max_level,damage_per_level,range_per_level,cooldown_scale,levels_per_extra_target`. 나머지는 선택 — 빈 칸 = 기본값.
+
+| 열 | 값 | 기본 | 뜻 |
+|---|---|---|---|
+| `id` | 소문자·숫자·밑줄 | (필수) | 식별자. `characters.csv` 의 `start_weapon` 과 이미지 이름(`wpn_<id>_icon`, `prj_<id>_NN`)이 이걸로 찾는다 |
+| `name` | ASCII | (필수) | 레벨업·HUD 표시 이름(폰트 A-Z 0-9 : - . %) |
+| `effect` | 아래 7개 | (필수) | 무엇을 어떤 도형으로 — `game/Card.h` `kEffectSpecs` 한 표가 `{형태, 도형, 명중 처리}` 로 푼다. 새 효과는 그 표에 먼저 |
+| `cooldown` `damage` `range` | 초 / 피해 / px | (필수) | 레벨 1 값. `range` = 즉시 장판의 크기, BOLT 사거리, `straight` 경로의 이동 거리 |
+| `base_targets` `levels_per_extra_target` | 정수 | (필수) | BOLT 타깃 수 / 관통 수(`piercingshot`, 사거리로 끝나는 경로만) |
+| `max_level` `damage_per_level` `range_per_level` `cooldown_scale` | | (필수) | 레벨 곡선 |
+| `cone_half_angle_deg` / `line_half_width` | 도 / px | 0 | `arcswing` 부채꼴 반각 / `lineswing` 반폭 |
+| `projectile_speed` | px/s | 0 | `straight` 경로 속도 |
+| `explode_radius` / `damage_max` | px / 피해 | 0 | `explodingbolt` 폭발 반경 / `randomdamageshot` 롤 상한 |
+| `overflow_stat` / `overflow_value` | StatId / 값 | 없음 | 최대 레벨 후 오버플로우([circular-design.md](circular-design.md) §3.4). 비우면 제안 안 함 |
+| `color` | `RRGGBB` | FFFFFF | 스프라이트 전 자리표시 색(외곽선·투사체) |
+| `hit_radius` | px | 6 | 움직이는 공격 자신의 반경(투사체 크기, 움직이는 장판의 도형 크기). 그림 = 이 판정 × `visual_scale` |
+| `visual_scale` | 배율 | 1 | 그림 배율. 1 이 아니면 "일부러 다르게" |
+| `sprite` / `fx_hit` | 이미지 접두사 | 빈 칸 | 이동 중 프레임 / 명중 이펙트 (M7 — 지금은 도형) |
+| `path` | `none` `straight` `polar` | 투사체 `straight`, 그 외 `none` | 시간에 따른 위치. `none` = 시전 지점에서 즉시 1회 |
+| `anchor` | `cast` `player` | `cast` | `polar` 의 중심: 발사 순간 위치 / 매 스텝 플레이어 |
+| `count` | ≥ 1 | 1 | `polar` 한 번에 만드는 수(360°/count 간격, `extra_projectiles` 가 더해짐) |
+| `lifetime` | 초 | 0 | > 0 이면 시간으로 끝남(`polar` 는 필수). 끝나면 사라지고 다음 쿨다운에 다시 생김 |
+| `start_radius` / `radial_speed` / `angular_speed_deg` | px / px·s⁻¹ / °·s⁻¹ | 0 | `polar` 매개변수. `radial_speed` 0 = 궤도, > 0 = 바깥으로 퍼지는 소용돌이. 반경에 `attack_size` 곱함 |
+| `tick_interval` | 초 | 0 | 움직이는 **장판**(효과 형태 Area + 경로)의 판정 간격 — 필수 |
+| `rehit_interval` | 초 | 0 | 시간으로 끝나는 **투사체**가 같은 몹을 다시 때리기까지(0 = 다시 안 때림) |
+
+`effect` = `radialpulse`(원 장판) · `arcswing`(부채꼴) · `lineswing`(캡슐) · `nearestbolt`(가까운 N체) · `explodingbolt`(닿으면 폭발)
+· `piercingshot`(관통) · `randomdamageshot`(랜덤 피해). 움직임은 `effect` 가 아니라 `path` 로 정한다 — 예: 원 장판 + `straight` =
+럴커식 전진 가시(SPIKE), 관통 + `polar` = 궤도 칼날(BLADE)·소용돌이(VORTEX).
+
+중복 id·모르는 effect/path/anchor·필수 열 파싱 실패, **실행할 수 없는 조합**(`nearestbolt` + 경로, `polar` 인데 `lifetime` 0,
+움직이는 장판인데 `tick_interval` 0, `straight` 인데 속도·수명 둘 다 0)은 그 행만 줄 번호와 함께 오류로 건너뛴다. 유효 행이
+하나도 없으면 내장 7종(`Card.h` `kCardDefs` — PULSE/BOLT + 기초 설계 5종, CSV 와 같은 숫자로 유지). BLADE/VORTEX/SPIKE 는
+레벨업 풀 전용(D5) — 폴백에는 없다.
 
 ### accessories.csv — 장신구 (M5)
 

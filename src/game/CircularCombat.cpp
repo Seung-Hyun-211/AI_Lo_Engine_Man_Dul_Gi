@@ -167,7 +167,7 @@ namespace engine::game
             // with distance so the dot visibly "flies" instead of teleporting.
             for (std::uint32_t i = 0; i < hitCount; ++i)
             {
-                const float life = std::max(kBoltShotMinLife, math::Length(hits[i] - playerCenter) / kBoltShotSpeed);
+                const float life = std::max(kTravelMinLife, math::Length(hits[i] - playerCenter) / kTravelSpeed);
                 m_visuals.push_back({ HitShape::Capsule(playerCenter, hits[i], def.hitRadius), VisualStyle::Travel,
                                       card.defIndex, life, life });
             }
@@ -238,7 +238,7 @@ namespace engine::game
             result += Hit(context.stats, amount, mobs.Damage(hit.ref, amount) ? 1u : 0u);
             Remember(attack, hit.ref, m_time);
             m_visuals.push_back({ HitShape::Capsule(attack.prevPos, hit.pos, hitRadius), VisualStyle::Travel,
-                                  attack.defIndex, kBoltShotMinLife, kBoltShotMinLife });
+                                  attack.defIndex, kTravelMinLife, kTravelMinLife });
         };
 
         switch (SpecOf(def.effect).onHit)

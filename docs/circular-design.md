@@ -16,14 +16,14 @@
 > 마일스톤을 끝낼 때마다 이 블록을 함께 갱신한다. 상세는 아래 절, 순서는 §10, 결정 기록은 §12.
 
 - **브랜치 `circular`** — 2D 뱀서 라이크 "서큘러". 부팅하면 곧장 Circular 씬(타이틀 화면 없음). 기준 = 기초 설계(헌법), 그 위에 사용자 [확정], 그 위에 이 문서의 [살].
-- **구현됨 ✅**: 무한 필드 + 화면 중앙 고정 카메라 · 걷기/**달리기(Shift)/대쉬(Space, 무적 판정 값)/스태미너** · **능력치 체계**(`Stats.h` `StatBlock`, 기초 4스텟 + 파생 20종 = `StatId` 24개) · **플레이어 HP**(`hp_regen`/`crit_chance`/`crit_damage`/`life_steal` 소비처 포함, 접촉 피해는 아직 없어 항상 풀피) · **캐릭터 4종 + 선택 모달**(부팅 시·F7) · `MobField`(SoA 4096, 초당 100마리 스폰) · **무기 5종 전부**(검/채찍/스태프/단검/트럼프 카드, §3.2 — `ArcSwing`/`LineSwing`/`ExplodingBolt`/`PiercingShot`/`RandomDamageShot`, 실제 투사체 시스템 포함, `weapons.csv` ✅, PULSE/BOLT 는 레벨업 풀에만 남은 구형) · **장신구**(`accessories.csv` 6종) · **오버플로우** · 공격 연출(전부 평면 도형, `EffectPass2D` 글로우 없음) · XP → 레벨업 3택 모달(스탯 카드 9종 + 무기/장신구/오버플로우) · **로비**(GAME/TEST SCENE 2버튼, §7.5) · **테스트 씬**(더미 99999 HP 1마리, §7.5) · **CSV 밸런싱 환경**(`assets/data/circular/` 8개, F5/F6/F7, `tools/run_balance_sim.bat`) · 이미지 오프라인 패킹(`tools/atlas_pack`). **M1·M5 완료.**
+- **구현됨 ✅**: 무한 필드 + 화면 중앙 고정 카메라 · 걷기/**달리기(Shift)/대쉬(Space, 무적 판정 값)/스태미너** · **능력치 체계**(`Stats.h` `StatBlock`, 기초 4스텟 + 파생 20종 = `StatId` 24개) · **플레이어 HP**(`hp_regen`/`crit_chance`/`crit_damage`/`life_steal` 소비처 포함, 접촉 피해는 아직 없어 항상 풀피) · **캐릭터 4종 + 선택 모달**(부팅 시·F7) · `MobField`(SoA 4096, 초당 100마리 스폰) · **무기 5종 전부**(검/채찍/스태프/단검/트럼프 카드, §3.2 — `ArcSwing`/`LineSwing`/`ExplodingBolt`/`PiercingShot`/`RandomDamageShot`, 실제 투사체 시스템 포함, `weapons.csv` ✅, PULSE/BOLT 는 레벨업 풀에만 남은 구형) · **장신구**(`accessories.csv` 6종) · **오버플로우** · **전투 구조**(`CircularCombat`: 판정 도형 `HitShape` 하나를 판정·연출이 같이 씀, 몹 반경 포함, 스윕 투사체, 효과 × 경로 — 궤도 BLADE·소용돌이 VORTEX·럴커 SPIKE 는 레벨업 풀 전용, [circular-combat.md](circular-combat.md)) · 공격 연출(전부 평면 도형, `EffectPass2D` 글로우 없음) · XP → 레벨업 3택 모달(스탯 카드 9종 + 무기/장신구/오버플로우) · **로비**(GAME/TEST SCENE 2버튼, §7.5) · **테스트 씬**(더미 99999 HP 1마리, §7.5) · **CSV 밸런싱 환경**(`assets/data/circular/` 8개, F5/F6/F7, `tools/run_balance_sim.bat`) · 이미지 오프라인 패킹(`tools/atlas_pack`). **M1·M5 완료.**
 - **임시 🟡**: 붉은 구역 예고 → 돌진(`kChargePattern`) · 텍스트 HUD(HP·스태미너 바·능력치 두 줄 포함, HUD.png 정식 배치 아님, M2 뼈대는 됨 — 아래) · 색 변화 애니메이션(달리기=초록, 대쉬=반투명 창백) · 검/채찍의 시각 연출이 부채꼴/직선이 아니라 PULSE/BOLT 자리표시자 도형을 재사용 · 단검(관통)이 광역 무기보다 킬 수가 낮음(밸런스, §3.2) · 능력치 중 `luck`/`damage_reduction` 등은 값만 있고 소비처 없음.
 - **없음 ❌**: 몹의 플레이어 접촉 피해(HP 자체는 있음 — 대쉬 무적이 실제로 막을 대상이 아직 없음) · 궁극기(Q 입력·게이지) · HUD.png 이미지/마우스 규칙/호버 아웃라인(뼈대는 있음) · **CardSelect 카드 레이아웃**(3택은 ✅ 이지만 좌·중·우 카드/티어 색/아이콘이 아직 — §3.4) · 적 5분류 · 스폰 패턴 3종 · 스테이지 20개/90초 버티기/보스/마계숲 노드 · **씬 구조(로딩·타이틀 시작/강화/설정/종료)와 난이도 6단계**(§7.6 — 지금은 개발용 로비가 대신) · 스프라이트 렌더·애니메이션 · 메타 재화/세이브 · 3D 데모 씬(DefenseCombat 등)은 코드는 있지만 로비에서 못 고름(§7.5).
 - **M2 뼈대 ✅**: §7.2 의 6개 영역(초상화·재화 2종·스태미너·궁극기·설정/상태 버튼·상태 팝업·무기/장신구 슬롯)이 HUD.png 앵커 좌표에 자리잡음(`ResolveHudRect`, 해상도 무관). 전부 단색 placeholder — **남은 M2 살**: 이미지(아트 필요), 입력 모드 전환(§7.1), 호버 아웃라인/팝업의 실제 호버 게이팅, 클릭(설정·상태 버튼).
 - **M5 완료 ✅**: `weapons.csv`·장신구(`accessories.csv`, 6종)·오버플로우 전부 구현·헤드리스 검증. 남은 건 밸런스(단검) 뿐.
 - **다음 할 일 = M3**(적 종류: 근접·탱커·원거리·마법, `mobs.csv`). 또는 M4(스폰 패턴, **사용자 입력 대기**). M2 의 남은 살(이미지·인터랙션)은 아트가 준비되거나 필요할 때.
 - **사용자 결정 대기**: §12.3 A~F(A·E 는 M1 을 [살] 제안값으로 구현해 둠 — 답에 따라 CSV 만 고치면 됨). **계속 [미정]**: §12.2.
-- **핵심 파일**: `src/game/{Simulation,MobField,Card,Stats,CircularConfig,CircularBalance,SnapshotBuilder,Application,LevelUpScreen}.*`, `assets/data/circular/*.csv`, `docs/# Circular 기초 설계.md`, `docs/images/HUD.png`.
+- **핵심 파일**: `src/game/{Simulation,CircularCombat,HitShape,MobField,Card,Stats,CircularConfig,CircularBalance,SnapshotBuilder,Application,LevelUpScreen}.*`, `assets/data/circular/*.csv`, `docs/# Circular 기초 설계.md`, `docs/images/HUD.png`.
 - **작업 방식**: 사용자는 명령으로 운전한다. 응답은 ① 바뀐 것 ② 판단 필요 시 옵션 ③ `경고 N / 오류 N` ④ 커밋은 명시 요청 시에만(`CLAUDE.md`).
 
 ---
@@ -72,7 +72,7 @@
 ### 2.1 직접 공격 없음 [기초]
 
 - 플레이어 입력은 **이동 관련만** 존재한다: 이동 축, 달리기, 대쉬(+ 궁극기 §2.4, UI 조작).
-- **`PlayerIntent` 에 "공격" 필드를 추가하지 않는다.** 공격은 전부 `Simulation` 안에서 무기가 쿨다운으로 자동 실행한다(✅ 현재 구조 그대로: `StepCards`→`ExecuteCard`).
+- **`PlayerIntent` 에 "공격" 필드를 추가하지 않는다.** 공격은 전부 `Simulation` 안에서 무기가 쿨다운으로 자동 실행한다(✅ 현재 구조 그대로: `Simulation::StepCombat` → `CircularCombat::Fire`).
 
 ### 2.2 이동: 걷기 · 달리기 · 대쉬 [기초] + 확정 + 수치 [살]
 
@@ -171,10 +171,10 @@
 | `attack_speed` | **공격속도** | 무기 쿨다운 배율(↓) | 모든 무기 쿨다운 | [확정] |
 | `max_hp`, `hp_regen` | 최대 HP / 초당 재생 | 체력 스텟 파생 | `Simulation::m_playerHp` (`StepCircularPlayer`) | [살 추가] ✅ |
 | `damage_reduction` | 받는 피해 감소 | 체력 스텟 파생 | 몹 접촉 피해(M3 이후 — 아직 없음) | [살 추가] |
-| `life_steal` | **체력 흡수** | 처치당 마지막 타격 피해의 비율만큼 HP 회복 | `ExecuteCard`(`ApplyLifeSteal`, 킬 게이트 — 생존한 대상에게 준 피해는 집계 안 함) | [살 추가] ✅ |
+| `life_steal` | **체력 흡수** | 처치당 마지막 타격 피해의 비율만큼 HP 회복 | `CircularCombat::Hit`(킬 게이트 — 생존한 대상에게 준 피해는 집계 안 함, 회복량은 `CombatResult.heal` 로 `Simulation` 이 반영) | [살 추가] ✅ |
 | `move_speed` | 이동속도 | 걷기·달리기 배율 | `StepCircularPlayer` | [살 추가] ✅ |
-| `weapon_damage` | 무기 피해 | 모든 무기 피해 배율 | `ExecuteCard` | [살 추가] |
-| `crit_chance`, `crit_damage` | 치명타 확률/피해 | 행운 파생(계수는 [미정] — 지금은 기초 스텟 계수 없음) | `ExecuteCard`(캐스트당 1회 롤, 무기 전체에 적용) | [살 추가] ✅ |
+| `weapon_damage` | 무기 피해 | 모든 무기 피해 배율 | `CircularCombat::Fire` | [살 추가] |
+| `crit_chance`, `crit_damage` | 치명타 확률/피해 | 행운 파생(계수는 [미정] — 지금은 기초 스텟 계수 없음) | `CircularCombat::Fire`(캐스트당 1회 롤, 무기 전체에 적용) | [살 추가] ✅ |
 | `projectile_speed`, `pierce`, `knockback`, `duration` | 투사체 속도/관통/넉백/지속시간 | 무기 부가 성질 | 투사체·장판 무기 | [살 추가] |
 | `pickup_range` | 획득 범위 | 젬·재화 자석 | XP/재화 드롭(M0 이후) | [살 추가] |
 | `xp_gain_mul`, `currency_gain_mul` | 경험치/재화 획득량 | | `AwardKills`, 상점 재화 | [살 추가] (`xp_gain` ✅, `currency_gain_mul` 은 제외 — 재화 시스템 이후) |
@@ -203,14 +203,14 @@
 
 ### 3.2 무기 데이터 모델 ✅ (1차 구현)
 
-`game/Card.h` 의 `CardDef` 테이블이 곧 무기 정의다(§3.5 대응표). **효과 태그(`CardEffect`) + `Simulation::ExecuteCard` switch** 가 OCP 지점이다 — 무기 종류마다 if 사슬을 만들지 않는다.
+`game/Card.h` 의 `CardDef` 테이블이 곧 무기 정의다(§3.5 대응표). **효과 표(`CardEffect` → `kEffectSpecs{형태, 도형, 명중 처리}`) + 경로(`path`) + `CircularCombat`** 이 OCP 지점이다 — 무기 종류마다 if 사슬을 만들지 않는다. 구조·판정 규칙은 [circular-combat.md](circular-combat.md).
 
 | 무기(코드명) | 효과 태그 | 기본 | 레벨 스케일 |
 |---|---|---|---|
 | PULSE | `RadialPulse` — 주변 반경 전부 타격 | 쿨 0.6s, 피해 12, 반경 120 | 피해 +6, 반경 +14, 쿨 ×0.95 /레벨 |
 | BOLT | `NearestBolt` — 가까운 N체 타격 | 쿨 0.9s, 피해 22, 사거리 320, 1체 | 피해 +8, 사거리 +20, 쿨 ×0.93, 2레벨마다 +1체 |
 
-- 최대 레벨 5. 새 효과가 필요하면 `CardEffect` 에 태그 + `ExecuteCard` case (+ 필요한 몹 질의는 `MobField` 에: `DamageInRadius`, `DamageNearest` 가 예시).
+- 최대 레벨 5. 새 효과가 필요하면 `CardEffect` 열거자 + `kEffectSpecs` 한 줄(새 도형이면 `HitShape` 표·그리기 표에도 한 줄) — [circular-combat.md](circular-combat.md) §5.
 - 캐릭터별 시작 무기(§2.3)는 이 테이블에 행을 추가하는 것으로 만든다.
 - **무기 수치는 `weapons.csv` ✅** (`assets/data/circular/weapons.csv`, [circular-balance.md](circular-balance.md)) — `game/Card.h` 의 `kCardDefs` 는 이제 파일이 없거나 깨졌을 때의 **폴백**일 뿐이다(`CircularBalance::Defaults()`). 게임/무기 관련 코드는 전부 `Balance().weapons`(= `m_balance.weapons`)를 읽고 `kCardDefs` 를 직접 참조하지 않는다.
 
@@ -218,15 +218,15 @@
 
 | # | 무기(코드명) | 모양 [기초] | 효과 태그 | 구현 메모 |
 |---|---|---|---|---|
-| 1 | 검(SWORD) | 부채꼴 | `ArcSwing` | `MobField::DamageInArc`(중심·방향·반각·사거리, 내적 콘 테스트). 방향 = `m_lastMoveDir`(대쉬가 쓰는 그 값, 재사용) |
-| 2 | 채찍(WHIP) | 직선 | `LineSwing` | `MobField::DamageInCapsule`(선분+반폭, 최근접점 거리 테스트) |
-| 3 | 스태프(STAFF) | 기본 전기볼트, 닿으면 폭발 | `ExplodingBolt` | 실제로 날아가는 `Simulation::Projectile` — 접촉 시(`MobField::ClosestWithin` 로 판독 전용 확인) `DamageInRadius` 로 소폭발. 사거리 소진만으로는 안 터짐("닿으면"만) |
-| 4 | 단검(DAGGER) | 투사체, 관통 2 | `PiercingShot` | `Projectile`, `piercesLeft` 가 0 될 때까지 최대 `CardTargets()`(=관통 수, `NearestBolt` 와 같은 공식 재사용) 회 타격. 같은 몹을 다음 스텝에 바로 다시 때리지 않도록 명중 시 `kPierceClearDistance` 만큼 전진(슬롯 식별자를 안 쓰는 근사 처리 — `Simulation.h` 주석) |
-| 5 | 트럼프 카드(TRUMP) | 투사체, 데미지 랜덤 | `RandomDamageShot` | `Projectile`, 명중 순간 `[damage, damageMax]` 에서 `std::uniform_real_distribution` 롤(명중이 확실해진 뒤에만 굴려 RNG 낭비 안 함) |
+| 1 | 검(SWORD) | 부채꼴 | `ArcSwing` | `HitShape::Arc` → `MobField::DamageInShape`(내적 콘 테스트, 몹 반경 포함). 방향 = `m_lastMoveDir`(대쉬가 쓰는 그 값, 재사용) |
+| 2 | 채찍(WHIP) | 직선 | `LineSwing` | `HitShape::Capsule` → `DamageInShape`(선분+반폭, 몹 반경 포함) |
+| 3 | 스태프(STAFF) | 기본 전기볼트, 닿으면 폭발 | `ExplodingBolt` | 실제로 날아가는 `AttackInstance`(직선 경로) — 스윕 접촉 시 처음 닿은 몹 자리에서 `explode_radius` 원 장판. 사거리 소진만으로는 안 터짐("닿으면"만) |
+| 4 | 단검(DAGGER) | 투사체, 관통 2 | `PiercingShot` | `AttackInstance`, 진행 순으로 최대 `CardTargets()`(=관통 수, `NearestBolt` 와 같은 공식 재사용) 마리. 맞힌 몹은 `MobRef` 로 기억해 다시 안 때림 |
+| 5 | 트럼프 카드(TRUMP) | 투사체, 데미지 랜덤 | `RandomDamageShot` | `AttackInstance`, 명중 순간 `[damage, damageMax]` 에서 `std::uniform_real_distribution` 롤(명중이 확실해진 뒤에만 굴려 RNG 낭비 안 함) |
 
 - **소비처는 §2.6 그대로**: 전부 `weapon_damage`·`attack_size`(치명타는 캐스트당 1회 롤, 전체에 적용)를 받는다. `LineSwing` 은 반폭도 `attack_size` 로 커진다. `ExplodingBolt` 는 폭발 반경도 `attack_size` 로 커진다.
 - **캐릭터 배정 [살, §12.3 A 대기]**: 마도기사→검, 스컬매지션→스태프, 서큐버스→채찍, 어쎄신리자드→단검(`characters.csv`). 트럼프 카드는 시작 무기가 아니라 레벨업 풀에서만 얻는다(4캐릭터·5무기라 하나는 남음).
-- **시각 연출은 자리표시자**: 검/채찍은 PULSE 의 점멸 원/BOLT 의 사각형을 그대로 재사용(모양이 안 맞음 — 부채꼴/직선 전용 도형은 미구현). 스태프/단검/트럼프 카드는 실제 비행 중에는 킬비(종류별 색: 주황/은색/보라) 사각형으로, 명중 순간엔 작은 플래시로 표시된다.
+- **시각 연출은 자리표시자(평면 도형)**: 판정에 쓴 도형 그대로 — 검 = 부채꼴 외곽, 채찍 = 캡슐 외곽, PULSE/폭발 = 점선 원, 투사체 = `hit_radius` 크기 사각형, 색은 `weapons.csv` `color`(`AttackVisual`, [circular-combat.md](circular-combat.md) §2.3). 스프라이트는 M7.
 - **알려진 밸런스 격차 [살, 조정 대기]**: 단검(관통형 단일 대상)이 검/채찍/스태프(광역)보다 시간당 킬 수가 눈에 띄게 낮다(헤드리스 20초 테스트: 관통 54 대 나머지 1300+) — 코드 결함이 아니라 광역 대 단일 대상의 자연스러운 격차. `weapons.csv` 의 `damage`/`cooldown`/`base_targets`(관통 수)로 조정(재빌드 불필요, F5).
 - **아직 안 함**: 관통(`pierce`) 능력치·`projectile_speed` 등 §2.6 "미구현 파생" 목록과의 연동(지금은 무기별 CSV 고정값, 플레이어 능력치가 못 건드림).
 - **판정 도형·움직임(궤도·소용돌이·럴커)·연출·CSV 를 묶는 구조와 작업 목록(결정 확정, 구현 전)은 [circular-combat.md](circular-combat.md).**
@@ -258,7 +258,7 @@ PULSE(`RadialPulse`)와 BOLT(`NearestBolt`)는 이 5종이 구현되기 전까�
 |---|---|---|
 | 무기 정의 | `CardDef`(`game/Card.h`) / `Balance().weapons`(`weapons.csv`, 실제로 읽는 곳), `kCardDefs` 는 폴백 | ✅ |
 | 소지 무기 | `CardInstance` 벡터 `Simulation::m_deck` | ✅ |
-| 무기 효과 | `CardEffect` + `Simulation::ExecuteCard` | ✅ |
+| 무기 효과 | `CardEffect` → `kEffectSpecs` + `CircularCombat`(`Fire`/`Step`) | ✅ |
 | 장신구 정의 | `AccessoryDef`(`CircularBalance.h`) / `Balance().accessories`(`accessories.csv`) | ✅ |
 | 소지 장신구 | `AccessoryInstance` 벡터 `Simulation::m_accessories` | ✅ |
 | 스탯 카드(장신구와 별개로 유지) | `StatCardDef` / `kStatCards`, `Simulation::m_cardMods` (`game/Card.h`, `Stats.h`) | ✅ |
@@ -494,7 +494,7 @@ PULSE(`RadialPulse`)와 BOLT(`NearestBolt`)는 이 5종이 구현되기 전까�
 ## 8. 렌더 · 아트
 
 - **2D baseline 만 사용**, 3D `#include` 금지(규칙 7). `ENGINE_WITH_3D` 없이 빌드·동작해야 한다.
-- 지금: 몹/플레이어/공격 전부 색 `Quad`(`worldQuads`) — **`EffectPass2D` 글로우는 안 쓴다**(사용자 결정: 전부 평면 도형). PULSE = 노란 점선 원(`DrawDottedRing`, 사거리에서 점멸) · BOLT = 빨간 사각형이 시전자→명중 지점으로 날아감(순수 연출, 데미지는 이미 적용된 뒤). UI 스프라이트 = `SpritePass2D`(아틀라스 1장 하드코딩, 지금 사용처 없음).
+- 지금: 몹/플레이어/공격 전부 색 `Quad`(`worldQuads`) — **`EffectPass2D` 글로우는 안 쓴다**(사용자 결정: 전부 평면 도형). 공격 = `AttackVisual`(판정에 쓴 `HitShape` 그대로): 원·부채꼴·캡슐 점선 외곽(`kOutlineDrawers`, 점멸) · BOLT·명중 표시 = 날아가는 점 · 투사체 = `hit_radius` 크기 사각형, 색은 `weapons.csv` `color` — [circular-combat.md](circular-combat.md) §2.3. UI 스프라이트 = `SpritePass2D`(아틀라스 1장 하드코딩, 지금 사용처 없음).
 - 앞으로: **월드 스프라이트 경로**(다중 아틀라스 + `SpriteDraw` 월드용 배열) → 스프라이트 애니메이션 → 아트. **이미지를 추가하는 방법, 파일 이름 규칙, 애니메이션 설계 방법은 [circular-art-guide.md](circular-art-guide.md).**
 - 아트가 없는 동안의 자리표시자 규칙: 분류별 색 — 근접 빨강, 탱커 남색, 원거리 초록, 마법 보라, 보스 금색(크기 큼) [살].
 
@@ -555,8 +555,8 @@ M1·M5 가 끝났고(§9), **M2 는 뼈대(앵커 배치)까지** 끝났다 — 
 
 **M5 — 무기/장신구 ✅ 전체 완료**
 
-1. ~~새 효과 태그 5개~~ ✅ `CardEffect`(`Card.h`): `ArcSwing`(검) · `LineSwing`(채찍) · `ExplodingBolt`(스태프) · `PiercingShot`(단검) · `RandomDamageShot`(트럼프 카드), 각자 `ExecuteCard`의 case.
-2. ~~MobField 새 질의~~ ✅ `DamageInArc`(내적 콘 테스트) · `DamageInCapsule`(선분+반폭) · `ClosestWithin`(판독 전용 — 투사체 조준/접촉 판정용) · `Simulation::Projectile` + `StepProjectiles`(실제로 날아가는 투사체, `ProjectileKind{Piercing,Exploding,Random}`).
+1. ~~새 효과 태그 5개~~ ✅ `CardEffect`(`Card.h`): `ArcSwing`(검) · `LineSwing`(채찍) · `ExplodingBolt`(스태프) · `PiercingShot`(단검) · `RandomDamageShot`(트럼프 카드), 각자 `ExecuteCard`의 case. (2026-09-23 이후 옛 구조 — `ExecuteCard` 는 삭제, 지금은 `kEffectSpecs` + `CircularCombat`)
+2. ~~MobField 새 질의~~ ✅ `DamageInArc`(내적 콘 테스트) · `DamageInCapsule`(선분+반폭) · `ClosestWithin`(판독 전용 — 투사체 조준/접촉 판정용) · `Simulation::Projectile` + `StepProjectiles`(실제로 날아가는 투사체, `ProjectileKind{Piercing,Exploding,Random}`). (2026-09-23 이후 옛 구조 — 이 이름들은 삭제, 지금은 `DamageInShape` + `AttackInstance`, [circular-combat.md](circular-combat.md))
 3. ~~`weapons.csv`로 뺀다~~ ✅ `CircularBalance::weapons`(`std::vector<CardDef>`) + 로더 블록, `kCardDefs` 는 이제 폴백. 무기 이름은 CSV/`characters.csv`/레벨업 라벨 전부의 공통 식별자.
 4. ~~캐릭터별 시작 무기 배정~~ ✅ `characters.csv`: 마도기사=검, 스컬매지션=스태프, 서큐버스=채찍, 어쎄신리자드=단검 — [살] 제안(§12.3 A 대기). 트럼프 카드는 시작 무기 없음(레벨업 풀만).
 5. ~~장신구~~ ✅ `AccessoryDef`(`CircularBalance.h`) + `accessories.csv`(6종) + `Simulation::m_accessories`. 스탯 카드(`kStatCards`)는 폐기하지 않고 별개로 유지(§3.3 — 기초 설계가 둘을 공존하는 선택지 종류로 나열).
@@ -571,7 +571,7 @@ M1·M5 가 끝났고(§9), **M2 는 뼈대(앵커 배치)까지** 끝났다 — 
 4. **입력 모드 전환**(§7.1: 키보드↔마우스 자동 고정/표시) + **호버 아웃라인** + 상태 팝업의 **실제 호버 게이팅**(지금은 항상 보임).
 5. 착수 전 **§12.3 질문 F**(90초 타이머를 HUD 어디에 둘지) 확인하면 좋음 — 없으면 우상단 상태 버튼 옆에 임시로 [살] 배치.
 
-**다음**: M3(적 종류, `mobs.csv` — 원거리·마법 몹은 이미 만든 `Projectile` 인프라를 재사용할 수 있음) → M4(스폰 패턴, **사용자가 패턴 상세를 추가하기로 함 — 착수 전 확인**) → M6(스테이지) → M8(메타). M7(아트)은 위 어느 단계와도 병행 가능. 위 M5 항목 7(밸런스)이나 M2 의 남은 이미지/인터랙션도 언제든 끼워 넣을 수 있다.
+**다음**: M3(적 종류, `mobs.csv` — 원거리·마법 몹은 `CircularCombat` 의 `effect`×`path` 구조를 재사용 — [circular-combat.md](circular-combat.md) W7) → M4(스폰 패턴, **사용자가 패턴 상세를 추가하기로 함 — 착수 전 확인**) → M6(스테이지) → M8(메타). M7(아트)은 위 어느 단계와도 병행 가능. 위 M5 항목 7(밸런스)이나 M2 의 남은 이미지/인터랙션도 언제든 끼워 넣을 수 있다.
 
 ---
 
@@ -622,8 +622,8 @@ M1·M5 가 끝났고(§9), **M2 는 뼈대(앵커 배치)까지** 끝났다 — 
 
 - **부팅/씬**: 앱이 곧장 Circular 로 부팅(`Application::Run` → `EnterInGame(DemoScene::Circular)`, 타이틀 화면 없음). ESC → 설정 → LOBBY 로 로비에 돌아갈 수 있다(로비는 GAME/TEST SCENE 2버튼뿐, §7.5). `ENGINE_WITH_3D` 무관하게 항상 사용 가능.
 - **카메라/축**: 플레이어를 화면 중앙에 고정하고 월드를 역스크롤(`SnapshotBuilder::BuildCircularScene` 의 `toScreen`). `PlayerIntent.move.y` 는 "앞 = +" 라 `Simulation::Step` 에서 한 번만 `-y` 로 뒤집는다(W=위) — 다른 곳에서 다시 뒤집지 말 것.
-- **몹**: `game::MobField` — SoA(병렬 벡터 + free-list + dense active list), `ParallelFor` 추적, `DamageInRadius`/`DamageNearest`/`DamageInArc`/`DamageInCapsule`(선형 스캔), 상태 `Seek/Windup/Charge`. capacity 4096(`kActiveMob.capacity`, CSV 로 못 바꿈).
-- **무기**: `weapons.csv`(§3.2) + `StepCards`/`ExecuteCard`, 시작 무기는 캐릭터마다 다름(`characters.csv` 의 `start_weapon`). 공격 시각 효과는 글로우 없이 평면 도형만 — 순수 연출(`Simulation.h`), 데미지 계산과 무관.
+- **몹**: `game::MobField` — SoA(병렬 벡터 + free-list + dense active list), `ParallelFor` 추적, `DamageInShape`/`Overlapping`/`Damage(MobRef)`/`DamageNearest`/`ClosestWithin`(선형 스캔, 슬롯 세대 번호), 상태 `Seek/Windup/Charge`. capacity 4096(`kActiveMob.capacity`, CSV 로 못 바꿈).
+- **무기**: `weapons.csv`(§3.2) + `Simulation::StepCombat` → `CircularCombat`([circular-combat.md](circular-combat.md)), 시작 무기는 캐릭터마다 다름(`characters.csv` 의 `start_weapon`). 공격 시각 효과는 글로우 없이 평면 도형만 — 판정 도형 그대로(`AttackVisual`), 데미지 계산과 무관.
 - **XP/레벨업**: 킬 → `AwardKills` → 임계값 → `RollLevelUpChoices` → `m_levelUpPending`(이 동안 `Simulation::Step` 이 Circular 를 정지) → `Application::ServiceLevelUp` 이 `LevelUpScreen` 오버레이. Esc 로 못 닫음. 버튼 콜백은 선택만 기록하고 다음 프레임에 적용(자기 위젯 파괴 방지). 선택지 RNG = 고정 시드 `std::mt19937`(엔진 최초 `<random>`).
 - **임시 패턴**: §6.5. **색 변화 애니메이션 테스트**: 몹(Seek/Windup/Charge)·플레이어 색을 시간·슬롯 해시로 계산([animation-design.md](animation-design.md)).
 - **CSV 밸런싱**: `assets/data/circular/{balance,levels,spawn_curve,player,stats,characters,weapons,accessories}.csv`, 씬 진입 시 로드 + F5(리로드)/F6(재시작)/F7(캐릭터 선택), `tools/run_balance_sim.bat`([circular-balance.md](circular-balance.md)).
@@ -645,7 +645,7 @@ M1·M5 가 끝났고(§9), **M2 는 뼈대(앵커 배치)까지** 끝났다 — 
 
 | 추가할 것 | 지금 가능한 방법 | 목표 방법(계획) |
 |---|---|---|
-| 무기 | ✅ `weapons.csv` 한 행(`overflow_stat`/`overflow_value` 열 포함). **새 동작일 때만** `CardEffect` 열거자 + `Simulation::ExecuteCard` case 를 먼저 추가한다(`effect` 열은 없는 태그를 발명하지 못함). 폴백 `Card.h` `kCardDefs`(`std::array<CardDef,7>`)는 CSV 가 없거나 전 행이 깨졌을 때만 쓰이므로 같이 안 고쳐도 된다 | 〃 (완료 — M5) |
+| 무기 | ✅ `weapons.csv` 한 행(`overflow_stat`/`overflow_value` 열 포함). 움직임은 `path` 열 조합으로(궤도·소용돌이·럴커 = BLADE/VORTEX/SPIKE 행 참고). **새 동작일 때만** `CardEffect` 열거자 + `kEffectSpecs` 한 줄을 먼저 추가한다(`effect` 열은 없는 효과를 발명하지 못함) — [circular-combat.md](circular-combat.md) §5. 폴백 `Card.h` `kCardDefs`(`std::array<CardDef,7>`)는 CSV 가 없거나 전 행이 깨졌을 때만 쓰이므로 같이 안 고쳐도 된다 | 〃 (완료 — M5) |
 | 장신구 | ✅ `accessories.csv` 한 행(`name,stat,multiplicative,amount,max_level`). 효과 코드 없음(패시브, §3.3) — 어떤 `StatId` 든 바로 쓸 수 있다 | 〃 (완료 — M5) |
 | 난이도 | ❌ | `difficulty.csv` 한 행 = 한 단계(§7.6). 6단계 이름은 [기초] 고정, 배율 열만 조정 |
 | 능력치(스텟) | `StatId` 열거자 + `kStatDefs` 한 줄 (`game/Stats.h`) | 위 + `stats.csv` 한 행(값만 조정할 땐 CSV 만) — 기초 4스텟 계수·파생 능력치(§2.6). 스탯 카드는 `kStatCards` 한 줄 |

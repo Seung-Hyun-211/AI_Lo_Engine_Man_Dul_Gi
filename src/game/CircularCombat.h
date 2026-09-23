@@ -105,8 +105,8 @@ namespace engine::game
     {
     public:
         static constexpr float kOutlineLife = 0.20f;        // seconds an Outline visual blinks
-        static constexpr float kBoltShotSpeed = 1200.0f;    // px/s the BOLT visual travels at
-        static constexpr float kBoltShotMinLife = 0.05f;    // seconds - floor so a point-blank hit still reads
+        static constexpr float kTravelSpeed = 1200.0f;      // px/s a Travel visual (BOLT) flies at
+        static constexpr float kTravelMinLife = 0.05f;      // seconds - floor so a point-blank hit still reads
         static constexpr std::size_t kMaxInstances = 512;
 
         // Drops every live attack and visual (scene reset / new run).
