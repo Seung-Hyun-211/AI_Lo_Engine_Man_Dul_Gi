@@ -20,6 +20,7 @@ game/CircularBalance.{h,cpp}   CSV → CircularBalance (몹/레벨/스폰 곡선
 core/CsvFile.{h,cpp}           범용 CSV 리더 (BOM·CRLF·따옴표·# 주석)
 tools/balance_sim.cpp          창 없는 시뮬레이터 (실제 Simulation 을 그대로 돌림)
 tools/run_balance_sim.bat      빌드 + 실행 한 방
+tools/build_balance_sim.sh     Linux(클라우드 세션)에서 g++ 로 빌드 + 실행 (같은 인자)
 ```
 
 컴파일 타임 기본값은 `game/CircularConfig.h`(`kActiveMob`, `kProgression`)에 남아 있다 — CSV 가 없거나 깨져도

@@ -16,7 +16,8 @@ C++20 / Win32 / DirectX 11 기반 2D 게임 엔진 뼈대. 이 파일은 세션�
 
 - 브랜치 **`circular`** = 2D 뱀서 라이크 **"서큘러"** 개발. 앱은 **곧장 Circular 씬으로 부팅**한다(타이틀 화면 없음). ESC → 설정 → **LOBBY** 로 로비 메뉴에 돌아갈 수 있다 — **2026-09 부터 로비는 GAME(Circular 정상)·TEST SCENE(99999 HP 더미 1마리, 무기 테스트용) 딱 두 버튼뿐**, 3D 디펜스 등 다른 씬은 어떤 메뉴에서도 안 뜬다(코드는 있음 — `Application::EnterInGame(DemoScene::N)` 직접 호출만 가능).
 - **기준(헌법)은 `docs/# Circular 기초 설계.md`** — 수정·위반 금지(사용자가 씀). 그 밑에 사용자 **[확정]**, 그 밑에 설계서의 **[살]**(제안). 충돌하면 먼저 사용자에게 묻는다.
-- **가장 먼저 `docs/circular-design.md` 의 "현재 위치" 블록**을 읽는다(구현 상태·다음 할 일·결정 대기 — M1·M2 뼈대·M5 완료, 다음은 M3/M4). 마일스톤을 끝내면 그 블록·격차표(§9)·`docs/roadmap.md` 서큘러 트랙을 함께 갱신한다.
+- **가장 먼저 `docs/circular-design.md` 의 "현재 위치" 블록**을 읽는다(구현 상태·"어디를 읽나" 표·다음 할 일·결정 대기 — M1·M5·전투 구조 완료, M2 뼈대, 다음은 M3). 마일스톤을 끝내면 그 블록·격차표(§9)·`docs/roadmap.md` 서큘러 트랙을 함께 갱신한다.
+- 작업 브랜치 이름은 세션마다 다를 수 있다(예: `claude/…`). 내용의 기준은 브랜치 이름이 아니라 위 "현재 위치" 블록이다.
 
 ## 빌드 / 실행
 
@@ -24,15 +25,16 @@ C++20 / Win32 / DirectX 11 기반 2D 게임 엔진 뼈대. 이 파일은 세션�
 - 툴셋 v143, `LanguageStandard=stdcpp20`, `WarningLevel=Level4`. 링크: `d3d11.lib;dxgi.lib;d3dcompiler.lib`. 인클루드 루트는 `src`.
 - **CLI 빌드**(저장소 루트, PowerShell): `& "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" CppWindowGame.vcxproj /p:Configuration=Debug /p:Platform=x64 /m /nologo /v:m /clp:"Summary;WarningsOnly;ErrorsOnly"` → 출력의 `경고 N개 / 오류 N개` 를 그대로 보고한다. 증분 빌드는 몇 초.
 - **스모크 테스트**: `x64\Debug\CppWindowGame.exe` 를 작업 디렉터리=저장소 루트로 실행 → 수 초 생존 확인 → `CloseMainWindow`. 종료 시 저장소 루트에 **`settings.cfg` 가 생긴다**(추적 안 되는 실행 산출물 — 지운다). 이 환경은 GPU 없이 WARP 폴백이어도 정상.
-- 도구: `tools\run_balance_sim.bat`(서큘러 밸런스 시뮬레이터, `docs/circular-balance.md`), `tools\build_atlas_pack.bat` → `build\tools\atlas_pack.exe`(이미지 패킹, `docs/circular-art-guide.md`), `tools\check_docs.ps1`(문서 점검). 산출물은 `build/`(gitignore).
+- 도구: `tools\run_balance_sim.bat`(서큘러 밸런스 시뮬레이터, `docs/circular-balance.md`; Linux 는 `tools/build_balance_sim.sh`), `tools/gen_templates.py`(그림 템플릿 `assets/templates/` 재생성 — Python 3, Linux 세션에서), `tools\build_atlas_pack.bat` → `build\tools\atlas_pack.exe`(이미지 패킹, `docs/circular-art-guide.md`), `tools\check_docs.ps1`(문서 점검). 산출물은 `build/`(gitignore).
 - 별도 테스트 프로젝트·CI 없음. 로직 검증이 필요하면 2D 전용 하네스를 스크래치에서 `cl /DENGINE_WITH_2D …` 로 컴파일해 `Simulation` 을 창 없이 돌린다(`tools/balance_sim.cpp` 가 예시).
+- **Linux 클라우드 세션(MSBuild·Windows SDK 없음)** 에서의 검증: ① `tools/build_balance_sim.sh [--seconds N]` — 2D 게임 로직(`Simulation`·`CircularCombat`·CSV 로더)을 g++ 로 빌드해 창 없이 돌린다. ② 나머지 `src/game/*.cpp` 는 `g++ -std=c++20 -fsyntax-only -Wall -Wextra -DENGINE_WITH_2D [-DENGINE_WITH_3D] -I src <파일>` 로 컴파일만 확인(`Application.cpp`·`platform/`·`render/Dx11*` 은 Windows 헤더라 불가). 보고할 때는 "MSBuild 미실행, g++ 경고 N / 오류 N" 으로 구분해 적고, Windows 에서의 빌드·실행 확인이 남았다고 밝힌다.
 
 ### 환경 함정 (실제로 겪은 것)
 
 - **줄바꿈**: `.vcxproj` 와 일부 소스는 CRLF 다. **Git Bash `sed -i` 는 CRLF 를 LF 로 바꿔 버린다** → 파일 편집은 Edit 도구 또는 PowerShell(`[IO.File]::ReadAllText` → 치환 → CRLF 유지해 `WriteAllText`, UTF-8 BOM 없음)로 한다. 문서(`docs/*.md`)는 UTF-8 BOM 없음.
 - 새 `.cpp/.h` 는 **`CppWindowGame.vcxproj` 에 등록**해야 빌드된다(`<ClCompile>`/`<ClInclude>`). 삭제할 땐 등록도 같이 뺀다.
 - PowerShell 도구에서 `Remove-Item`/`git rm` 이 "보호 경로" 오탐으로 막힐 수 있다 → Bash 의 `git rm`/`rm` 을 쓴다.
-- Python/Node 가 없다 → 일회성 스크립트는 PowerShell 로.
+- Windows 개발 PC 에는 Python/Node 가 없다 → 일회성 스크립트는 PowerShell 로. (Linux 클라우드 세션에는 `python3`·`g++` 가 있고 PowerShell 이 없다 — `tools\check_docs.ps1` 대신 링크를 직접 확인.)
 - 파일을 Edit 하기 전에 그 파일을 Read 해야 한다. 큰 문서는 부분 Read 후에도 Write 가 "수정됨" 으로 막히면 다시 Read.
 
 ## 아키텍처 불변 규칙 (절대 깨지 말 것)
@@ -63,7 +65,7 @@ C++20 / Win32 / DirectX 11 기반 2D 게임 엔진 뼈대. 이 파일은 세션�
 | `# Circular 기초 설계.md` + `images/HUD.png` | **헌법.** 장르·규칙·스테이지·캐릭터·UI·적·스폰. 수정 금지 |
 | `circular-design.md` | **먼저 읽기.** "현재 위치" 스냅샷, 태그 [기초]/[확정]/[살]/[미정], 격차표, 개발 순서 M1~M8, 결정 기록(§12), 종류 늘리는 법 |
 | `circular-balance.md` | 몹 수·XP·레벨·이동/스태미너·능력치·캐릭터 **CSV 밸런싱 환경**(`assets/data/circular/`, F5/F6/F7, 시뮬레이터) + 앞으로 늘릴 CSV 표 계획 |
-| `circular-art-guide.md` | **이미지 추가 절차·파일 이름 규칙·이미지 사양·애니메이션 설계** (패킹은 지금 됨, 월드 스프라이트 표시는 M7) |
+| `circular-art-guide.md` | **이미지 추가 절차·파일 이름 규칙·이미지 사양·템플릿(`assets/templates/`, §4.1)·애니메이션 설계** (패킹은 지금 됨, 월드 스프라이트 표시는 M7) |
 | `circular-combat.md` | 무기·적 공격 구조 = **효과(형태·도형) × 경로(직선·극좌표)**, 판정·연출 공용 `HitShape`, `CircularCombat` 분리, SOLID·KISS·DRY 검사표, 사용법(열 정의는 `circular-balance.md`). 결정 D1~D7 확정(전부 A), W1~W16 구현됨(W7 적 공격 = M3, W8 스프라이트 = M7) |
 
 **엔진 공통**

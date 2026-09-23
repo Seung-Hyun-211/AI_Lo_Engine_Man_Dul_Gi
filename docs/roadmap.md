@@ -185,10 +185,7 @@ if (auto hit = world.RaycastClosest(down)) { actor.pos.y = hit->point.y; actor.g
 데이터 표는 [circular-balance.md](circular-balance.md), 이미지·애니메이션은 [circular-art-guide.md](circular-art-guide.md).
 삭제된 옛 트랙: "덱빌딩 × 오토배틀"(덱 합성, 미니언 그리드) — 기초 설계에 없다.
 
-현재 ✅: 씬·이동(걷기/달리기/대쉬/스태미너)·카메라·능력치 체계(`Stats.h`, 캐릭터 4종)·**플레이어 HP**(회복·크리·흡혈 소비처, 접촉 피해는 아직 없음)·
-`MobField`(SoA 4096, 초당 100마리 스폰)·**무기 5종 전부**(검/채찍/스태프/단검/트럼프 카드, `Card*` = 소지 무기, 실제 투사체 시스템 포함 — PULSE/BOLT 는 레벨업 풀에만 남은 구형, `weapons.csv`)·**장신구**(`accessories.csv` 6종)·**오버플로우**·
-XP/레벨업 3택 모달([살])·공격 연출(전부 평면 도형, `EffectPass2D` 미사용)·**CSV 밸런싱 환경**·
-**HUD 뼈대**(§7.2 6개 영역 앵커 배치, 단색 placeholder)·🟡 임시(붉은 구역 예고→돌진).
+**현재 상태의 단일 소스는 [circular-design.md](circular-design.md) "현재 위치"** (여기에 복제하지 않는다 — 두 곳이 따로 갱신되며 어긋난 전례). 요약(2026-09-23): M1·M5 ✅, M2 뼈대 ✅, 전투 구조 ✅(효과×경로, `HitShape`, 무기 10종), 1920×1080 고정 시야 + 무한 필드 ✅, 테스트 씬 콜라이더 표시 ✅ → **다음 M3**.
 
 | 단계 | 내용 (기초 설계 항목) | 상태 |
 |---|---|---|

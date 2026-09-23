@@ -151,8 +151,9 @@ physics::CollisionWorld2D m_collision2d;
 m_collision2d.Clear();
 Collider2D player{};
 player.shape = Collider2D::Shape::Box;
-player.center = m_player + math::Vec2{ kPlayerSize * 0.5f, kPlayerSize * 0.5f };
-player.halfExtents = { kPlayerSize * 0.5f, kPlayerSize * 0.5f };
+const math::Rect box = PlayerHitbox();   // 서큘러: player.csv hitbox_* (48×72)
+player.center = PlayerCenter();
+player.halfExtents = { box.width * 0.5f, box.height * 0.5f };
 player.user = kPlayerEntity;
 m_collision2d.Add(player);
 // ... 장애물들 Add ...

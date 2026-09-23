@@ -13,18 +13,48 @@
 
 ## 현재 위치 (스냅샷 — 세션을 시작하거나 컨텍스트가 압축된 뒤 **가장 먼저 읽는 곳**)
 
-> 마일스톤을 끝낼 때마다 이 블록을 함께 갱신한다. 상세는 아래 절, 순서는 §10, 결정 기록은 §12.
+> 마일스톤이나 큰 작업을 끝낼 때마다 이 블록을 갱신한다. 상세는 아래 절, 순서는 §10, 결정 기록은 §12. **마지막 갱신: 2026-09-23.**
 
-- **브랜치 `circular`** — 2D 뱀서 라이크 "서큘러". 부팅하면 곧장 Circular 씬(타이틀 화면 없음). 기준 = 기초 설계(헌법), 그 위에 사용자 [확정], 그 위에 이 문서의 [살].
-- **구현됨 ✅**: 화면 중앙 고정 카메라(월드 1920×1080 고정 시야, 창 크기에 맞춰 확대·축소 — §8) · **무한 필드**(이동 경계 없음, 2026-09-23) · 몹은 화면 밖(`spawn_radius` 1150 > 화면 모서리 ≈1101)에서 등장 · **플레이어 몸**(그림 64×128, 히트박스 48×72 가 그림 바닥에서 8px 위 — `player.csv`) · **그림 템플릿**(`assets/templates/`, [circular-art-guide.md](circular-art-guide.md) §4.1) · 걷기/**달리기(Shift)/대쉬(Space, 무적 판정 값)/스태미너** · **능력치 체계**(`Stats.h` `StatBlock`, 기초 4스텟 + 파생 20종 = `StatId` 24개) · **플레이어 HP**(`hp_regen`/`crit_chance`/`crit_damage`/`life_steal` 소비처 포함, 접촉 피해는 아직 없어 항상 풀피) · **캐릭터 4종 + 선택 모달**(부팅 시·F7) · `MobField`(SoA 4096, 초당 100마리 스폰) · **무기 5종 전부**(검/채찍/스태프/단검/트럼프 카드, §3.2 — `ArcSwing`/`LineSwing`/`ExplodingBolt`/`PiercingShot`/`RandomDamageShot`, 실제 투사체 시스템 포함, `weapons.csv` ✅, PULSE/BOLT 는 레벨업 풀에만 남은 구형) · **장신구**(`accessories.csv` 6종) · **오버플로우** · **전투 구조**(`CircularCombat`: 판정 도형 `HitShape` 하나를 판정·연출이 같이 씀, 몹 반경 포함, 스윕 투사체, 효과 × 경로 — 궤도 BLADE·소용돌이 VORTEX·럴커 SPIKE 는 레벨업 풀 전용, [circular-combat.md](circular-combat.md)) · 공격 연출(전부 평면 도형, `EffectPass2D` 글로우 없음) · XP → 레벨업 3택 모달(스탯 카드 9종 + 무기/장신구/오버플로우) · **로비**(GAME/TEST SCENE 2버튼, §7.5) · **테스트 씬**(더미 99999 HP 1마리, §7.5) · **CSV 밸런싱 환경**(`assets/data/circular/` 8개, F5/F6/F7, `tools/run_balance_sim.bat`) · 이미지 오프라인 패킹(`tools/atlas_pack`). **M1·M5 완료.**
-- **임시 🟡**: 붉은 구역 예고 → 돌진(`kChargePattern`) · 텍스트 HUD(HP·스태미너 바·능력치 두 줄 포함, HUD.png 정식 배치 아님, M2 뼈대는 됨 — 아래) · 색 변화 애니메이션(달리기=초록, 대쉬=반투명 창백) · 검/채찍의 시각 연출이 부채꼴/직선이 아니라 PULSE/BOLT 자리표시자 도형을 재사용 · 단검(관통)이 광역 무기보다 킬 수가 낮음(밸런스, §3.2) · 능력치 중 `luck`/`damage_reduction` 등은 값만 있고 소비처 없음.
-- **없음 ❌**: 몹의 플레이어 접촉 피해(HP 자체는 있음 — 대쉬 무적이 실제로 막을 대상이 아직 없음) · 궁극기(Q 입력·게이지) · HUD.png 이미지/마우스 규칙/호버 아웃라인(뼈대는 있음) · **CardSelect 카드 레이아웃**(3택은 ✅ 이지만 좌·중·우 카드/티어 색/아이콘이 아직 — §3.4) · 적 5분류 · 스폰 패턴 3종 · 스테이지 20개/90초 버티기/보스/마계숲 노드 · **씬 구조(로딩·타이틀 시작/강화/설정/종료)와 난이도 6단계**(§7.6 — 지금은 개발용 로비가 대신) · 스프라이트 렌더·애니메이션 · 메타 재화/세이브 · 3D 데모 씬(DefenseCombat 등)은 코드는 있지만 로비에서 못 고름(§7.5).
-- **M2 뼈대 ✅**: §7.2 의 6개 영역(초상화·재화 2종·스태미너·궁극기·설정/상태 버튼·상태 팝업·무기/장신구 슬롯)이 HUD.png 앵커 좌표에 자리잡음(`ResolveHudRect`, 해상도 무관). 전부 단색 placeholder — **남은 M2 살**: 이미지(아트 필요), 입력 모드 전환(§7.1), 호버 아웃라인/팝업의 실제 호버 게이팅, 클릭(설정·상태 버튼).
-- **M5 완료 ✅**: `weapons.csv`·장신구(`accessories.csv`, 6종)·오버플로우 전부 구현·헤드리스 검증. 남은 건 밸런스(단검) 뿐.
-- **다음 할 일 = M3**(적 종류: 근접·탱커·원거리·마법, `mobs.csv`). 또는 M4(스폰 패턴, **사용자 입력 대기**). M2 의 남은 살(이미지·인터랙션)은 아트가 준비되거나 필요할 때.
-- **사용자 결정 대기**: §12.3 A~F(A·E 는 M1 을 [살] 제안값으로 구현해 둠 — 답에 따라 CSV 만 고치면 됨). **계속 [미정]**: §12.2.
-- **핵심 파일**: `src/game/{Simulation,CircularCombat,HitShape,MobField,Card,Stats,CircularConfig,CircularBalance,SnapshotBuilder,Application,LevelUpScreen}.*`, `assets/data/circular/*.csv`, `docs/# Circular 기초 설계.md`, `docs/images/HUD.png`.
-- **작업 방식**: 사용자는 명령으로 운전한다. 응답은 ① 바뀐 것 ② 판단 필요 시 옵션 ③ `경고 N / 오류 N` ④ 커밋은 명시 요청 시에만(`CLAUDE.md`).
+**한 줄 요약**: 2D 뱀서 라이크 "서큘러". 부팅 = 곧장 Circular 씬(타이틀 없음, ESC → 설정 → LOBBY 로 GAME / TEST SCENE). 기준 = 기초 설계(헌법) > 사용자 [확정] > 이 문서의 [살]. **M1·M5 완료, M2 뼈대, 전투 구조 완료 → 다음은 M3(적 종류).**
+
+**어디를 읽나** (주제 → 문서)
+
+| 주제 | 문서 |
+|---|---|
+| 게임 규칙·진행 상태·결정 기록 | 이 문서(§2 플레이어/능력치, §3 무기, §7 UI, §9 격차표, §10 순서, §12 결정) |
+| 무기·공격 구조(판정 도형, 경로, 연출, 사용법) | [circular-combat.md](circular-combat.md) |
+| CSV 수치·열 정의(무기 열 포함) | [circular-balance.md](circular-balance.md) |
+| 그림 추가·이름 규칙·템플릿 | [circular-art-guide.md](circular-art-guide.md) (§4.1 템플릿) |
+| 월드 단위·축·화면 배율 | [engine-conventions.md](engine-conventions.md) 2D |
+| 다음 할 일 우선순위 | [roadmap.md](roadmap.md) "서큘러 트랙" |
+
+**구현됨 ✅**
+- **화면**: 항상 월드 1920×1080 만큼 보이고 창 크기에 맞춰 균일 확대·축소, 비율이 다르면 레터박스(§8). 게임 수치는 전부 월드 단위(1920×1080 화면의 px).
+- **필드**: 무한(이동 경계 없음). 몹은 화면 밖(`spawn_radius` 1150 > 화면 모서리 ≈1101)에서 스폰, 초당 100마리, `MobField` SoA 4096.
+- **플레이어**: 그림 64×128, 히트박스 48×72(그림 바닥에서 8px 위) — `player.csv`. 걷기·달리기(Shift)·대쉬(Space, 무적)·스태미너. HP(재생·크리·흡혈 소비처). 캐릭터 4종 + 선택 모달(부팅·F7).
+- **능력치**: 기초 4스텟 + 파생 23종 = `StatId` 27개(`Stats.h`, `stats.csv`). 2026-09-23 추가 `defense`·`dot_damage`·`armor_break` 는 **값·표시만**(계산식 [미정]).
+- **무기**: 기초 5종(검 부채꼴 / 채찍 캡슐 / 스태프 폭발 투사체 / 단검 관통 / 트럼프 랜덤 피해) + 구형 PULSE·BOLT + 움직이는 공격 3종(BLADE 궤도, VORTEX 소용돌이, SPIKE 럴커식 전진 — 레벨업 풀 전용). 전부 `weapons.csv` 한 행.
+- **전투 구조**(`CircularCombat`, [circular-combat.md](circular-combat.md)): 효과(`kEffectSpecs`) × 경로(None/Straight/Polar). 판정 도형 `HitShape` 하나를 판정과 그림이 같이 씀, 몹 반경 포함, 투사체는 스윕 접촉 + 맞힌 몹 기억(`MobRef` 세대).
+- **성장**: XP → 레벨업 3택(무기·장신구 6종·스탯 카드 9종·오버플로우).
+- **UI**: 로비(GAME / TEST SCENE), 테스트 씬(더미 99999 HP + **콜라이더 초록 외곽선 표시**), HUD 뼈대(§7.2 영역이 앵커 좌표에, 전부 단색 자리표시).
+- **데이터·도구**: CSV 8개(`assets/data/circular/`, F5 다시 읽기 / F6 재시작 / F7 캐릭터), 밸런스 시뮬레이터 `tools/run_balance_sim.bat`, 이미지 패커 `tools/atlas_pack`, 그림 템플릿 `assets/templates/`.
+
+**임시 🟡**: 붉은 구역 예고 → 돌진(`kChargePattern`, M4 에서 교체) · 텍스트 HUD · 색 사각형 자리표시(스프라이트는 M7) · 단검 킬 수가 광역 무기보다 낮음(밸런스) · 소비처 없는 능력치(`luck`, `damage_reduction`, `ultimate_charge_mul`, `corruption_power`, `defense`, `dot_damage`, `armor_break`).
+
+**없음 ❌**: 몹 접촉 피해·적 공격(W7 = M3) · 적 5분류 · 스폰 패턴 3종 · 스테이지·90초·보스·마계숲 노드 · 궁극기 · CardSelect 카드 레이아웃 · HUD 이미지·호버·클릭 · 씬 구조(로딩·타이틀)·난이도 · 월드 스프라이트·애니메이션(M7) · 메타 재화·세이브.
+
+**다음 할 일**: **M3**(적 종류 `mobs.csv` + `MobBehavior`, 적 공격은 [circular-combat.md](circular-combat.md) W7 구조 재사용) → M4(스폰 패턴 — **사용자가 패턴 상세를 주기로 함, 착수 전 확인**) → M6 → M8. M7(아트)·M2 나머지는 병행 가능.
+
+**사용자 결정 대기**
+- §12.3 A~F — **2026-09-23 에 B(90초·보스)·D(오버플로우 상한)·E(대쉬 효율)·A②(오염 의미)를 물었으나 사용자가 창을 닫음. 다시 묻기 전에 먼저 확인.** C(노드 세부)·F(타이머 위치·클리어 보상)는 아직 안 물음.
+- `defense`/`dot_damage`/`armor_break` 계산식·단위·얻는 방법(사용자: "계산식은 나중에").
+- 계속 [미정]: §12.2.
+
+**최근 결정 (2026-09-23)**: 전투 D1~D7 전부 A([circular-combat.md](circular-combat.md) §4) · 보이는 세계 1920×1080 고정 · 무한 필드 · `spawn_radius` 1150 · 몹 그림 발밑 정렬은 M7 때 · BLADE 반경 80 유지 · 플레이어 히트박스 48×72 + 8px 띄움. 전체 목록 §12.1.
+
+**핵심 파일**: `src/game/{Simulation,CircularCombat,HitShape,MobField,Card,Stats,CircularConfig,CircularBalance,SnapshotBuilder,Application,LevelUpScreen}.*`, `assets/data/circular/*.csv`, `assets/templates/`, `docs/# Circular 기초 설계.md`, `docs/images/HUD.png`.
+
+**작업 방식**: 사용자는 명령으로 운전한다. 응답 = ① 바뀐 것 ② 판단 필요 시 옵션(권장 먼저) ③ `경고 N / 오류 N` ④ 커밋은 명시 요청 시에만(`CLAUDE.md`). 설계는 SOLID·KISS·DRY 로 자체 검사하고 문서에 사용법을 남긴다.
 
 ---
 ## 0. 이 문서의 규칙 — 기초 설계를 위반하지 않는다
@@ -517,7 +547,7 @@ PULSE(`RadialPulse`)와 BOLT(`NearestBolt`)는 이 5종이 구현되기 전까�
 | B-규칙 걷기 | ✅ | `player.csv` `walk_speed` 300 px/s × `move_speed` 스탯 |
 | B-규칙 **달리기(Shift) · 대쉬(Space, 무적)** | ✅ | §2.2 [확정]. 무적은 `PlayerInvulnerable()` 값까지 — 실제 피격 판정은 몹 접촉 피해(M3) 이후 |
 | B-규칙 **스태미너** (HUD 3) — 달리기 ≪ 대쉬, 연타 페널티, 스킬로 조절 | ✅ (바는 임시 HUD) | §2.2 [확정]. `dash_cost_mul`/`dash_chain_penalty_mul`/`dash_cooldown_mul` 스탯이 조절 |
-| B-캐릭터 4종 (+ 캐릭터별 **주력 스텟**) | ✅ 데이터·선택 / 🟡 아트·시작 무기 | `characters.csv` 4행, 선택 모달(F7). 플레이어 = 색 사각 |
+| B-캐릭터 4종 (+ 캐릭터별 **주력 스텟**) | ✅ 데이터·선택 / 🟡 아트·시작 무기 | `characters.csv` 4행, 선택 모달(F7). 플레이어 = 64×128 색 사각(히트박스 48×72, `player.csv`), 템플릿 `assets/templates/char` |
 | **능력치 체계**(기초 4스텟 + 행운·공격 크기·추가 투사체·공격속도 등 파생) | ✅ | §2.6 [확정]. 일부 파생은 소비처 대기 |
 | 무기·장신구 슬롯 6/6, 최대 레벨 5 | 🟡 | [확정]. 무기 쪽 이미 6/5, 장신구 슬롯 ❌ |
 | **오버플로우** (최대 레벨 시 소량 능력치) | ✅ | §3.4 [확정] |
@@ -527,7 +557,7 @@ PULSE(`RadialPulse`)와 BOLT(`NearestBolt`)는 이 5종이 구현되기 전까�
 | B-UI **HUD 전체 레이아웃** | ❌ 🟡 | 임시 텍스트 HUD |
 | B-UI **마우스 고정/표시 자동 전환, 호버 아웃라인** | ❌ | §7.1 (지금은 항상 고정) |
 | B-UI **CardSelect 카드 레이아웃**(좌·중·우 3장, 티어 색, 아이콘/세트명/설명/변화량) | ❌ (개수 3 만 ✅) | §3.4. 지금은 세로 텍스트 버튼 3개. 티어 = `luck` 의 확정 소비처 |
-| B-무기장신구 무기 | ✅ | 5종 전부(검/채찍/스태프/단검/트럼프 카드, §3.2) — `weapons.csv` 로 CSV 조정 가능 |
+| B-무기장신구 무기 | ✅ | 5종 전부(검/채찍/스태프/단검/트럼프 카드, §3.2) + 움직이는 공격 3종(레벨업 풀) — `weapons.csv`, 구조 [circular-combat.md](circular-combat.md) |
 | B-무기장신구 **장신구** | ✅ | `accessories.csv` 6종, 스탯 카드는 별개로 유지(§3.3) |
 | B-스테이지 20 스테이지 · 4 바이옴 · 4 흐름 | ❌ | 단일 무한 아레나 |
 | B-적 5분류 · 바이옴별 출현 | ❌ | 근접 1종뿐 |
@@ -535,6 +565,8 @@ PULSE(`RadialPulse`)와 BOLT(`NearestBolt`)는 이 5종이 구현되기 전까�
 | B-스폰 3종 + 추가 | ❌ | 링 스폰(밀도) ✅ + 임시 돌진 🟡 |
 | 레벨업 3택 · XP | ✅ | 기초 설계 밖이지만 **[확정: 유지]** |
 | (인프라) CSV 밸런싱 환경 | ✅ | 새 표를 얹을 기반 ([circular-balance.md](circular-balance.md)) |
+| (인프라) 해상도 무관 화면 | ✅ | 월드 1920×1080 고정 시야 + 확대·축소·레터박스(§8) |
+| (인프라) 테스트 씬 콜라이더 표시 | ✅ | §7.5 |
 
 ---
 

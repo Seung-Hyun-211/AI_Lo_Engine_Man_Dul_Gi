@@ -275,7 +275,7 @@ fx_hit,20,once,,0.5,0.5,
 - **몹(수천 마리)**: 몹마다 `SpriteAnimator` 객체를 두지 않는다. **`MobField` SoA 에 `animTime`(float) 한 열만 추가**하고 `Step` 의 `ParallelFor` 안에서 자기 슬롯만 증가(규칙 6). 클립은 저장하지 않는다 — `MobState`/`MobBehavior` 에서 §6.2 로 **매 프레임 계산**. 무리가 발맞춰 걷지 않도록 **위상 오프셋 = 슬롯 인덱스 해시**(지금 색 애니메이션 테스트가 이미 쓰는 방식, [animation-design.md](animation-design.md)).
 - **속도 연동(선택)**: 걷기 fps 를 `fps × (실제 속도 / 기준 속도)` 로 스케일하면 발이 미끄러져 보이지 않는다.
 - **좌우 반전**: 몹은 `velX` 부호, 플레이어는 마지막 이동 방향 — 반전은 uv 의 `u0/u1` 교환(추가 저장 없음).
-- **이펙트**: 힛/폭발은 수명(`age`)을 가진 값 타입(지금 `HitFlash` 와 같은 패턴) → `frame = age × fps`. 아트가 있으면 `fx_*` 프레임, 없으면 지금의 절차적 글로우(`EffectPass2D`) 유지.
+- **이펙트**: 힛/폭발은 수명(`ageLeft`)을 가진 값 타입(지금 `CircularCombat` 의 `AttackVisual` 과 같은 패턴) → `frame = age × fps`. 아트가 있으면 `fx_*` 프레임, 없으면 지금의 절차적 글로우(`EffectPass2D`) 유지.
 - **성능**: 스프라이트도 몹 수천 = 쿼드 수천. 같은 아틀라스 연속 구간은 한 번에 그린다(`SpritePass2D` 는 `(atlasId, clip)` 그룹으로 이미 배칭). 몹 그룹은 한 페이지에 모아 두면 유리하다 → **바이옴 몹을 한 그룹(`mob/<biome>`)으로** 묶는 이유.
 
 ### 6.5 애니메이션 추가 체크리스트
