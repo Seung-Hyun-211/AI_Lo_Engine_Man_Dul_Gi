@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <functional>
+#include <iterator>
 #include <string>
 
 #if defined(ENGINE_WITH_3D)
@@ -47,6 +48,86 @@ namespace engine::game
             }
         }
 
+
+        // Dots every `spacing` px along a polyline (closed = back to the first
+        // point) - the flat-shape stand-in for an outline, same look as
+        // DrawDottedRing.
+        void DrawDottedPolyline(std::vector<render::Quad>& quads, const std::vector<math::Vec2>& points, bool closed,
+                                float dotSize, math::Color color, float spacing = 18.0f)
+        {
+            const std::size_t count = points.size();
+            if (count == 0) return;
+            float carry = 0.0f;   // distance already walked past the last dot
+            const std::size_t segments = closed ? count : count - 1;
+            for (std::size_t i = 0; i < segments; ++i)
+            {
+                const math::Vec2 a = points[i];
+                const math::Vec2 b = points[(i + 1) % count];
+                const float length = math::Length(b - a);
+                float d = spacing - carry;
+                if (i == 0) d = 0.0f;
+                for (; d <= length; d += spacing)
+                {
+                    const math::Vec2 dot = length > 0.0f ? a + (b - a) * (d / length) : a;
+                    quads.push_back({ dot.x - dotSize * 0.5f, dot.y - dotSize * 0.5f, dotSize, dotSize,
+                                      color.r, color.g, color.b, color.a });
+                }
+                carry = length - (d - spacing);
+            }
+        }
+
+        // Appends `steps` points on a circle arc (inclusive of both ends).
+        void AppendArc(std::vector<math::Vec2>& points, math::Vec2 center, float radius, float fromAngle, float toAngle, int steps)
+        {
+            for (int i = 0; i <= steps; ++i)
+            {
+                const float angle = fromAngle + (toAngle - fromAngle) * static_cast<float>(i) / static_cast<float>(steps);
+                points.push_back(center + math::Vec2{ std::cos(angle), std::sin(angle) } * radius);
+            }
+        }
+
+        // --- attack outlines (docs/circular-combat.md §2.3) -------------------
+        // One drawer per HitShapeKind, fed the very HitShape the hit used, so the
+        // outline is the hit area (x the weapon's visual_scale). `offset` maps
+        // world to screen.
+        using OutlineDrawer = void (*)(std::vector<render::Quad>&, const HitShape&, math::Vec2 offset, float scale, math::Color);
+
+        void OutlineCircle(std::vector<render::Quad>& quads, const HitShape& s, math::Vec2 offset, float scale, math::Color color)
+        {
+            DrawDottedRing(quads, s.center + offset, s.radius * scale, 8.0f, color);
+        }
+
+        void OutlineArc(std::vector<render::Quad>& quads, const HitShape& s, math::Vec2 offset, float scale, math::Color color)
+        {
+            const math::Vec2 center = s.center + offset;
+            const float facing = std::atan2(s.dir.y, s.dir.x);
+            std::vector<math::Vec2> points{ center };
+            AppendArc(points, center, s.radius * scale, facing - s.halfAngle, facing + s.halfAngle, 12);
+            DrawDottedPolyline(quads, points, true, 8.0f, color);
+        }
+
+        void OutlineCapsule(std::vector<render::Quad>& quads, const HitShape& s, math::Vec2 offset, float scale, math::Color color)
+        {
+            const math::Vec2 start = s.center + offset;
+            const math::Vec2 end = start + (s.end - s.center) * scale;
+            const float width = s.radius * scale;
+            const math::Vec2 axis = end - start;
+            const float heading = math::Length(axis) > 0.0f ? std::atan2(axis.y, axis.x) : 0.0f;
+            constexpr float kHalfPi = 1.57079632679f;
+            std::vector<math::Vec2> points;
+            AppendArc(points, end, width, heading - kHalfPi, heading + kHalfPi, 6);           // far cap
+            AppendArc(points, start, width, heading + kHalfPi, heading + 3.0f * kHalfPi, 6);  // near cap
+            DrawDottedPolyline(quads, points, true, 8.0f, color);
+        }
+
+        constexpr OutlineDrawer kOutlineDrawers[] = { &OutlineCircle, &OutlineArc, &OutlineCapsule };
+        static_assert(std::size(kOutlineDrawers) == static_cast<std::size_t>(HitShapeKind::Count), "one drawer per HitShapeKind");
+
+        math::Color RgbColor(std::uint32_t rgb, float alpha)
+        {
+            return { static_cast<float>((rgb >> 16) & 0xFFu) / 255.0f, static_cast<float>((rgb >> 8) & 0xFFu) / 255.0f,
+                     static_cast<float>(rgb & 0xFFu) / 255.0f, alpha };
+        }
         // --- HUD skeleton (docs/circular-design.md §7.2) ---------------------
         // Anchors a design-space rect (HUD.png, 1920x1080 reference) into actual
         // pixel space, preserving each edge's margin so the HUD hugs screen
@@ -816,41 +897,55 @@ namespace engine::game
                                             Simulation::kPlayerSize, Simulation::kPlayerSize,
                                             playerColor.r, playerColor.g, playerColor.b, playerColor.a });
 
-            // PULSE range -> a blinking yellow dotted ring (no glow VFX, plain
-            // flat shapes - docs/circular-design.md §7 "이펙트 없음").
-            for (const PulseRing& ring : simulation.Combat().PulseRings())
+            // Attacks (docs/circular-combat.md §2.3) - every visual carries the
+            // HitShape its hit used, drawn through the one drawer table, in its
+            // weapon row's colour and visual_scale. Plain flat shapes, no glow
+            // (docs/circular-design.md §7 "이펙트 없음"). Sprites replace these in M7.
+            const std::vector<CardDef>& weapons = simulation.Balance().weapons;
+            const auto weaponOf = [&](std::uint8_t defIndex) -> const CardDef* {
+                return defIndex < weapons.size() ? &weapons[defIndex] : nullptr;   // F5 can shrink the table mid-run
+            };
+            const math::Vec2 worldToScreen = screenCenter - playerCenter;
+            for (const AttackVisual& visual : simulation.Combat().Visuals())
             {
-                const float t = ring.life > 0.0f ? math::Clamp(ring.ageLeft / ring.life, 0.0f, 1.0f) : 0.0f;
-                const float blink = std::sin(ring.ageLeft * 55.0f) > 0.0f ? 1.0f : 0.35f;
-                const math::Color color{ 1.0f, 0.85f, 0.10f, t * blink };
-                DrawDottedRing(snapshot.worldQuads, toScreen(ring.pos), ring.range, 8.0f, color);
+                const CardDef* def = weaponOf(visual.defIndex);
+                const std::uint32_t rgb = def ? def->color : 0xFFFFFFu;
+                const float scale = def ? def->visualScale : 1.0f;
+                switch (visual.style)
+                {
+                case VisualStyle::Outline:
+                {
+                    const float t = visual.life > 0.0f ? math::Clamp(visual.ageLeft / visual.life, 0.0f, 1.0f) : 0.0f;
+                    const float blink = std::sin(visual.ageLeft * 55.0f) > 0.0f ? 1.0f : 0.35f;
+                    kOutlineDrawers[static_cast<std::size_t>(visual.shape.kind)](
+                        snapshot.worldQuads, visual.shape, worldToScreen, scale, RgbColor(rgb, t * blink));
+                    break;
+                }
+                case VisualStyle::Travel:
+                {
+                    // A dot flying from the capsule's start to its end over its life.
+                    const float t = visual.life > 0.0f ? math::Clamp(1.0f - visual.ageLeft / visual.life, 0.0f, 1.0f) : 1.0f;
+                    const math::Vec2 pos = toScreen(visual.shape.center + (visual.shape.end - visual.shape.center) * t);
+                    const float size = 2.0f * visual.shape.radius * scale;
+                    const math::Color color = RgbColor(rgb, 1.0f);
+                    snapshot.worldQuads.push_back({ pos.x - size * 0.5f, pos.y - size * 0.5f, size, size,
+                                                    color.r, color.g, color.b, color.a });
+                    break;
+                }
+                }
             }
 
-            // BOLT -> a red square travelling from the caster to each hit. Purely
-            // cosmetic (the damage already landed) - just how the shot reads.
-            constexpr float kBoltShotSize = 14.0f;
-            for (const BoltShot& shot : simulation.Combat().BoltShots())
-            {
-                const float t = shot.life > 0.0f ? math::Clamp(1.0f - shot.ageLeft / shot.life, 0.0f, 1.0f) : 1.0f;
-                const math::Vec2 pos = toScreen(shot.start + (shot.end - shot.start) * t);
-                snapshot.worldQuads.push_back({ pos.x - kBoltShotSize * 0.5f, pos.y - kBoltShotSize * 0.5f,
-                                                kBoltShotSize, kBoltShotSize, 0.95f, 0.12f, 0.10f, 1.0f });
-            }
-
-            // 스태프/단검/트럼프 카드 (§3.2) - a real, physically-travelling
-            // projectile, drawn every frame at its live position (unlike
-            // BoltShot's cast-to-hit lerp, this one has actual gameplay motion
-            // to show). Colour by kind so the three read apart at a glance;
-            // still a plain flat square, no glow.
-            constexpr float kProjectileSize = 12.0f;
+            // Live projectiles at their real positions, sized by their weapon's
+            // hit_radius (x visual_scale) - the drawn square is the touch area.
             for (const Projectile& shot : simulation.Combat().Projectiles())
             {
-                math::Color color{ 0.8f, 0.8f, 0.85f, 1.0f };   // Piercing: silver
-                if (shot.kind == ProjectileKind::Exploding) color = { 1.0f, 0.55f, 0.15f, 1.0f };
-                else if (shot.kind == ProjectileKind::Random) color = { 0.75f, 0.35f, 0.95f, 1.0f };
+                const CardDef* def = weaponOf(shot.defIndex);
+                if (def == nullptr) continue;
+                const float size = 2.0f * def->hitRadius * def->visualScale;
+                const math::Color color = RgbColor(def->color, 1.0f);
                 const math::Vec2 pos = toScreen(shot.pos);
-                snapshot.worldQuads.push_back({ pos.x - kProjectileSize * 0.5f, pos.y - kProjectileSize * 0.5f,
-                                                kProjectileSize, kProjectileSize, color.r, color.g, color.b, color.a });
+                snapshot.worldQuads.push_back({ pos.x - size * 0.5f, pos.y - size * 0.5f, size, size,
+                                                color.r, color.g, color.b, color.a });
             }
         }
 

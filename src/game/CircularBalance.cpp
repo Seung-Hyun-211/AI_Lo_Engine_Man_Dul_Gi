@@ -9,6 +9,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <iterator>
 
 namespace engine::game
@@ -142,18 +143,25 @@ namespace engine::game
             return text;
         }
 
-        // weapons.csv's effect column - lower-case name -> CardEffect. New
-        // effects (a new CardEffect enumerator + ExecuteCard case) get one row here.
-        struct EffectEntry { const char* name; CardEffect effect; };
-        constexpr EffectEntry kEffectNames[] = {
-            { "radialpulse",      CardEffect::RadialPulse },
-            { "nearestbolt",      CardEffect::NearestBolt },
-            { "arcswing",         CardEffect::ArcSwing },
-            { "lineswing",        CardEffect::LineSwing },
-            { "explodingbolt",    CardEffect::ExplodingBolt },
-            { "piercingshot",     CardEffect::PiercingShot },
-            { "randomdamageshot", CardEffect::RandomDamageShot },
-        };
+        // weapons.csv id: lower-case letters, digits, underscore (it becomes part of
+        // image file names - docs/circular-art-guide.md naming rules).
+        bool IsIdentifier(const std::string& text)
+        {
+            if (text.empty()) return false;
+            return std::all_of(text.begin(), text.end(), [](char c) {
+                return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+            });
+        }
+
+        // "RRGGBB" or "#RRGGBB" -> 0xRRGGBB.
+        bool ParseHexColor(std::string text, std::uint32_t& out)
+        {
+            if (!text.empty() && text[0] == '#') text.erase(0, 1);
+            if (text.size() != 6 || !std::all_of(text.begin(), text.end(), [](char c) { return std::isxdigit(static_cast<unsigned char>(c)) != 0; }))
+                return false;
+            out = static_cast<std::uint32_t>(std::strtoul(text.c_str(), nullptr, 16));
+            return true;
+        }
 
         // key -> (target, minimum allowed, inclusive)
         struct KvEntry { const char* name; float* target; float minValue; bool minInclusive; };
@@ -297,16 +305,16 @@ namespace engine::game
             }
         }
 
-        // ---- weapons.csv: one row = one weapon (docs/circular-design.md §3.2) ----
-        // name,effect,cooldown,damage,range,base_targets,max_level,damage_per_level,
-        // range_per_level,cooldown_scale,levels_per_extra_target are required;
-        // cone_half_angle_deg/line_half_width/projectile_speed/explode_radius/
-        // damage_max are per-weapon-kind and optional (blank = 0, unused).
+        // ---- weapons.csv: one row = one weapon (docs/circular-combat.md §2.4 is the column list) ----
+        // id,name,effect,cooldown,damage,range,base_targets,max_level,damage_per_level,
+        // range_per_level,cooldown_scale,levels_per_extra_target are required; the
+        // rest are optional (blank = the CardDef default, unused by that effect).
         {
             const std::string file = "weapons.csv";
             core::CsvTable table;
             if (loader.Open(dir, file, table))
             {
+                const int idCol = table.Column("id");
                 const int nameCol = table.Column("name");
                 const int effectCol = table.Column("effect");
                 const int cdCol = table.Column("cooldown");
@@ -318,20 +326,18 @@ namespace engine::game
                 const int rangePerLevelCol = table.Column("range_per_level");
                 const int cdScaleCol = table.Column("cooldown_scale");
                 const int extraEveryCol = table.Column("levels_per_extra_target");
-                const int coneCol = table.Column("cone_half_angle_deg");
-                const int lineWidthCol = table.Column("line_half_width");
-                const int projSpeedCol = table.Column("projectile_speed");
-                const int explodeRadiusCol = table.Column("explode_radius");
-                const int dmgMaxCol = table.Column("damage_max");
                 const int overflowStatCol = table.Column("overflow_stat");
                 const int overflowValueCol = table.Column("overflow_value");
+                const int colorCol = table.Column("color");
+                const int spriteCol = table.Column("sprite");
+                const int fxHitCol = table.Column("fx_hit");
 
-                bool headerOk = nameCol >= 0 && effectCol >= 0 && cdCol >= 0 && dmgCol >= 0 && rangeCol >= 0 &&
+                bool headerOk = idCol >= 0 && nameCol >= 0 && effectCol >= 0 && cdCol >= 0 && dmgCol >= 0 && rangeCol >= 0 &&
                                 baseTargetsCol >= 0 && maxLevelCol >= 0 && dmgPerLevelCol >= 0 &&
                                 rangePerLevelCol >= 0 && cdScaleCol >= 0 && extraEveryCol >= 0;
                 if (!headerOk)
                 {
-                    loader.Error(file, 1, "header must contain name,effect,cooldown,damage,range,base_targets,"
+                    loader.Error(file, 1, "header must contain id,name,effect,cooldown,damage,range,base_targets,"
                                           "max_level,damage_per_level,range_per_level,cooldown_scale,"
                                           "levels_per_extra_target (the rest are optional)");
                 }
@@ -342,25 +348,26 @@ namespace engine::game
                     {
                         CardDef def{};
                         def.kind = CardKind::Attack;
+                        const std::string id = Lower(Cell(row, idCol));
                         const std::string name = Cell(row, nameCol);
-                        if (name.empty())
+                        if (!IsIdentifier(id) || name.empty())
                         {
-                            loader.Error(file, row.line, "name is required - row skipped");
+                            loader.Error(file, row.line, "id (a-z 0-9 _) and name are required - row skipped");
                             continue;
                         }
                         const bool duplicate = std::any_of(weapons.begin(), weapons.end(),
-                            [&](const CardDef& other) { return Lower(other.name) == Lower(name); });
+                            [&](const CardDef& other) { return other.id == id; });
                         if (duplicate)
                         {
-                            loader.Error(file, row.line, "duplicate name '" + name + "' - row skipped");
+                            loader.Error(file, row.line, "duplicate id '" + id + "' - row skipped");
                             continue;
                         }
 
                         const std::string effectName = Lower(Cell(row, effectCol));
-                        int effectIndex = -1;
-                        for (std::size_t i = 0; i < std::size(kEffectNames); ++i)
-                            if (effectName == kEffectNames[i].name) effectIndex = static_cast<int>(i);
-                        if (effectIndex < 0)
+                        const EffectSpec* spec = nullptr;
+                        for (const EffectSpec& candidate : kEffectSpecs)
+                            if (effectName == candidate.name) spec = &candidate;
+                        if (spec == nullptr)
                         {
                             loader.Error(file, row.line, "unknown effect '" + effectName + "' - row skipped");
                             continue;
@@ -398,25 +405,37 @@ namespace engine::game
                         }
                         if (!valid) continue;
 
-                        // Weapon-kind-specific - blank cell keeps 0.0f (unused for that effect).
-                        struct Opt { int col; float* target; };
+                        // Optional numbers - blank cell keeps the CardDef default.
+                        struct Opt { const char* label; float* target; float minValue; };
                         const Opt optional[] = {
-                            { coneCol, &def.coneHalfAngleDeg }, { lineWidthCol, &def.lineHalfWidth },
-                            { projSpeedCol, &def.projectileSpeed }, { explodeRadiusCol, &def.explodeRadius },
-                            { dmgMaxCol, &def.damageMax },
+                            { "cone_half_angle_deg", &def.coneHalfAngleDeg, 0.0f },
+                            { "line_half_width",     &def.lineHalfWidth,    0.0f },
+                            { "projectile_speed",    &def.projectileSpeed,  0.0f },
+                            { "explode_radius",      &def.explodeRadius,    0.0f },
+                            { "damage_max",          &def.damageMax,        0.0f },
+                            { "hit_radius",          &def.hitRadius,        0.0f },
+                            { "visual_scale",        &def.visualScale,      0.0f },
                         };
                         for (const Opt& opt : optional)
                         {
-                            const std::string cell = Cell(row, opt.col);
-                            if (opt.col < 0 || cell.empty()) continue;
-                            if (!core::ParseFloat(cell, *opt.target))
+                            const int col = table.Column(opt.label);
+                            const std::string cell = Cell(row, col);
+                            if (col < 0 || cell.empty()) continue;
+                            if (!core::ParseFloat(cell, *opt.target) || *opt.target < opt.minValue)
                             {
-                                loader.Error(file, row.line, "an optional numeric field is not a number - row skipped");
+                                loader.Error(file, row.line, std::string(opt.label) + " must be a number >= 0 - row skipped");
                                 valid = false;
                                 break;
                             }
                         }
                         if (!valid) continue;
+
+                        const std::string colorCell = Cell(row, colorCol);
+                        if (!colorCell.empty() && !ParseHexColor(colorCell, def.color))
+                        {
+                            loader.Error(file, row.line, "color must be RRGGBB hex - row skipped");
+                            continue;
+                        }
 
                         // Overflow (§3.4) - blank overflow_stat keeps overflowValue at 0
                         // (no bonus configured, so this weapon is never offered as an
@@ -442,11 +461,14 @@ namespace engine::game
                             }
                         }
 
+                        def.id = id;
                         def.name = name;
-                        def.effect = kEffectNames[effectIndex].effect;
+                        def.effect = spec->effect;
                         def.baseTargets = static_cast<int>(baseTargetsF);
                         def.maxLevel = static_cast<int>(maxLevelF);
                         def.levelsPerExtraTarget = static_cast<int>(extraEveryF);
+                        def.sprite = Lower(Cell(row, spriteCol));
+                        def.fxHit = Lower(Cell(row, fxHitCol));
                         weapons.push_back(std::move(def));
                     }
                     if (weapons.empty()) loader.Warn(file, 0, "no valid rows - using the built-in weapons");
@@ -593,10 +615,10 @@ namespace engine::game
                         const std::string weaponName = Lower(Cell(row, weaponCol));
                         int weaponIndex = -1;
                         for (std::size_t i = 0; i < out.weapons.size(); ++i)
-                            if (weaponName == Lower(out.weapons[i].name)) weaponIndex = static_cast<int>(i);
+                            if (weaponName == out.weapons[i].id) weaponIndex = static_cast<int>(i);
                         if (weaponIndex < 0)
                         {
-                            loader.Error(file, row.line, "start_weapon '" + weaponName + "' is not a known weapon - row skipped");
+                            loader.Error(file, row.line, "start_weapon '" + weaponName + "' is not a known weapon id - row skipped");
                             continue;
                         }
                         c.startWeapon = static_cast<std::uint8_t>(weaponIndex);

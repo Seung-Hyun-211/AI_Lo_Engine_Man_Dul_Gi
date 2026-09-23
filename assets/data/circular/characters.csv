@@ -1,12 +1,12 @@
 # Circular scene - playable characters (docs/circular-design.md 2.3, docs/circular-balance.md). One row = one character.
 # The four names are from the base design doc; main stats and start weapons are proposals (docs 12.3 A).
 # main_stat: vit | int | cor | agi (the character's focus - give it the highest start_*).
-# start_weapon: a weapon name from Card.h (SWORD, WHIP, STAFF, DAGGER, TRUMP - the base design's 5, docs-design 3.2;
-# PULSE/BOLT still exist as placeholders but no character starts with them anymore). TRUMP has no starting owner
+# start_weapon: a weapon id from weapons.csv (sword, whip, staff, dagger, trump - the base design's 5, docs-design 3.2;
+# pulse/bolt still exist as placeholders but no character starts with them anymore). trump has no starting owner
 # (level-up pool only) - four characters, five weapons.
 # name is ASCII because the HUD font has no Hangul yet.
 id,name,main_stat,start_vit,start_int,start_cor,start_agi,start_weapon
-magic_knight,MAGIC KNIGHT,vit,8,3,3,3,SWORD
-skull_magician,SKULL MAGICIAN,int,3,8,3,3,STAFF
-succubus,SUCCUBUS,cor,3,3,8,3,WHIP
-assassin_lizard,ASSASSIN LIZARD,agi,3,3,3,8,DAGGER
+magic_knight,MAGIC KNIGHT,vit,8,3,3,3,sword
+skull_magician,SKULL MAGICIAN,int,3,8,3,3,staff
+succubus,SUCCUBUS,cor,3,3,8,3,whip
+assassin_lizard,ASSASSIN LIZARD,agi,3,3,3,8,dagger

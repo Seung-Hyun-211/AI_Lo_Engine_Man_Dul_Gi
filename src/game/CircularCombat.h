@@ -3,9 +3,10 @@
 #include "core/NonCopyable.h"
 #include "game/Card.h"
 #include "game/CircularBalance.h"
+#include "game/HitShape.h"
 #include "game/MobField.h"
 #include "game/Stats.h"
-#include "math/Math.h"
+#include "math/Math2D.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -22,49 +23,38 @@
 // queries, same rule as MobField itself).
 namespace engine::game
 {
-    // A blinking yellow ring showing PULSE's radius at the moment it fired -
-    // render-only (no EffectPass2D glow - plain flat shapes only, docs/
-    // circular-design.md §7). SnapshotBuilder draws it as a dashed ring of worldQuads.
-    struct PulseRing
+    // How SnapshotBuilder draws an AttackVisual. Outline = the hit shape's
+    // outline (what just got hit); Travel = a dot moving along the capsule's
+    // segment (BOLT, a pierce hit) - purely cosmetic, the damage already landed.
+    enum class VisualStyle : std::uint8_t { Outline, Travel };
+
+    // A short-lived attack visual (docs/circular-combat.md §2.3). Carries the
+    // very HitShape the hit used, so the drawn size is the hit size (x the
+    // weapon's visual_scale). `defIndex` finds colour/sprite in the weapon row.
+    struct AttackVisual
     {
-        math::Vec2 pos{};
-        float range{ 0.0f };
+        HitShape shape;
+        VisualStyle style{ VisualStyle::Outline };
+        std::uint8_t defIndex{ 0 };
         float ageLeft{ 0.0f };
         float life{ 1.0f };   // ageLeft/life -> 1 (just spawned) .. 0 (about to vanish)
     };
 
-    // A red square that visually travels from the caster to a BOLT hit -
-    // render-only and purely cosmetic: the hit already landed (DamageNearest)
-    // when this is queued, so it never affects gameplay timing, only how the
-    // shot reads on screen.
-    struct BoltShot
-    {
-        math::Vec2 start{};
-        math::Vec2 end{};
-        float ageLeft{ 0.0f };
-        float life{ 1.0f };   // ageLeft/life -> 1 (just fired) .. 0 (arrived)
-    };
-
-    // Which weapon-specific thing a live Projectile does on its first hit each
-    // step (docs/circular-design.md §3.2 무기 5종). CircularCombat::Step
-    // switches on this - same "effect tag, not an if-chain" shape as CardEffect.
-    enum class ProjectileKind : std::uint8_t { Piercing, Exploding, Random };
-
-    // A real, physically-travelling shot (스태프/단검/트럼프 카드) - unlike
-    // BoltShot above, this one carries gameplay state: its own position/
-    // velocity/remaining flight distance, and it deals damage when it
-    // actually touches a mob (not on cast). Bounded pool (kMaxProjectiles),
-    // swap-removed when spent.
+    // A real, physically-travelling shot (스태프/단검/트럼프 카드) - carries
+    // gameplay state: its own position/velocity/remaining flight distance,
+    // and it deals damage when it actually touches a mob (not on cast). What
+    // it does on contact is its weapon's EffectSpec::onHit. Bounded pool
+    // (kMaxProjectiles), swap-removed when spent.
     struct Projectile
     {
         math::Vec2 pos{};
         math::Vec2 vel{};              // px/s
         float rangeLeft{ 0.0f };       // px budget - despawns (no hit) when this runs out
-        float damage{ 0.0f };          // Piercing/Exploding: the hit damage. Random: the roll's lower bound.
-        float damageMax{ 0.0f };       // Random only: the roll's upper bound (unused otherwise)
-        float explodeRadius{ 0.0f };   // Exploding only: AoE radius on contact
-        std::uint8_t piercesLeft{ 0 }; // Piercing only: hits left before it's spent
-        ProjectileKind kind{ ProjectileKind::Piercing };
+        float damage{ 0.0f };          // the hit damage (Random: the roll's lower bound)
+        float damageMax{ 0.0f };       // Random only: the roll's upper bound
+        float explodeRadius{ 0.0f };   // Explode only: blast radius (attack_size applied)
+        std::uint8_t piercesLeft{ 0 }; // Pierce only: hits left before it's spent
+        std::uint8_t defIndex{ 0 };    // weapon row: onHit, colour, size
     };
 
     // What combat needs from the rest of the run for one call - values and
@@ -95,7 +85,7 @@ namespace engine::game
     class CircularCombat final : private core::NonCopyable
     {
     public:
-        static constexpr float kPulseRingLife = 0.20f;      // seconds the PULSE range ring blinks
+        static constexpr float kOutlineLife = 0.20f;        // seconds an Outline visual blinks
         static constexpr float kBoltShotSpeed = 1200.0f;    // px/s the BOLT visual travels at
         static constexpr float kBoltShotMinLife = 0.05f;    // seconds - floor so a point-blank hit still reads
         static constexpr std::size_t kMaxProjectiles = 512;
@@ -117,16 +107,16 @@ namespace engine::game
         CombatResult Step(float fixedDelta, const CombatContext& context, MobField& mobs, std::mt19937& rng);
 
         // --- reads for the snapshot builder ---
-        [[nodiscard]] const std::vector<PulseRing>& PulseRings() const { return m_pulseRings; }
-        [[nodiscard]] const std::vector<BoltShot>& BoltShots() const { return m_boltShots; }
+        [[nodiscard]] const std::vector<AttackVisual>& Visuals() const { return m_visuals; }
         [[nodiscard]] const std::vector<Projectile>& Projectiles() const { return m_projectiles; }
 
     private:
-        // life_steal (§2.6): heals a fraction of the blow's damage per kill.
+        // The single "damage landed" point (docs S7): kills + life_steal heal.
         [[nodiscard]] static CombatResult Hit(const StatBlock& stats, float damage, std::uint32_t kills);
+        // Area attack: damage everything in `shape`, leave its outline.
+        CombatResult HitArea(const HitShape& shape, float damage, std::uint8_t defIndex, const StatBlock& stats, MobField& mobs);
 
-        std::vector<PulseRing> m_pulseRings;
-        std::vector<BoltShot> m_boltShots;
+        std::vector<AttackVisual> m_visuals;
         std::vector<Projectile> m_projectiles;   // <= kMaxProjectiles
     };
 }

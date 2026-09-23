@@ -39,7 +39,7 @@ namespace
         for (const CardInstance& card : sim.Deck())
         {
             if (!text.empty()) text += ' ';
-            text += std::string(kCardDefs[card.defIndex].name) + std::to_string(card.level);
+            text += sim.Balance().weapons[card.defIndex].name + std::to_string(card.level);
         }
         return text;
     }

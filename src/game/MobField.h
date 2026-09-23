@@ -2,6 +2,7 @@
 
 #include "core/JobSystem.h"
 #include "core/NonCopyable.h"
+#include "game/HitShape.h"
 #include "math/Math2D.h"
 
 #include <cstddef>
@@ -21,13 +22,12 @@
 // animation/mesh state to justify AoS the way SimAgent's VAT clip time does.
 //
 // Recycling is a free-list of slot indices plus a dense active list (same
-// swap-remove shape as core::ObjectPool), but no per-slot generation: nothing
-// in this scene holds a Handle across frames yet (SnapshotBuilder reads
-// ActiveIndices() fresh every frame). Add a generation-checked Handle later
-// if something needs to reference one specific mob across steps (e.g. a
-// homing projectile lock-on) - YAGNI for now.
+// swap-remove shape as core::ObjectPool). Each slot also has a generation,
+// bumped when its mob dies, so a MobRef held across steps (a projectile's
+// "already hit" memory, docs/circular-combat.md §2.2) goes stale instead of
+// silently pointing at whatever respawned into the slot.
 //
-// Thread: main/sim thread only for Spawn/Kill/DamageInRadius/Clear - same
+// Thread: main/sim thread only for Spawn/Kill/Damage*/Clear - same
 // rule as core::ObjectPool and CollisionWorld (CLAUDE.md invariant 6). Step()
 // itself runs a JobSystem::ParallelFor internally and blocks until it
 // completes, so it is safe to call from the main thread like any other
@@ -38,6 +38,21 @@ namespace engine::game
     // and flashing until LaunchCharge; Charge = straight-line dash that ends
     // back in Seek when its timer runs out.
     enum class MobState : std::uint8_t { Seek = 0, Windup = 1, Charge = 2 };
+
+    // One specific mob across steps: slot + the generation it had when seen.
+    struct MobRef
+    {
+        std::uint32_t slot{ 0 };
+        std::uint32_t generation{ 0 };
+        [[nodiscard]] bool operator==(const MobRef&) const = default;
+    };
+
+    // One mob found by MobField::Overlapping.
+    struct MobHit
+    {
+        MobRef ref;
+        math::Vec2 pos{};
+    };
 
     class MobField final : private core::NonCopyable
     {
@@ -56,36 +71,33 @@ namespace engine::game
         // posY/velX/velY entry). Blocks until the fence completes.
         void Step(core::JobSystem& jobs, math::Vec2 target, float speed, float fixedDelta);
 
-        // Applies `amount` damage to every live mob within `radius` of
-        // `center` (a card/weapon attack). Linear scan over the dense active
+        // Applies `amount` damage to every live mob overlapping `shape` - a
+        // mob counts when any part of its disc (own radius) is inside
+        // (docs/circular-combat.md §2.1). Linear scan over the dense active
         // list - same "fine until profiling says otherwise" call as
-        // CollisionWorld2D's brute-force broadphase (that file's own
-        // comment); a uniform grid goes here first if this ever needs to
-        // scale past what a per-attack O(live mob count) scan can afford.
-        // Main thread only. Returns how many mobs this call killed so the
-        // caller can award kills/XP without a second pass.
-        std::uint32_t DamageInRadius(math::Vec2 center, float radius, float amount);
+        // CollisionWorld2D's brute-force broadphase; a uniform grid goes here
+        // first if this ever needs to scale past what a per-attack O(live mob
+        // count) scan can afford. Main thread only. Returns how many mobs
+        // this call killed so the caller can award kills/XP without a second pass.
+        std::uint32_t DamageInShape(const HitShape& shape, float amount);
+
+        // Read-only: every live mob overlapping `shape` (same rule as
+        // DamageInShape), appended to `out` after clearing it. For attacks
+        // that must pick among or remember the mobs they touch (projectiles:
+        // pierce order, re-hit gating). Main thread only.
+        void Overlapping(const HitShape& shape, std::vector<MobHit>& out) const;
+
+        // Applies `amount` to one mob. A stale ref (that mob already died,
+        // even if its slot was reused) is a no-op. Returns true if this killed it.
+        bool Damage(MobRef ref, float amount);
 
         // Applies `amount` damage to the `count` (<= 8) live mobs nearest to
         // `center` within `range` (a single-target/multi-target card). Writes
         // each hit mob's position to hitOut[0..hitCount) for the caller's
         // visuals. Linear scan with a small sorted candidate list, like
-        // DamageInRadius. Main thread only. Returns how many mobs it killed.
+        // DamageInShape. Main thread only. Returns how many mobs it killed.
         std::uint32_t DamageNearest(math::Vec2 center, float range, float amount, std::uint32_t count,
                                     math::Vec2* hitOut, std::uint32_t& hitCount);
-
-        // Applies `amount` damage to every live mob within `range` of `center`
-        // AND within `halfAngleRad` of `forward` (docs/circular-design.md §3.2
-        // "검" - fan-shaped swing). Dot-product cone test, no atan2. A mob
-        // exactly on `center` is always inside the cone. `forward` need not be
-        // normalized. Same scan/kill shape as DamageInRadius. Main thread only.
-        std::uint32_t DamageInArc(math::Vec2 center, math::Vec2 forward, float halfAngleRad,
-                                  float range, float amount);
-
-        // Applies `amount` damage to every live mob within `halfWidth` of the
-        // segment [start,end] (docs §3.2 "채찍" - a straight-line swing with
-        // width). Closest-point-on-segment distance test. Main thread only.
-        std::uint32_t DamageInCapsule(math::Vec2 start, math::Vec2 end, float halfWidth, float amount);
 
         // Read-only: the closest live mob within `radius` of `center`, if any
         // (no damage). Used to aim a thrown projectile (docs §3.2 스태프/단검/
@@ -137,9 +149,10 @@ namespace engine::game
         std::vector<std::uint8_t>  m_state;       // MobState per slot
         std::vector<float>         m_stateTimer;  // seconds left in Charge
         std::vector<std::uint8_t>  m_slotActive;  // per slot 0/1
+        std::vector<std::uint32_t> m_generation;  // per slot, bumped on death (MobRef staleness)
         std::vector<std::uint32_t> m_activePos;   // slot index -> its position in m_active (valid while active)
         std::vector<std::uint32_t> m_active;      // dense live-slot indices
         std::vector<std::uint32_t> m_free;        // free-slot stack
-        std::vector<std::uint32_t> m_deadScratch; // reused by DamageInRadius, avoids a per-call allocation
+        std::vector<std::uint32_t> m_deadScratch; // reused by DamageInShape/DamageNearest, avoids a per-call allocation
     };
 }

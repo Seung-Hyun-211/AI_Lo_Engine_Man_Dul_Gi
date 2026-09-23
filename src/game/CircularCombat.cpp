@@ -5,23 +5,66 @@
 
 namespace engine::game
 {
+    namespace
+    {
+        constexpr float kDegToRad = 3.14159265f / 180.0f;
+
+        // Ages every entry by `dt` and swap-removes the expired ones (order is
+        // not kept - nothing here depends on it). The one copy of this loop (S6).
+        template <typename T>
+        void AgeAndErase(std::vector<T>& items, float dt)
+        {
+            for (std::size_t i = 0; i < items.size(); )
+            {
+                items[i].ageLeft -= dt;
+                if (items[i].ageLeft <= 0.0f) { items[i] = items.back(); items.pop_back(); }
+                else ++i;
+            }
+        }
+
+        // The shape an Area weapon covers when fired from `center` facing
+        // `facing` with reach `size` (range for an instant swing). The per-shape
+        // parameters live in the weapon row; this is the only place that maps
+        // them onto a HitShape.
+        HitShape AreaShape(const CardDef& def, HitShapeKind kind, math::Vec2 center, math::Vec2 facing,
+                           float size, float attackSize)
+        {
+            switch (kind)
+            {
+            case HitShapeKind::Arc:     return HitShape::Arc(center, facing, def.coneHalfAngleDeg * kDegToRad, size);
+            case HitShapeKind::Capsule: return HitShape::Capsule(center, center + facing * size, def.lineHalfWidth * attackSize);
+            case HitShapeKind::Circle:
+            case HitShapeKind::Count:   break;
+            }
+            return HitShape::Circle(center, size);
+        }
+    }
+
     void CircularCombat::Reset()
     {
-        m_pulseRings.clear();
-        m_boltShots.clear();
+        m_visuals.clear();
         m_projectiles.clear();
     }
 
     CombatResult CircularCombat::Hit(const StatBlock& stats, float damage, std::uint32_t kills)
     {
-        // Kill-gated (not per point of damage dealt) since the MobField queries
-        // only report kill counts, not total damage applied to survivors.
+        // life_steal (§2.6) heals a fraction of the blow's damage per kill -
+        // kill-gated since the MobField queries report kills, not damage dealt.
         return { kills, damage * stats[StatId::LifeSteal] * static_cast<float>(kills) };
+    }
+
+    CombatResult CircularCombat::HitArea(const HitShape& shape, float damage, std::uint8_t defIndex,
+                                         const StatBlock& stats, MobField& mobs)
+    {
+        const std::uint32_t kills = mobs.DamageInShape(shape, damage);
+        m_visuals.push_back({ shape, VisualStyle::Outline, defIndex, kOutlineLife, kOutlineLife });
+        return Hit(stats, damage, kills);
     }
 
     CombatResult CircularCombat::Fire(const CardInstance& card, const CombatContext& context, MobField& mobs, std::mt19937& rng)
     {
         const CardDef& def = context.balance.weapons[card.defIndex];
+        const EffectSpec& spec = SpecOf(def.effect);
         const StatBlock& stats = context.stats;
         const math::Vec2 playerCenter = context.playerCenter;
         // Weapons read the stat block by id (docs §2.6): damage x weapon_damage,
@@ -35,15 +78,13 @@ namespace engine::game
         const float damage = CardDamage(def, card.level) * dmgMul;
         const float range = CardRange(def, card.level) * stats[StatId::AttackSize];
 
-        switch (def.effect)
+        switch (spec.form)
         {
-        case CardEffect::RadialPulse:
-        {
-            const std::uint32_t kills = mobs.DamageInRadius(playerCenter, range, damage);
-            m_pulseRings.push_back({ playerCenter, range, kPulseRingLife, kPulseRingLife });
-            return Hit(stats, damage, kills);
-        }
-        case CardEffect::NearestBolt:
+        case AttackForm::Area:
+            return HitArea(AreaShape(def, spec.shape, playerCenter, context.facing, range, stats[StatId::AttackSize]),
+                           damage, card.defIndex, stats, mobs);
+
+        case AttackForm::Nearest:
         {
             math::Vec2 hits[kMaxBoltTargets];
             std::uint32_t hitCount = 0;
@@ -52,34 +93,19 @@ namespace engine::game
             const std::uint32_t kills = mobs.DamageNearest(
                 playerCenter, range, damage, static_cast<std::uint32_t>(targets), hits, hitCount);
             // Cosmetic only - the hit already landed above. Duration scales
-            // with distance so the square visibly "flies" instead of teleporting.
+            // with distance so the dot visibly "flies" instead of teleporting.
             for (std::uint32_t i = 0; i < hitCount; ++i)
             {
                 const float life = std::max(kBoltShotMinLife, math::Length(hits[i] - playerCenter) / kBoltShotSpeed);
-                m_boltShots.push_back({ playerCenter, hits[i], life, life });
+                m_visuals.push_back({ HitShape::Capsule(playerCenter, hits[i], def.hitRadius), VisualStyle::Travel,
+                                      card.defIndex, life, life });
             }
             return Hit(stats, damage, kills);
         }
-        case CardEffect::ArcSwing:
+
+        case AttackForm::Projectile:
         {
-            const float halfAngleRad = def.coneHalfAngleDeg * (3.14159265f / 180.0f);
-            const std::uint32_t kills = mobs.DamageInArc(playerCenter, context.facing, halfAngleRad, range, damage);
-            m_pulseRings.push_back({ playerCenter, range, kPulseRingLife, kPulseRingLife });   // stand-in visual until a real swing shape exists
-            return Hit(stats, damage, kills);
-        }
-        case CardEffect::LineSwing:
-        {
-            const float halfWidth = def.lineHalfWidth * stats[StatId::AttackSize];
-            const math::Vec2 lineEnd = playerCenter + context.facing * range;
-            const std::uint32_t kills = mobs.DamageInCapsule(playerCenter, lineEnd, halfWidth, damage);
-            m_boltShots.push_back({ playerCenter, lineEnd, kPulseRingLife, kPulseRingLife });   // stand-in visual (line sweep)
-            return Hit(stats, damage, kills);
-        }
-        case CardEffect::ExplodingBolt:
-        case CardEffect::PiercingShot:
-        case CardEffect::RandomDamageShot:
-        {
-            // Damage lands later, in Step - these three actually fly.
+            // Damage lands later, in Step - these actually fly.
             if (m_projectiles.size() >= kMaxProjectiles) return {};   // pool full: drop, not fatal (MobField::Spawn's convention)
             math::Vec2 aimPos;
             const math::Vec2 aimDir = mobs.ClosestWithin(playerCenter, range, aimPos)
@@ -91,21 +117,10 @@ namespace engine::game
             shot.vel = aimDir * def.projectileSpeed;
             shot.rangeLeft = range;
             shot.damage = damage;
-            switch (def.effect)
-            {
-            case CardEffect::RandomDamageShot:
-                shot.damageMax = CardDamageMax(def, card.level) * dmgMul;
-                shot.kind = ProjectileKind::Random;
-                break;
-            case CardEffect::PiercingShot:
-                shot.piercesLeft = static_cast<std::uint8_t>(CardTargets(def, card.level));
-                shot.kind = ProjectileKind::Piercing;
-                break;
-            default:   // ExplodingBolt
-                shot.explodeRadius = def.explodeRadius * stats[StatId::AttackSize];
-                shot.kind = ProjectileKind::Exploding;
-                break;
-            }
+            shot.damageMax = CardDamageMax(def, card.level) * dmgMul;
+            shot.explodeRadius = def.explodeRadius * stats[StatId::AttackSize];
+            shot.piercesLeft = static_cast<std::uint8_t>(CardTargets(def, card.level));
+            shot.defIndex = card.defIndex;
             m_projectiles.push_back(shot);
             return {};
         }
@@ -120,27 +135,27 @@ namespace engine::game
         for (std::size_t i = 0; i < m_projectiles.size(); )
         {
             Projectile& shot = m_projectiles[i];
+            const OnHit onHit = SpecOf(context.balance.weapons[shot.defIndex].effect).onHit;
             const float speed = math::Length(shot.vel);
             shot.pos = shot.pos + shot.vel * fixedDelta;
             shot.rangeLeft -= speed * fixedDelta;
 
             bool spent = false;
-            switch (shot.kind)
+            switch (onHit)
             {
-            case ProjectileKind::Exploding:
+            case OnHit::Explode:
             {
                 // "닿으면 폭발" (§3.2 스태프) - contact only, not on range-out:
-                // read-only proximity check first, then the AoE is the hit.
+                // read-only proximity check first, then the blast is the hit.
                 math::Vec2 hitPos;
                 if (mobs.ClosestWithin(shot.pos, reach, hitPos))
                 {
-                    result += Hit(context.stats, shot.damage, mobs.DamageInRadius(hitPos, shot.explodeRadius, shot.damage));
-                    m_pulseRings.push_back({ hitPos, shot.explodeRadius, kPulseRingLife, kPulseRingLife });   // stand-in blast ring
+                    result += HitArea(HitShape::Circle(hitPos, shot.explodeRadius), shot.damage, shot.defIndex, context.stats, mobs);
                     spent = true;
                 }
                 break;
             }
-            case ProjectileKind::Piercing:
+            case OnHit::Pierce:
             {
                 math::Vec2 hit;
                 std::uint32_t hitCount = 0;
@@ -148,7 +163,8 @@ namespace engine::game
                 if (hitCount > 0)
                 {
                     result += Hit(context.stats, shot.damage, hitKills);
-                    m_boltShots.push_back({ shot.pos, hit, kBoltShotMinLife, kBoltShotMinLife });
+                    m_visuals.push_back({ HitShape::Capsule(shot.pos, hit, context.balance.weapons[shot.defIndex].hitRadius), VisualStyle::Travel, shot.defIndex,
+                                          kBoltShotMinLife, kBoltShotMinLife });
                     if (shot.piercesLeft > 0) --shot.piercesLeft;
                     if (shot.piercesLeft == 0) spent = true;
                     // Nudge past the mob just hit so next step doesn't immediately
@@ -157,7 +173,7 @@ namespace engine::game
                 }
                 break;
             }
-            case ProjectileKind::Random:
+            case OnHit::Random:
             {
                 math::Vec2 nearest;
                 if (mobs.ClosestWithin(shot.pos, reach, nearest))
@@ -169,30 +185,21 @@ namespace engine::game
                     math::Vec2 hit;
                     std::uint32_t hitCount = 0;
                     result += Hit(context.stats, rolled, mobs.DamageNearest(shot.pos, reach, rolled, 1, &hit, hitCount));
-                    m_boltShots.push_back({ shot.pos, hit, kBoltShotMinLife, kBoltShotMinLife });
+                    m_visuals.push_back({ HitShape::Capsule(shot.pos, hit, context.balance.weapons[shot.defIndex].hitRadius), VisualStyle::Travel, shot.defIndex,
+                                          kBoltShotMinLife, kBoltShotMinLife });
                     spent = true;
                 }
                 break;
             }
+            case OnHit::None:
+                break;
             }
 
             if (spent || shot.rangeLeft <= 0.0f) { m_projectiles[i] = m_projectiles.back(); m_projectiles.pop_back(); }
             else ++i;
         }
 
-        // Swap-remove expired attack visuals.
-        for (std::size_t i = 0; i < m_pulseRings.size(); )
-        {
-            m_pulseRings[i].ageLeft -= fixedDelta;
-            if (m_pulseRings[i].ageLeft <= 0.0f) { m_pulseRings[i] = m_pulseRings.back(); m_pulseRings.pop_back(); }
-            else ++i;
-        }
-        for (std::size_t i = 0; i < m_boltShots.size(); )
-        {
-            m_boltShots[i].ageLeft -= fixedDelta;
-            if (m_boltShots[i].ageLeft <= 0.0f) { m_boltShots[i] = m_boltShots.back(); m_boltShots.pop_back(); }
-            else ++i;
-        }
+        AgeAndErase(m_visuals, fixedDelta);
         return result;
     }
 }

@@ -15,6 +15,7 @@ namespace engine::game
         m_state.assign(capacity, static_cast<std::uint8_t>(MobState::Seek));
         m_stateTimer.assign(capacity, 0.0f);
         m_slotActive.assign(capacity, 0u);
+        m_generation.assign(capacity, 0u);
         m_activePos.assign(capacity, 0u);
         m_active.reserve(capacity);
         m_free.reserve(capacity);
@@ -50,6 +51,7 @@ namespace engine::game
         if (index >= m_slotActive.size() || m_slotActive[index] == 0u) return;
 
         m_slotActive[index] = 0u;
+        ++m_generation[index];   // any MobRef to this mob is stale from now on
         const std::uint32_t pos = m_activePos[index];
         const std::uint32_t moved = m_active.back();
         m_active[pos] = moved;
@@ -108,16 +110,12 @@ namespace engine::game
             }).Wait();
     }
 
-    std::uint32_t MobField::DamageInRadius(math::Vec2 center, float radius, float amount)
+    std::uint32_t MobField::DamageInShape(const HitShape& shape, float amount)
     {
-        const float r2 = radius * radius;
         m_deadScratch.clear();
         for (const std::uint32_t idx : m_active)
         {
-            const float dx = m_posX[idx] - center.x;
-            const float dy = m_posY[idx] - center.y;
-            if (dx * dx + dy * dy > r2) continue;
-
+            if (!ShapeContains(shape, { m_posX[idx], m_posY[idx] }, m_radius[idx])) continue;
             m_health[idx] -= amount;
             if (m_health[idx] <= 0.0f) m_deadScratch.push_back(idx);
         }
@@ -126,6 +124,26 @@ namespace engine::game
         // list the loop above is still iterating.
         for (const std::uint32_t idx : m_deadScratch) Kill(idx);
         return static_cast<std::uint32_t>(m_deadScratch.size());
+    }
+
+    void MobField::Overlapping(const HitShape& shape, std::vector<MobHit>& out) const
+    {
+        out.clear();
+        for (const std::uint32_t idx : m_active)
+        {
+            const math::Vec2 pos{ m_posX[idx], m_posY[idx] };
+            if (ShapeContains(shape, pos, m_radius[idx])) out.push_back({ { idx, m_generation[idx] }, pos });
+        }
+    }
+
+    bool MobField::Damage(MobRef ref, float amount)
+    {
+        if (ref.slot >= m_slotActive.size() || m_slotActive[ref.slot] == 0u || m_generation[ref.slot] != ref.generation)
+            return false;
+        m_health[ref.slot] -= amount;
+        if (m_health[ref.slot] > 0.0f) return false;
+        Kill(ref.slot);
+        return true;
     }
 
     std::uint32_t MobField::DamageNearest(math::Vec2 center, float range, float amount, std::uint32_t count,
@@ -172,56 +190,7 @@ namespace engine::game
             if (m_health[idx] <= 0.0f) m_deadScratch.push_back(idx);
         }
         hitCount = found;
-        for (const std::uint32_t idx : m_deadScratch) Kill(idx);   // after the scan, as in DamageInRadius
-        return static_cast<std::uint32_t>(m_deadScratch.size());
-    }
-
-    std::uint32_t MobField::DamageInArc(math::Vec2 center, math::Vec2 forward, float halfAngleRad,
-                                        float range, float amount)
-    {
-        const math::Vec2 dir = math::Normalized(forward);
-        if (dir.x == 0.0f && dir.y == 0.0f) return 0;   // no facing to swing along - nothing to hit
-        const float rangeSq = range * range;
-        const float cosHalfAngle = std::cos(halfAngleRad);
-        m_deadScratch.clear();
-        for (const std::uint32_t idx : m_active)
-        {
-            const float dx = m_posX[idx] - center.x;
-            const float dy = m_posY[idx] - center.y;
-            const float distSq = dx * dx + dy * dy;
-            if (distSq > rangeSq) continue;
-            if (distSq > 1e-6f)   // a mob exactly on `center` is always "in the cone"
-            {
-                const float cosAngle = (dx * dir.x + dy * dir.y) / std::sqrt(distSq);
-                if (cosAngle < cosHalfAngle) continue;
-            }
-
-            m_health[idx] -= amount;
-            if (m_health[idx] <= 0.0f) m_deadScratch.push_back(idx);
-        }
-        for (const std::uint32_t idx : m_deadScratch) Kill(idx);   // after the scan, as in DamageInRadius
-        return static_cast<std::uint32_t>(m_deadScratch.size());
-    }
-
-    std::uint32_t MobField::DamageInCapsule(math::Vec2 start, math::Vec2 end, float halfWidth, float amount)
-    {
-        const math::Vec2 seg = end - start;
-        const float segLenSq = math::Dot(seg, seg);
-        const float radiusSq = halfWidth * halfWidth;
-        m_deadScratch.clear();
-        for (const std::uint32_t idx : m_active)
-        {
-            const math::Vec2 toMob{ m_posX[idx] - start.x, m_posY[idx] - start.y };
-            float t = segLenSq > 1e-6f ? math::Dot(toMob, seg) / segLenSq : 0.0f;
-            t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
-            const float dx = m_posX[idx] - (start.x + seg.x * t);
-            const float dy = m_posY[idx] - (start.y + seg.y * t);
-            if (dx * dx + dy * dy > radiusSq) continue;
-
-            m_health[idx] -= amount;
-            if (m_health[idx] <= 0.0f) m_deadScratch.push_back(idx);
-        }
-        for (const std::uint32_t idx : m_deadScratch) Kill(idx);
+        for (const std::uint32_t idx : m_deadScratch) Kill(idx);   // after the scan, as in DamageInShape
         return static_cast<std::uint32_t>(m_deadScratch.size());
     }
 
@@ -286,6 +255,7 @@ namespace engine::game
         m_free.clear();
         for (std::size_t i = m_posX.size(); i-- > 0; )
         {
+            if (m_slotActive[i] != 0u) ++m_generation[i];
             m_slotActive[i] = 0u;
             m_free.push_back(static_cast<std::uint32_t>(i));
         }
