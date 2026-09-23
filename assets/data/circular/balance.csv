@@ -6,5 +6,5 @@ mob_health,20,HP of every newly spawned mob
 mob_speed,90,px per second toward the player (player walks 300)
 mob_radius,10,px - collision and drawn half-size
 mob_xp,1,XP per kill (before the player's XP GAIN multiplier)
-spawn_radius,640,px from the player where mobs appear (off-screen)
+spawn_radius,1150,px from the player where mobs appear - beyond the view corner (sqrt(960^2+540^2) ~ 1101) so they never pop in on screen
 xp_growth_after_table,1.35,past the last levels.csv row each level needs this many times more XP

@@ -501,11 +501,9 @@ namespace engine::game
         // vitals. hp_regen is HP/second; life_steal heals on hit instead (StepCombat).
         m_playerHp = std::min(m_stats[StatId::MaxHp], m_playerHp + m_stats[StatId::HpRegen] * dt);
 
+        // Infinite field [확정] (docs/circular-design.md §4.3): no bounds - the camera
+        // follows and mobs spawn around wherever the player is.
         m_player = m_player + velocityDir * (speed * dt);
-        // Movement box in world units (kCircularView), not the window - the
-        // field must not grow or shrink with the resolution.
-        m_player.x = math::Clamp(m_player.x, 0.0f, kCircularView.width - m_balance.player.hitboxWidth);
-        m_player.y = math::Clamp(m_player.y, 0.0f, kCircularView.height - m_balance.player.hitboxHeight);
     }
 
     void Simulation::RestartCircularRun()
