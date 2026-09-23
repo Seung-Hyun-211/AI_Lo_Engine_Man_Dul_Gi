@@ -15,7 +15,7 @@
 
 > 마일스톤이나 큰 작업을 끝낼 때마다 이 블록을 갱신한다. 상세는 아래 절, 순서는 §10, 결정 기록은 §12. **마지막 갱신: 2026-09-23.**
 
-**한 줄 요약**: 2D 뱀서 라이크 "서큘러". 부팅 = 곧장 Circular 씬(타이틀 없음, ESC → 설정 → LOBBY 로 GAME / TEST SCENE). 기준 = 기초 설계(헌법) > 사용자 [확정] > 이 문서의 [살]. **M1·M5 완료, M2 뼈대, 전투 구조 완료 → 다음은 M3(적 종류).**
+**한 줄 요약**: 2D 뱀서 라이크 "서큘러". 부팅 = 곧장 Circular 씬(타이틀 없음, ESC → 설정 → LOBBY 로 GAME / TEST SCENE). 기준 = 기초 설계(헌법) > 사용자 [확정] > 이 문서의 [살]. **M1·M3·M5·전투 구조 완료, M2 뼈대 → 다음은 M4(스폰 패턴 — 사용자 입력 대기).**
 
 **어디를 읽나** (주제 → 문서)
 
@@ -31,24 +31,27 @@
 **구현됨 ✅**
 - **화면**: 항상 월드 1920×1080 만큼 보이고 창 크기에 맞춰 균일 확대·축소, 비율이 다르면 레터박스(§8). 게임 수치는 전부 월드 단위(1920×1080 화면의 px).
 - **필드**: 무한(이동 경계 없음). 몹은 화면 밖(`spawn_radius` 1150 > 화면 모서리 ≈1101)에서 스폰, 초당 100마리, `MobField` SoA 4096.
-- **플레이어**: 그림 64×128, 히트박스 48×72(그림 바닥에서 8px 위) — `player.csv`. 걷기·달리기(Shift)·대쉬(Space, 무적)·스태미너. HP(재생·크리·흡혈 소비처). 캐릭터 4종 + 선택 모달(부팅·F7).
+- **적 (M3, §5)**: `mobs.csv` 4종 — 근접 GRUNT · 탱커 BRUTE · 원거리 ARCHER(화살) · 마법 WITCH(예고 후 떨어지는 장판). 종류는 `weight` 비율로 섞여 스폰. 행동은 숫자(`keep_distance` 0 = 추적, > 0 = 그 거리에서 멈춤) + `attack`(= `mob_attacks.csv` 행, 무기와 같은 열·같은 전투 구조).
+- **플레이어**: 그림 64×128, 히트박스 48×72(그림 바닥에서 8px 위) — `player.csv`. 걷기·달리기(Shift)·대쉬(Space, **무적 — 이제 실제로 피격을 막음**)·스태미너. HP(재생·크리·흡혈). **피격**: 몹 접촉·적 공격 → `damage_reduction` 만큼 감소, 한 번 맞으면 `hurt_invuln` 0.5초 동안 추가 피해 없음. **HP 0 → 런 종료 모달(RETRY / LOBBY)**. 캐릭터 4종 + 선택 모달(부팅·F7).
 - **능력치**: 기초 4스텟 + 파생 23종 = `StatId` 27개(`Stats.h`, `stats.csv`). 2026-09-23 추가 `defense`·`dot_damage`·`armor_break` 는 **값·표시만**(계산식 [미정]).
 - **무기**: 기초 5종(검 부채꼴 / 채찍 캡슐 / 스태프 폭발 투사체 / 단검 관통 / 트럼프 랜덤 피해) + 구형 PULSE·BOLT + 움직이는 공격 3종(BLADE 궤도, VORTEX 소용돌이, SPIKE 럴커식 전진 — 레벨업 풀 전용). 전부 `weapons.csv` 한 행.
 - **전투 구조**(`CircularCombat`, [circular-combat.md](circular-combat.md)): 효과(`kEffectSpecs`) × 경로(None/Straight/Polar). 판정 도형 `HitShape` 하나를 판정과 그림이 같이 씀, 몹 반경 포함, 투사체는 스윕 접촉 + 맞힌 몹 기억(`MobRef` 세대).
 - **성장**: XP → 레벨업 3택(무기·장신구 6종·스탯 카드 9종·오버플로우).
-- **UI**: 로비(GAME / TEST SCENE), 테스트 씬(더미 99999 HP + **콜라이더 초록 외곽선 표시**), HUD 뼈대(§7.2 영역이 앵커 좌표에, 전부 단색 자리표시).
-- **데이터·도구**: CSV 8개(`assets/data/circular/`, F5 다시 읽기 / F6 재시작 / F7 캐릭터), 밸런스 시뮬레이터 `tools/run_balance_sim.bat`, 이미지 패커 `tools/atlas_pack`, 그림 템플릿 `assets/templates/`.
+- **UI**: 로비(GAME / TEST SCENE), 테스트 씬(더미 99999 HP + **콜라이더 초록 외곽선 표시**, **플레이어 피해 없음**), HUD 뼈대(§7.2 영역이 앵커 좌표에, 전부 단색 자리표시), 런 종료 모달(`YOU DIED 시간 LV` → RETRY / LOBBY).
+- **데이터·도구**: CSV 10개(`assets/data/circular/`, F5 다시 읽기 / F6 재시작 / F7 캐릭터), 밸런스 시뮬레이터 `tools/run_balance_sim.bat`(기본 무적, `--mortal` 이면 죽으면 멈춤), 이미지 패커 `tools/atlas_pack`, 그림 템플릿 `assets/templates/`.
 
-**임시 🟡**: 붉은 구역 예고 → 돌진(`kChargePattern`, M4 에서 교체) · 텍스트 HUD · 색 사각형 자리표시(스프라이트는 M7) · 단검 킬 수가 광역 무기보다 낮음(밸런스) · 소비처 없는 능력치(`luck`, `damage_reduction`, `ultimate_charge_mul`, `corruption_power`, `defense`, `dot_damage`, `armor_break`).
+**임시 🟡**: 붉은 구역 예고 → 돌진(`kChargePattern`, M4 에서 교체) · 텍스트 HUD · 색 사각형 자리표시(스프라이트는 M7) · 단검 킬 수가 광역 무기보다 낮음(밸런스) · **적 수치 전부 [살] 초기값** — 제자리에 서 있으면 약 10~12초 만에 죽는다(평탄한 초당 100마리 테스트 스폰 기준, 원거리·마법이 먼저 맞힘) · 소비처 없는 능력치(`luck`, `ultimate_charge_mul`, `corruption_power`, `defense`, `dot_damage`, `armor_break`).
 
-**없음 ❌**: 몹 접촉 피해·적 공격(W7 = M3) · 적 5분류 · 스폰 패턴 3종 · 스테이지·90초·보스·마계숲 노드 · 궁극기 · CardSelect 카드 레이아웃 · HUD 이미지·호버·클릭 · 씬 구조(로딩·타이틀)·난이도 · 월드 스프라이트·애니메이션(M7) · 메타 재화·세이브.
+**없음 ❌**: 적 보스 · 스폰 패턴 3종 · 스테이지·90초·보스·마계숲 노드 · 궁극기 · CardSelect 카드 레이아웃 · HUD 이미지·호버·클릭 · 씬 구조(로딩·타이틀)·난이도 · 월드 스프라이트·애니메이션(M7) · 메타 재화·세이브.
 
-**다음 할 일**: **M3**(적 종류 `mobs.csv` + `MobBehavior`, 적 공격은 [circular-combat.md](circular-combat.md) W7 구조 재사용) → M4(스폰 패턴 — **사용자가 패턴 상세를 주기로 함, 착수 전 확인**) → M6 → M8. M7(아트)·M2 나머지는 병행 가능.
+**다음 할 일** (세부 작업표 = §10.1): **M4**(스폰 패턴 — **사용자가 패턴 상세를 주기로 함, 착수 전 확인**) → M6 → M8. M7(아트)·M2 나머지·밸런스(단검 재측정, 적 수치)는 병행 가능.
 
 **사용자 결정 대기**
-- §12.3 A~F — **2026-09-23 에 B(90초·보스)·D(오버플로우 상한)·E(대쉬 효율)·A②(오염 의미)를 물었으나 사용자가 창을 닫음. 다시 묻기 전에 먼저 확인.** C(노드 세부)·F(타이머 위치·클리어 보상)는 아직 안 물음.
+- §12.3 A~G — **2026-09-23 에 B(90초·보스)·D(오버플로우 상한)·E(대쉬 효율)·A②(오염 의미)를 물었으나 사용자가 창을 닫음. 다시 묻기 전에 먼저 확인.** C(노드 세부)·F(타이머 위치·클리어 보상)는 아직 안 물음. G(플레이어 사망)는 기본안 [살]으로 구현함 — 다른 규칙을 원하면 바꾼다.
 - `defense`/`dot_damage`/`armor_break` 계산식·단위·얻는 방법(사용자: "계산식은 나중에").
 - 계속 [미정]: §12.2.
+
+**최근 구현 (2026-09-23, M3)**: `mobs.csv`·`mob_attacks.csv` 신설, `balance.csv` 의 `mob_*` 키는 삭제(→ `mobs.csv`), 적 공격 = 전투 구조의 `Team::Enemy`(W7), 예고 후 떨어지는 장판 = 무기 열 `delay`·`origin`. 계획했던 `MobBehavior` 열거·`TelegraphZone` 일반화는 **안 만듦**(KISS — §5.3).
 
 **최근 결정 (2026-09-23)**: 전투 D1~D7 전부 A([circular-combat.md](circular-combat.md) §4) · 보이는 세계 1920×1080 고정 · 무한 필드 · `spawn_radius` 1150 · 몹 그림 발밑 정렬은 M7 때 · BLADE 반경 80 유지 · 플레이어 히트박스 48×72 + 8px 띄움. 전체 목록 §12.1.
 
@@ -108,9 +111,9 @@
 
 | 동작 | 입력 **[확정]** | 규칙 |
 |---|---|---|
-| 걷기 ✅ | WASD / 방향키 | 기본 이동. 현재 `kPlayerSpeed` = 300 px/s |
+| 걷기 ✅ | WASD / 방향키 | 기본 이동. `player.csv` `walk_speed` = 300 px/s × `move_speed` 스탯 |
 | 달리기 ✅ | **Shift** 누르는 동안 | 걷기보다 빠름. **스태미너를 소모**한다 [기초: HUD 스테미너 = 달리기·대쉬]. 스태미너가 바닥나면 `run_resume_stamina` 까지 회복될 때까지 달리기 잠금 |
-| 대쉬 ✅ | **Space(스페이스바)** | 짧은 시간 고속 이동. **스태미너를 소모** [기초]. **대쉬 중 무적** [확정] — `PlayerInvulnerable()` 이 대쉬 시간 동안 참(HP 는 이미 있음 §2.6 — 몹 접촉 피해 판정이 생기면 그 판정이 이를 본다) |
+| 대쉬 ✅ | **Space(스페이스바)** | 짧은 시간 고속 이동. **스태미너를 소모** [기초]. **대쉬 중 무적** [확정] ✅ — `PlayerInvulnerable()` 이 대쉬 시간 동안 참이고, 그동안 몹 접촉·적 장판은 피해를 못 주고 적 투사체는 몸을 통과한다(`Simulation::HurtPlayer`, `CombatContext::playerHittable`) |
 
 > **구현 메모 (M1)**: `Simulation::StepCircularPlayer`. 대쉬 입력은 3D 점프처럼 `QueueDash()` 로 래치(0-스텝 프레임 손실 방지)하며 스태미너가 전체 소모량에 못 미치면 **거절**(부분 대쉬 없음). 대쉬 소모 = `dash_cost × dash_cost_mul × (1 + dash_chain_penalty × dash_chain_penalty_mul × 창 안 직전 대쉬 수)`. 헤드리스로 확인한 값(마도기사): 1회 29.6 → 2회 44.3 → 3회 59.1, 최대 스태미너 106 이면 4연속은 거절됨. 수치는 전부 `assets/data/circular/player.csv` + `stats.csv`.
 
@@ -131,7 +134,8 @@
 | 대쉬 이동 | ×3.5 속도, 0.18 s (≈189 px) | 방향 = 입력 방향(입력 없으면 마지막 이동 방향) |
 | 대쉬 소모 / 재사용 대기 | **30** / 0.5 s | 연속 시 소모 ×(1 + 0.5·연속횟수) |
 | 회복 | 30 per s, 마지막 사용 후 0.8 s 뒤부터 | |
-| **대쉬 무적** [확정] | 대쉬 지속시간(0.18 s) 동안 | HP 는 이미 있음(§2.6) — 몹 접촉 피해 판정(M3)이 생길 때 실제로 막을 대상이 생긴다 |
+| **대쉬 무적** [확정] | 대쉬 지속시간(0.18 s) 동안 | ✅ 몹 접촉·적 공격을 막는다(M3) |
+| 피격 무적 [살] | 맞은 뒤 `hurt_invuln` 0.5 s | 대쉬와 별개. 몹 떼에 둘러싸여도 0.5초에 한 번만 맞는다(`player.csv`) |
 
 **효율 계산(제안값 기준, 걷기 300 px/s 대비 "추가로 번 이동거리 ÷ 스태미너")**
 
@@ -159,7 +163,7 @@
 
 - **캐릭터별 주력 스텟 [확정]**: 기초 4스텟(체력·지력·오염·민첩, §2.6) 중 캐릭터마다 하나가 **주력**이다(시작 값·성장 보너스가 높음). 위 4쌍의 **배정은 제안 [살]** — 이름과 컨셉에서 유추했다(§12.3 A).
 - 이름·역할·무기 컨셉은 **제안**이다. 확정된 건 4종의 이름·콘셉트·**주력 스텟이 있다는 것**이다.
-- 캐릭터는 코드에 박지 않고 `characters.csv` ✅ 한 행 = 한 캐릭터. **지금 열**: `id, name(ASCII — HUD 폰트에 한글 없음), main_stat, start_vit, start_int, start_cor, start_agi, start_weapon(kCardDefs 이름)`. 예정 열: `portrait, ultimate_kills, ultimate_id`([circular-balance.md](circular-balance.md) §확장 표). 지금 시작값은 주력 8 / 나머지 3 [살].
+- 캐릭터는 코드에 박지 않고 `characters.csv` ✅ 한 행 = 한 캐릭터. **지금 열**: `id, name(ASCII — HUD 폰트에 한글 없음), main_stat, start_vit, start_int, start_cor, start_agi, start_weapon(weapons.csv 의 무기 id)`. 예정 열: `portrait, ultimate_kills, ultimate_id`([circular-balance.md](circular-balance.md) §확장 표). 지금 시작값은 주력 8 / 나머지 3 [살].
 - **선택 UI ✅ (임시)**: 씬 진입 시 "SELECT CHARACTER" 모달(레벨업 모달과 같은 위젯), **F7** 로 언제든 다시 열기 — 고르면 그 캐릭터로 새 런. Esc 는 현재 런 유지. 정식 선택 화면(초상화)은 M2 HUD·M8 메타 이후.
 - 결과 [살 수치로 확인]: 마도기사=체력(최대 HP 98), 스컬매지션=지력(무기 피해 ×1.16·공격속도↑), 서큐버스=오염(오염 위력↑, 소비처 미구현), 어쎄신리자드=민첩(이동 +8%·스태미너 116).
 - 아트: 캐릭터당 `char/<id>` 아틀라스 그룹([circular-art-guide.md](circular-art-guide.md)). 아트가 없는 동안은 색 사각형.
@@ -200,25 +204,27 @@
 | `extra_projectiles` | **추가 투사체 갯수** | 무기가 한 번에 내보내는 수 +N | `NearestBolt` 대상 수, 투사체 무기 발사 수 | [확정] |
 | `attack_speed` | **공격속도** | 무기 쿨다운 배율(↓) | 모든 무기 쿨다운 | [확정] |
 | `max_hp`, `hp_regen` | 최대 HP / 초당 재생 | 체력 스텟 파생 | `Simulation::m_playerHp` (`StepCircularPlayer`) | [살 추가] ✅ |
-| `damage_reduction` | 받는 피해 감소 | 체력 스텟 파생 | 몹 접촉 피해(M3 이후 — 아직 없음) | [살 추가] |
+| `damage_reduction` | 받는 피해 감소 | 체력 스텟 파생 | `Simulation::HurtPlayer`(받는 피해 × (1 − 값), 0~0.8 로 잘림) | [살 추가] ✅ |
 | `defense` | **방어력** | 받는 피해를 줄이는 수치(점수). **계산식 [미정 — 나중에 추가]** | 몹 공격 피해(M3 이후) | [확정: 2026-09-23 사용자 추가] 값·표시만 ✅ |
 | `dot_damage` | **지속피해** | 도트 피해의 세기(점수). **계산식 [미정]** | 지속피해 공격(아직 없음) | [확정: 2026-09-23 사용자 추가] 값·표시만 ✅ |
 | `armor_break` | **방어력 감소** | 공격이 대상의 방어력을 깎는 양(점수). **계산식 [미정]** | 몹 방어력(M3 `mobs.csv` 이후) | [확정: 2026-09-23 사용자 추가] 값·표시만 ✅ |
 | `life_steal` | **체력 흡수** | 처치당 마지막 타격 피해의 비율만큼 HP 회복 | `CircularCombat::Hit`(킬 게이트 — 생존한 대상에게 준 피해는 집계 안 함, 회복량은 `CombatResult.heal` 로 `Simulation` 이 반영) | [살 추가] ✅ |
 | `move_speed` | 이동속도 | 걷기·달리기 배율 | `StepCircularPlayer` | [살 추가] ✅ |
-| `weapon_damage` | 무기 피해 | 모든 무기 피해 배율 | `CircularCombat::Fire` | [살 추가] |
+| `weapon_damage` | 무기 피해 | 모든 무기 피해 배율 | `CircularCombat::Fire` | [살 추가] ✅ |
 | `crit_chance`, `crit_damage` | 치명타 확률/피해 | 행운 파생(계수는 [미정] — 지금은 기초 스텟 계수 없음) | `CircularCombat::Fire`(캐스트당 1회 롤, 무기 전체에 적용) | [살 추가] ✅ |
 | `projectile_speed`, `pierce`, `knockback`, `duration` | 투사체 속도/관통/넉백/지속시간 | 무기 부가 성질 | 투사체·장판 무기 | [살 추가] |
 | `pickup_range` | 획득 범위 | 젬·재화 자석 | XP/재화 드롭(M0 이후) | [살 추가] |
 | `xp_gain_mul`, `currency_gain_mul` | 경험치/재화 획득량 | | `AwardKills`, 상점 재화 | [살 추가] (`xp_gain` ✅, `currency_gain_mul` 은 제외 — 재화 시스템 이후) |
-| `stamina_max`, `stamina_regen_mul` | 스태미너 최대/회복 | 민첩 파생 | §2.2 | [살 추가] |
+| `stamina_max`, `stamina_regen` | 스태미너 최대/회복 배율 | 민첩 파생 | §2.2 | [살 추가] ✅ |
 | `dash_cost_mul`, `dash_chain_penalty_mul`, `dash_cooldown_mul` | 대쉬 소모/연속 페널티/재사용 | **스킬로 페널티 조절** [확정 요건, §2.2] | 대쉬 | [확정 요건] |
 | `ultimate_charge_mul` | 궁극기 충전 속도(필요 킬 수 배율) | 지력 파생 | §2.4 | [살 추가] |
 
 - **HUD 상태창(우상단 2-2 팝업)** 에 보여줄 능력치 = 기초 4스텟 + `max_hp`·`move_speed`·`weapon_damage`·`attack_speed`·`attack_size`·`extra_projectiles`·`luck`·`crit_chance` (+ 스크롤로 나머지). (목록 확정 요청: §12.3 A)
 - 데이터: `stats.csv` ✅ `stat_id, base_value, min, max, from_vit, from_int, from_cor, from_agi` (`name_ko`/`display_order` 는 M2 상태창 때 추가). 무기·몹 코드는 능력치를 **id 로 조회**(`m_stats[StatId::AttackSpeed]`)하고 하드코딩하지 않는다.
-- **구현 ✅ (M1)**: `game/Stats.h` — `StatId`(기초 4 + 파생), `kStatDefs`(기본값), `StatModifiers{add, mul}`, `StatBlock`, `ComputeStats`(헤더 전용). `Simulation::RecomputeStats()` 가 캐릭터 시작값 + 레벨업 스탯 카드(`m_cardMods`)로 다시 계산한다 — **런 시작 · 레벨업 선택 · F5 리로드 때만**(더티), 매 스텝 아님. 소비처 지금: `attack_speed`(쿨다운 ÷), `weapon_damage`(피해 ×), `attack_size`(반경/사거리 ×), `extra_projectiles`(BOLT 대상 +N), `move_speed`, `xp_gain`, `stamina_max/regen`, `dash_*`, **`max_hp`/`hp_regen`(플레이어 HP, 아래)·`crit_chance`/`crit_damage`(캐스트당 1회 롤)·`life_steal`(킬당 회복)**. 값만 있고 소비처 없음: `luck`(소비처는 **확정** — CardSelect 카드 티어, §3.4. 티어 판정 자체가 미구현), `damage_reduction`(접촉 피해, M3), `ultimate_charge_mul`(궁극기, §2.4), `corruption_power`(오염 계열, [미정]), `defense`·`dot_damage`·`armor_break`(2026-09-23 추가 — 계산식 [미정], 상태창에만 표시).
-- **플레이어 HP ✅ (신규)**: `Simulation::m_playerHp`(현재값) + `stats[MaxHp]`(최대값). 새 런/캐릭터 선택 시 풀피, `RecomputeStats` 때 최대치로 클램프(스태미너와 같은 패턴). `StepCircularPlayer` 에서 `hp_regen` 만큼 매초 회복. **몹이 아직 플레이어를 때리지 못한다**(접촉 피해는 M3) — 그래서 지금은 항상 풀피로 보인다. HUD 좌상단에 바로 표시(스태미너 바 위). 대쉬 무적(`PlayerInvulnerable()`)이 막을 대상이 이걸로 생겼다 — 접촉 피해가 생기면 그 판정이 이 값을 본다.
+- **구현 ✅ (M1)**: `game/Stats.h` — `StatId`(기초 4 + 파생), `kStatDefs`(기본값), `StatModifiers{add, mul}`, `StatBlock`, `ComputeStats`(헤더 전용). `Simulation::RecomputeStats()` 가 캐릭터 시작값 + 레벨업 스탯 카드(`m_cardMods`)로 다시 계산한다 — **런 시작 · 레벨업 선택 · F5 리로드 때만**(더티), 매 스텝 아님. 소비처 지금: `attack_speed`(쿨다운 ÷), `weapon_damage`(피해 ×), `attack_size`(반경/사거리 ×), `extra_projectiles`(BOLT 대상 +N), `move_speed`, `xp_gain`, `stamina_max/regen`, `dash_*`, **`max_hp`/`hp_regen`(플레이어 HP, 아래)·`crit_chance`/`crit_damage`(캐스트당 1회 롤)·`life_steal`(킬당 회복)·`damage_reduction`(피격, M3)**. 값만 있고 소비처 없음: `luck`(소비처는 **확정** — CardSelect 카드 티어, §3.4. 티어 판정 자체가 미구현), `ultimate_charge_mul`(궁극기, §2.4), `corruption_power`(오염 계열, [미정]), `defense`·`dot_damage`·`armor_break`(2026-09-23 추가 — 계산식 [미정], 상태창에만 표시).
+- **플레이어 HP ✅ (신규)**: `Simulation::m_playerHp`(현재값) + `stats[MaxHp]`(최대값). 새 런/캐릭터 선택 시 풀피, `RecomputeStats` 때 최대치로 클램프(스태미너와 같은 패턴). `StepCircularPlayer` 에서 `hp_regen` 만큼 매초 회복. HUD 좌상단에 바로 표시(스태미너 바 위).
+- **피격 ✅ (M3)**: 한 스텝에 들어온 피해(닿아 있는 몹 중 가장 센 `contact_damage`, 적 공격 명중 중 가장 센 것) 중 **가장 큰 하나**만 `Simulation::HurtPlayer` 로 — 대쉬 중·피격 무적(`hurt_invuln`) 중·테스트 씬·갓 모드면 무시, 아니면 `× (1 − damage_reduction)` 만큼 깎고 피격 무적 시작. 맞은 동안 플레이어가 빨강/흰색으로 깜빡인다. `defense`·`armor_break` 는 계산식이 [미정]이라 아직 안 쓴다.
+- **사망 ✅ (M3, §12.3 G 기본안 [살])**: HP 0 → `RunOver()` — 서큘러 월드 전체 정지(레벨업 모달과 같은 방식) → `Application` 이 모달 **"YOU DIED 분:초 LV n"** + **RETRY(같은 캐릭터 새 런) / LOBBY**. Esc 로 안 닫힌다. 부활·목숨 여러 개 없음.
 - 레벨업 **스탯 카드**(`Card.h` `kStatCards`, 9종): 이동속도 +10% · XP +15% · 공격속도 +8% · 공격 크기 +10% · 무기 피해 +10% · 체력/지력/오염/민첩 +2. `StatCardDef{label, stat, multiplicative, amount}` 한 줄 = 카드 한 종. 옛 `PlayerStats`/`PlayerStat` 은 삭제됨.
 - 미구현 파생 [살 목록에 있으나 제외]: `projectile_speed, pierce, knockback, duration, pickup_range, currency_gain_mul` — 소비처(투사체 무기·젬·상점)가 생길 때 `StatId` 한 줄 + `kStatDefs` 한 줄 + `stats.csv` 한 행으로 추가한다.
 
@@ -232,7 +238,7 @@
 
 - **무기** = 쿨다운마다 **자동으로** 공격하는 것. 레벨이 있다. (옛 설계의 "공격 카드"가 여기 대응.)
 - **장신구** = 공격하지 않는 **패시브**. 능력치(이동속도, 경험치 획득량, 스태미너, 무기 쿨다운 등)만 바꾼다.
-- 플레이어는 무기 칸 N개, 장신구 칸 M개를 가진다. **N = M = 6, 최대 레벨 5 [확정]** (HUD.png 의 두 칸은 가로로 긴 띠라 다수 슬롯을 보여주는 형태). 지금 코드의 `kProgression.maxDeckSlots` = 6, `CardDef.maxLevel` = 5 가 이미 이 값이다. 장신구 칸(M)은 구현 시 같은 6.
+- 플레이어는 무기 칸 N개, 장신구 칸 M개를 가진다. **N = M = 6, 최대 레벨 5 [확정]** (HUD.png 의 두 칸은 가로로 긴 띠라 다수 슬롯을 보여주는 형태). 코드: `kProgression.maxDeckSlots` = 6 이 무기·장신구 **둘 다의** 칸 상한(✅), 최대 레벨은 CSV `max_level` = 5.
 
 ### 3.2 무기 데이터 모델 ✅ (1차 구현)
 
@@ -244,7 +250,7 @@
 | BOLT | `NearestBolt` — 가까운 N체 타격 | 쿨 0.9s, 피해 22, 사거리 320, 1체 | 피해 +8, 사거리 +20, 쿨 ×0.93, 2레벨마다 +1체 |
 
 - 최대 레벨 5. 새 효과가 필요하면 `CardEffect` 열거자 + `kEffectSpecs` 한 줄(새 도형이면 `HitShape` 표·그리기 표에도 한 줄) — [circular-combat.md](circular-combat.md) §5.
-- 캐릭터별 시작 무기(§2.3)는 이 테이블에 행을 추가하는 것으로 만든다.
+- 캐릭터별 시작 무기(§2.3)는 `characters.csv` 의 `start_weapon` 이 이 표의 `id` 를 가리키는 것으로 정한다.
 - **무기 수치는 `weapons.csv` ✅** (`assets/data/circular/weapons.csv`, [circular-balance.md](circular-balance.md)) — `game/Card.h` 의 `kCardDefs` 는 이제 파일이 없거나 깨졌을 때의 **폴백**일 뿐이다(`CircularBalance::Defaults()`). 게임/무기 관련 코드는 전부 `Balance().weapons`(= `m_balance.weapons`)를 읽고 `kCardDefs` 를 직접 참조하지 않는다.
 
 **기초 설계가 정한 무기 5종 [기초] ✅ 구현됨 — PULSE/BOLT 는 이제 레벨업 풀에만 남은 구형 자리표시자(교체 대상, 삭제는 안 함)**
@@ -260,11 +266,11 @@
 - **소비처는 §2.6 그대로**: 전부 `weapon_damage`·`attack_size`(치명타는 캐스트당 1회 롤, 전체에 적용)를 받는다. `LineSwing` 은 반폭도 `attack_size` 로 커진다. `ExplodingBolt` 는 폭발 반경도 `attack_size` 로 커진다.
 - **캐릭터 배정 [살, §12.3 A 대기]**: 마도기사→검, 스컬매지션→스태프, 서큐버스→채찍, 어쎄신리자드→단검(`characters.csv`). 트럼프 카드는 시작 무기가 아니라 레벨업 풀에서만 얻는다(4캐릭터·5무기라 하나는 남음).
 - **시각 연출은 자리표시자(평면 도형)**: 판정에 쓴 도형 그대로 — 검 = 부채꼴 외곽, 채찍 = 캡슐 외곽, PULSE/폭발 = 점선 원, 투사체 = `hit_radius` 크기 사각형, 색은 `weapons.csv` `color`(`AttackVisual`, [circular-combat.md](circular-combat.md) §2.3). 스프라이트는 M7.
-- **알려진 밸런스 격차 [살, 조정 대기]**: 단검(관통형 단일 대상)이 검/채찍/스태프(광역)보다 시간당 킬 수가 눈에 띄게 낮다(헤드리스 20초 테스트: 관통 54 대 나머지 1300+) — 코드 결함이 아니라 광역 대 단일 대상의 자연스러운 격차. `weapons.csv` 의 `damage`/`cooldown`/`base_targets`(관통 수)로 조정(재빌드 불필요, F5).
+- **알려진 밸런스 격차 [살, 조정 대기]**: 단검(관통형 단일 대상)이 검/채찍/스태프(광역)보다 시간당 킬 수가 눈에 띄게 낮다(헤드리스 20초 테스트: 관통 54 대 나머지 1300+ — **전투 구조 개편(W1 몹 반경 포함·W4 스윕 접촉) 이전 측정값이라 재측정 필요**) — 코드 결함이 아니라 광역 대 단일 대상의 자연스러운 격차. `weapons.csv` 의 `damage`/`cooldown`/`base_targets`(관통 수)로 조정(재빌드 불필요, F5).
 - **아직 안 함**: 관통(`pierce`) 능력치·`projectile_speed` 등 §2.6 "미구현 파생" 목록과의 연동(지금은 무기별 CSV 고정값, 플레이어 능력치가 못 건드림).
-- **판정 도형·움직임(궤도·소용돌이·럴커)·연출·CSV 를 묶는 구조와 작업 목록(결정 확정, 구현 전)은 [circular-combat.md](circular-combat.md).**
+- **판정 도형·움직임(궤도·소용돌이·럴커)·연출·CSV 를 묶는 구조와 작업 기록(W1~W16 구현됨)은 [circular-combat.md](circular-combat.md).** 움직이는 공격 3종(BLADE·VORTEX·SPIKE)도 거기 §2.5.
 
-PULSE(`RadialPulse`)와 BOLT(`NearestBolt`)는 이 5종이 구현되기 전까지 쓰는 임시 무기다 — 능력치 배선(§2.6)·레벨업·CSV 로더 같은 주변 시스템을 먼저 검증하기 위한 자리표시자이며, 5종이 들어오면 시작 무기·`CardEffect` 모두 이 표로 교체한다(구현 단계는 §10 M5).
+PULSE(`RadialPulse`)와 BOLT(`NearestBolt`)는 5종 구현 전에 주변 시스템(능력치 배선·레벨업·CSV 로더)을 검증하던 **구형 자리표시자**다. 5종이 들어온 지금은 어떤 캐릭터의 시작 무기도 아니고 레벨업 풀에만 남아 있다(삭제는 사용자 결정 전까지 보류).
 
 ### 3.3 장신구 데이터 모델 ✅
 
@@ -356,15 +362,18 @@ PULSE(`RadialPulse`)와 BOLT(`NearestBolt`)는 이 5종이 구현되기 전까�
 
 ## 5. 적 — B-적
 
-### 5.1 분류 [기초] + 행동 정의 [살]
+### 5.1 분류 [기초] + 행동 정의 [살] — M3 ✅
 
-| 분류 [기초] | 행동 [살] | `MobBehavior`(예정) | 구현 |
+| 분류 [기초] | 행동 [살] | 기본 몹 (`mobs.csv`) | 구현 |
 |---|---|---|---|
-| 근접 | 플레이어를 향해 이동, 접촉 시 피해 | `Melee` = 현재 `Seek` | ✅ (단일 타입 "몹") |
-| 탱커 | 느리고 단단함(HP·방어 높음, 넉백 저항). 방패병(§6 포위)이 여기 | `Tank` | ❌ |
-| 원거리 | 일정 거리를 유지하며 투사체 발사 | `Ranged` | ❌ |
-| 마법 | 바닥에 **붉은 예고 구역**을 찍고 잠시 후 폭발 — 현재 텔레그래프 인프라(`ChargeZone`)를 일반화해 재사용 | `Caster` | ❌ (인프라 🟡) |
-| 보스 | §4.3 별도 클래스 | `BossController` | ❌ |
+| 근접 | 플레이어를 향해 이동, 접촉 시 피해 | GRUNT — HP 20, 90 px/s, 접촉 8 | ✅ |
+| 탱커 | 느리고 단단하고 크다, 세게 부딪힌다. 방패병(§6 포위)이 여기 | BRUTE — HP 140, 55 px/s, 반경 18, 접촉 16 | ✅ (넉백 자체가 없어 "넉백 저항"은 해당 없음) |
+| 원거리 | 일정 거리(`keep_distance`)에서 멈춰 투사체 발사 | ARCHER — 360px 에서 멈춤, 520px 안이면 2.4초마다 화살(6, 380 px/s) | ✅ |
+| 마법 | 플레이어 자리에 **붉은(보라) 예고 원**을 찍고 잠시 후 그 자리에 피해 — 예고 동안 벗어나면 안 맞는다 | WITCH — 400px 에서 멈춤, 560px 안이면 3.8초마다 HEX(반경 70, 1.1초 뒤 12) | ✅ |
+| 보스 | §4.3 별도 클래스 | — | ❌ (M6) |
+
+- 수치는 전부 [살] 초기값 — `mobs.csv`·`mob_attacks.csv` 로 F5 조정. 비율은 `weight`(70 / 10 / 12 / 8).
+- 적 공격도 **전투 구조 그대로**다: 같은 `effect`·`path`·`HitShape`·연출, 대상만 플레이어 히트박스(`Team::Enemy`, [circular-combat.md](circular-combat.md) W7). 대쉬 중엔 투사체가 몸을 통과하고 장판은 안 맞는다.
 
 ### 5.2 바이옴별 출현 [기초 — 원문 그대로]
 
@@ -377,11 +386,15 @@ PULSE(`RadialPulse`)와 BOLT(`NearestBolt`)는 이 5종이 구현되기 전까�
 
 (+ 각 스테이지 마지막 보스). 개별 몹의 이름·외형은 [미정] — 분류만 확정.
 
-### 5.3 데이터와 구조 [살]
+### 5.3 데이터와 구조 [살] — ✅ (M3)
 
-- `mobs.csv`(예정): `id, name, class(melee|tank|ranged|caster), biome, health, speed, radius, contact_damage, xp, (ranged) range·projectile, (caster) telegraph_sec·zone_radius, sprite_prefix`. 한 행 = 한 몹 종류. 바이옴 출현표(§5.2)는 `stages.csv` 의 `mob_pool` 이 참조.
-- `MobField`(SoA)에 `type`(uint8) 컬럼과 `MobBehavior` 별 커널 분기를 추가한다. 이미 있는 상태 분기(`Seek/Windup/Charge`)와 같은 자리다. 규칙 6(`ParallelFor` 각 잡은 자기 슬롯만)은 그대로.
-- 지금의 몹은 `balance.csv` 의 `mob_*` 한 세트 = **근접 1종**으로 취급한다(✅ → `mobs.csv` 로 이관 예정, [circular-balance.md](circular-balance.md)).
+- **`mobs.csv`** ✅ 한 행 = 한 몹 종류: `id, name, class, health, speed, radius, contact_damage, xp, weight, color, keep_distance, attack, attack_range`(열 뜻은 [circular-balance.md](circular-balance.md) "mobs.csv"). `class` 는 기초 설계 분류 라벨 — 스테이지 출현 풀(M6, §5.2 → `stages.csv` 의 `mob_pool`)과 색이 읽고, **움직임·공격 코드는 안 읽는다.**
+- **`mob_attacks.csv`** ✅ = 적 공격 표. **`weapons.csv` 와 열이 같고 로더도 같다**(`LoadAttackTable`) — 레벨 곡선 열만 선택. `mobs.csv` 의 `attack` 이 `id` 로 가리킨다.
+- **행동은 열거가 아니라 숫자** (KISS — 계획했던 `MobBehavior` 열거·커널 분기는 안 만듦): `keep_distance` 0 = 추적(근접·탱커), > 0 = 그 거리에서 멈춤(원거리·마법). 탱커는 "느리고 단단하다"가 숫자일 뿐이다. 진짜로 다른 움직임(돌아서 도망, 순간이동 …)이 두 번째로 필요해질 때 열거 + 표를 만든다.
+- **`MobField`**(SoA): `type`(uint8, `mobs.csv` 행 번호)·`attackTimer` 열 추가. `Step` 이 종류별 `MobMotion{speed, keepDistance}` 표를 받아 `ParallelFor` 로 움직이고(규칙 6 그대로), `CollectCasts` 가 쿨이 찬 몹 중 사거리 안인 것만 모아 준다(메인 스레드), `StrongestTouching` 이 히트박스에 닿은 몹 중 가장 센 접촉 피해를, `KillTally` 가 종류별 사망 수(→ 종류별 `xp`)를 준다. `MobField` 는 CSV 타입을 모른다 — `Simulation::RebuildMobTables` 가 `mobs.csv` 에서 표를 만들어 넘긴다.
+- **예고 장판** = 무기 표의 새 열 `delay`(초)·`origin`(`self`|`target`): 경로 없는 Area 가 `origin=target` 이면 대상(적 → 플레이어, 무기 → 가장 가까운 몹) 자리에, `delay` > 0 이면 그만큼 기다렸다가 떨어진다. 기다리는 동안 맞을 영역이 `VisualStyle::Telegraph` 로 보인다. 계획했던 `ChargeZone` → `TelegraphZone` 일반화는 **안 함** — 돌진 패턴은 M4 에서 지워질 임시라서, 마법 몹은 전투 구조로 해결했다.
+- 스폰 종류 선택: 링 스폰 1마리마다 `weight` 비율로 — 스폰 번호의 해시(런 RNG 안 씀: 레벨업·치명타 굴림 순서를 흔들지 않게). 스테이지(M6)가 생기면 `stages.csv` 의 `mob_pool` 이 이 목록을 좁힌다.
+- 테스트 씬 더미 = `mobs.csv` 0행 종류(HP 만 99999).
 
 ---
 
@@ -408,7 +421,7 @@ PULSE(`RadialPulse`)와 BOLT(`NearestBolt`)는 이 5종이 구현되기 전까�
 ### 6.3 실행 모델 [살]
 
 - `PatternExecutor` 가 `Simulation` 안에서 고정 스텝으로 돈다. 패턴이 발동하면 `MobField::Spawn` 으로 계산된 위치에 몹을 만들고 **`MobState::March`**(고정 속도 직진 — 지금 `Charge` 와 같은 동작, 이름만 일반화)를 준다. `enclose` 는 위치가 매 스텝 갱신되는 별도 상태.
-- 텔레그래프(§5.1 마법과 공용): 패턴 시작 전 붉은 구역/화살표를 `telegraph_sec` 동안 표시 후 스폰. ✅ 인프라 = `ChargeZone`/`kChargePattern`(붉은 사각 예고 → 일부 몹 돌진).
+- 텔레그래프: 패턴 시작 전 붉은 구역/화살표를 `telegraph_sec` 동안 표시 후 스폰. 지금 있는 인프라 = `ChargeZone`/`kChargePattern`(붉은 사각 예고 → 일부 몹 돌진, 임시). (마법 몹의 예고 장판은 M3 에서 전투 구조의 `delay` 열 + `VisualStyle::Telegraph` 로 따로 해결했다 — §5.3. 패턴 예고는 "몹이 나타날 곳"이라 공격 예고와 다르다; M4 에서 필요한 모양으로 정한다.)
 
 ### 6.4 타임라인 [살]
 
@@ -477,7 +490,7 @@ PULSE(`RadialPulse`)와 BOLT(`NearestBolt`)는 이 5종이 구현되기 전까�
 |---|---|
 | 게임 중 HUD | 🟡 **뼈대만.** §7.2 의 6개 영역이 실제 앵커 좌표(1920×1080 기준, 해상도 무관하게 모서리에 붙음)에 자리잡았고 값도 채워져 있지만, 전부 단색 `Quad`(`DrawHudPanel`) — 이미지·아웃라인·호버 표시(2-2 팝업은 지금 항상 보임)·클릭은 아직 없다. XP 바(풀폭 상단 스트립)와 좌하단 밸런싱 줄(MOBS/KILLS 포함, 개발용)은 HUD.png 영역이 아니라서 앵커 없이 그대로 유지 |
 | 설정 화면 / 로비 메뉴 | ✅ (설정 진입은 ESC. HUD 우상단 설정 버튼이 생기면 마우스로도 열림) |
-| 레벨업 3택 모달 | ✅ [확정: 유지] — 레벨업 자체는 기초 설계 밖이지만 확정. **UI 는 기초 설계 UI 규칙을 따른다**(마우스 모드 진입, 호버 아웃라인 — §3.4). 지금은 단순 버튼이라 M2 에서 정렬 |
+| 레벨업 3택 모달 | 🟡 [확정: 유지] — 동작은 ✅, 모양은 세로 텍스트 버튼 3개. **기초 설계 CardSelect 레이아웃**(좌·중·우 카드, 티어 색 — §3.4)과 UI 규칙(마우스 모드 진입, 호버 아웃라인)은 M2 에서 |
 | 예전 좌상단 SETTINGS 패널 | 삭제됨 — 기초 설계의 우상단 (1) 설정 버튼이 정식 위치 |
 
 ### 7.5 로비 — GAME/TEST SCENE [확정: 2026-09 사용자 결정, 기초 설계 밖 개발용]
@@ -489,7 +502,7 @@ PULSE(`RadialPulse`)와 BOLT(`NearestBolt`)는 이 5종이 구현되기 전까�
 - **GAME** = `Application::EnterInGame(DemoScene::Circular)` — 지금까지의 정상 서큘러 런(캐릭터 선택 모달부터).
 - **TEST SCENE** = `Application::EnterInGame(DemoScene::Circular, /*circularTest=*/true)` →
   `Simulation::EnterCircularTestScene()` — **체력 99999 더미 몹 1마리만** 있는 무기 테스트 전용 씬. 스폰 예산(`spawn_curve.csv`)도
-  돌진 패턴(`kChargePattern`)도 돌지 않는다(`Simulation::m_circularTestMode`) — 몹은 죽지 않는 이상 하나만 유지되고
+  돌진 패턴(`kChargePattern`)도 돌지 않고, **플레이어는 피해를 안 받는다**(M3 — 더미가 붙어 있어도 무기 시험만 하도록) (`Simulation::m_circularTestMode`) — 몹은 죽지 않는 이상 하나만 유지되고
   플레이어를 향해 Seek 는 그대로 한다(이동 대상으로도 씀). 더미가 죽으면(오버플로우가 극단적으로 쌓인 빌드 등) 즉시
   다시 스폰. HUD 상단에 주황 "TEST SCENE" 배너가 항상 떠서 실수로 진짜 런으로 착각하지 않게 한다.
   **콜라이더 표시 ✅**: 테스트 씬에서만 모든 콜라이더를 초록 외곽선으로 그린다 — 플레이어 히트박스(48×72 상자), 몹 충돌 원, 날아가는 투사체의 판정 원
@@ -545,23 +558,25 @@ PULSE(`RadialPulse`)와 BOLT(`NearestBolt`)는 이 5종이 구현되기 전까�
 | B-장르 뱀서 라이크 (몹 다수, 자동 공격, XP) | ✅ 골격 | 몹 4096, 초당 100마리, 무기 자동 발동 |
 | B-규칙 직접 공격 없음, 소지 무기 자동 공격 | ✅ | `PlayerIntent` 에 공격 없음 |
 | B-규칙 걷기 | ✅ | `player.csv` `walk_speed` 300 px/s × `move_speed` 스탯 |
-| B-규칙 **달리기(Shift) · 대쉬(Space, 무적)** | ✅ | §2.2 [확정]. 무적은 `PlayerInvulnerable()` 값까지 — 실제 피격 판정은 몹 접촉 피해(M3) 이후 |
+| B-규칙 **달리기(Shift) · 대쉬(Space, 무적)** | ✅ | §2.2 [확정]. 대쉬 중엔 몹 접촉·적 공격이 안 맞는다(M3) |
 | B-규칙 **스태미너** (HUD 3) — 달리기 ≪ 대쉬, 연타 페널티, 스킬로 조절 | ✅ (바는 임시 HUD) | §2.2 [확정]. `dash_cost_mul`/`dash_chain_penalty_mul`/`dash_cooldown_mul` 스탯이 조절 |
-| B-캐릭터 4종 (+ 캐릭터별 **주력 스텟**) | ✅ 데이터·선택 / 🟡 아트·시작 무기 | `characters.csv` 4행, 선택 모달(F7). 플레이어 = 64×128 색 사각(히트박스 48×72, `player.csv`), 템플릿 `assets/templates/char` |
+| B-캐릭터 4종 (+ 캐릭터별 **주력 스텟**) | ✅ 데이터·선택·시작 무기 / 🟡 아트 | `characters.csv` 4행, 선택 모달(F7). 플레이어 = 64×128 색 사각(히트박스 48×72, `player.csv`), 템플릿 `assets/templates/char` |
 | **능력치 체계**(기초 4스텟 + 행운·공격 크기·추가 투사체·공격속도 등 파생) | ✅ | §2.6 [확정]. 일부 파생은 소비처 대기 |
-| 무기·장신구 슬롯 6/6, 최대 레벨 5 | 🟡 | [확정]. 무기 쪽 이미 6/5, 장신구 슬롯 ❌ |
+| 무기·장신구 슬롯 6/6, 최대 레벨 5 | ✅ | [확정]. 둘 다 `maxDeckSlots` 6칸, `max_level` 5. HUD 하단 슬롯 띠 2줄(뼈대) |
 | **오버플로우** (최대 레벨 시 소량 능력치) | ✅ | §3.4 [확정] |
 | 스테이지 **무한 필드 · 90초 버티기**, 보스 풀 바이옴당 2~3 | ❌ (무한 필드만 ✅) | §4.3 [확정] |
 | 마계숲 노드: 휴식·상점·이벤트 | ❌ | §4.2 [확정] |
 | B-UI 궁극기 게이지 · 재화 2종 | ❌ | §2.4, §2.5 |
-| B-UI **HUD 전체 레이아웃** | ❌ 🟡 | 임시 텍스트 HUD |
+| B-UI **HUD 전체 레이아웃** | 🟡 뼈대 | §7.2 영역이 앵커 좌표에 단색 자리표시로 있음. 이미지·호버·클릭 ❌(M2) |
 | B-UI **마우스 고정/표시 자동 전환, 호버 아웃라인** | ❌ | §7.1 (지금은 항상 고정) |
 | B-UI **CardSelect 카드 레이아웃**(좌·중·우 3장, 티어 색, 아이콘/세트명/설명/변화량) | ❌ (개수 3 만 ✅) | §3.4. 지금은 세로 텍스트 버튼 3개. 티어 = `luck` 의 확정 소비처 |
 | B-무기장신구 무기 | ✅ | 5종 전부(검/채찍/스태프/단검/트럼프 카드, §3.2) + 움직이는 공격 3종(레벨업 풀) — `weapons.csv`, 구조 [circular-combat.md](circular-combat.md) |
 | B-무기장신구 **장신구** | ✅ | `accessories.csv` 6종, 스탯 카드는 별개로 유지(§3.3) |
 | B-스테이지 20 스테이지 · 4 바이옴 · 4 흐름 | ❌ | 단일 무한 아레나 |
-| B-적 5분류 · 바이옴별 출현 | ❌ | 근접 1종뿐 |
-| B-적 보스 | ❌ | |
+| B-적 분류 근접·탱커·원거리·마법 | ✅ | §5.1 — `mobs.csv` 4종, 접촉 피해, 원거리 화살, 마법 예고 장판(M3) |
+| B-적 바이옴별 출현 | ❌ | 지금은 4종이 `weight` 로 한꺼번에 섞임 — 바이옴·스테이지가 생기면(M6) `stages.csv` 의 `mob_pool` |
+| B-적 보스 | ❌ | M6 |
+| (살) 플레이어 피격·사망 | ✅ | §2.6 — 피격 무적 0.5초, HP 0 → RETRY/LOBBY 모달(§12.3 G 기본안) |
 | B-스폰 3종 + 추가 | ❌ | 링 스폰(밀도) ✅ + 임시 돌진 🟡 |
 | 레벨업 3택 · XP | ✅ | 기초 설계 밖이지만 **[확정: 유지]** |
 | (인프라) CSV 밸런싱 환경 | ✅ | 새 표를 얹을 기반 ([circular-balance.md](circular-balance.md)) |
@@ -578,7 +593,7 @@ PULSE(`RadialPulse`)와 BOLT(`NearestBolt`)는 이 5종이 구현되기 전까�
 |---|---|---|
 | **M1** ✅ 플레이어·능력치 | 달리기(Shift)·대쉬(Space, 무적, 연속 페널티)·스태미너(`PlayerMotion`, `player.csv`), **능력치 체계**(`StatBlock` + `stats.csv`: 기초 4스텟 + 파생), 캐릭터 데이터(`characters.csv`, 주력 스텟) 4행 | 이동 변화·스태미너 소모/회복·대쉬 연타 시 손해, 능력치가 무기 쿨다운/범위/투사체 수에 반영, 캐릭터 선택 가능 — **헤드리스 검증 + 빌드 경고 0/오류 0** |
 | **M2** HUD·CardSelect | 앵커 배치(✅ `ResolveHudRect`) + 위젯 6종의 **이미지**(placeholder Quad → 아트) + `HudState`/실제 `ui::Widget`화, 입력 모드 전환, 호버 아웃라인, **CardSelect 카드 레이아웃**(§3.4 — 좌·중·우 3장, 티어 색, 아이콘/세트명/설명/변화량) | HUD.png 와 같은 배치(✅) + 이미지 + 키보드↔마우스 자동 전환 + 호버 아웃라인 + CardSelect.png 와 같은 레벨업 화면 |
-| **M3** 적 종류 | `mobs.csv`, `MobBehavior`(근접·탱커·원거리·마법) | 4분류 몹이 각자 행동, 색 자리표시자 |
+| **M3** ✅ 적 종류 | `mobs.csv` + `mob_attacks.csv`(근접·탱커·원거리·마법), **몹 접촉 피해 + 플레이어 사망**, 적 공격(W7) — §5 | 4분류 몹이 각자 움직이고 공격, 맞으면 HP 감소·대쉬 중 무적, 색 자리표시자 — **헤드리스 검증 + 빌드 경고 0/오류 0** |
 | **M4** 스폰 패턴 | `SpawnPatternKind` 3종 + `spawn_patterns.csv` + `stage_timeline.csv`, 텔레그래프 일반화 | 3패턴이 CSV 만으로 조정됨, 임시 돌진 삭제 |
 | **M5** ✅ 무기/장신구 | **무기 5종**(검=부채꼴, 채찍=직선, 스태프=폭발형 전기볼트, 단검=관통2 투사체, 트럼프 카드=랜덤 데미지 투사체 — §3.2 [기초]) + `weapons.csv` + 장신구 모델(`accessories.csv`) + 슬롯 2줄(HUD, 6/6) + **오버플로우** + 캐릭터별 시작 무기(궁극기 내용은 [미정] — 게이지·Q 입력만) | 전부 구현·헤드리스 검증 완료. 남은 건 밸런스(단검)뿐 |
 | **M6** 스테이지 | `stages.csv`(90초 버티기), `StageFlow`(마계숲 라운드 선택[휴식·상점·이벤트] / 초원 직선 / 왕국 성 방), 보스 풀(`bosses.csv`, 바이옴당 2~3, `BossController`), 런 상태 | 90초 타이머 → 보스 → 다음 스테이지, 1~5→6~10→… 진행, 왕의 기사 |
@@ -587,29 +602,36 @@ PULSE(`RadialPulse`)와 BOLT(`NearestBolt`)는 이 5종이 구현되기 전까�
 
 M7 은 M1~M6 과 **병행 가능**(자리표시자가 있어서) — 아트가 준비되는 대로 끼운다. 인간마을 흐름([미정])은 M6 에서 자리표시자만 둔다.
 
-### 10.1 다음 작업 로드맵 (2026-09-22 기준 — M2 뼈대 완료, M5 전체 완료)
+### 10.1 다음 작업 (2026-09-23 기준 — M1·M3·M5·전투 구조 ✅, M2 뼈대 ✅)
 
-M1·M5 가 끝났고(§9), **M2 는 뼈대(앵커 배치)까지** 끝났다 — §7.2 의 6개 영역이 실제 좌표에 있고 값도 채워져 있지만 전부 단색 placeholder다(이미지·인터랙션은 아직). 다음은 **M3(적 종류)** 또는 **M4(스폰 패턴, 사용자 입력 대기)**. 하나 끝낼 때마다 §9 격차표와 이 파일의 "현재 위치"를 갱신한다.
+끝난 단계의 구현 기록은 각 절(§2 플레이어·능력치·피격, §3 무기·장신구, §5 적, [circular-combat.md](circular-combat.md) 전투 구조)에 있다. 여기는 **앞으로 할 일만** 둔다. 하나 끝낼 때마다 항목을 지우고 §9 격차표와 "현재 위치"를 갱신한다.
 
-**M5 — 무기/장신구 ✅ 전체 완료**
+**순서**: M4(사용자 패턴 상세 받은 뒤) → M6 → M8. M2 남은 살·M7(아트)·밸런스는 어느 단계와도 병행 가능.
 
-1. ~~새 효과 태그 5개~~ ✅ `CardEffect`(`Card.h`): `ArcSwing`(검) · `LineSwing`(채찍) · `ExplodingBolt`(스태프) · `PiercingShot`(단검) · `RandomDamageShot`(트럼프 카드), 각자 `ExecuteCard`의 case. (2026-09-23 이후 옛 구조 — `ExecuteCard` 는 삭제, 지금은 `kEffectSpecs` + `CircularCombat`)
-2. ~~MobField 새 질의~~ ✅ `DamageInArc`(내적 콘 테스트) · `DamageInCapsule`(선분+반폭) · `ClosestWithin`(판독 전용 — 투사체 조준/접촉 판정용) · `Simulation::Projectile` + `StepProjectiles`(실제로 날아가는 투사체, `ProjectileKind{Piercing,Exploding,Random}`). (2026-09-23 이후 옛 구조 — 이 이름들은 삭제, 지금은 `DamageInShape` + `AttackInstance`, [circular-combat.md](circular-combat.md))
-3. ~~`weapons.csv`로 뺀다~~ ✅ `CircularBalance::weapons`(`std::vector<CardDef>`) + 로더 블록, `kCardDefs` 는 이제 폴백. 무기 이름은 CSV/`characters.csv`/레벨업 라벨 전부의 공통 식별자.
-4. ~~캐릭터별 시작 무기 배정~~ ✅ `characters.csv`: 마도기사=검, 스컬매지션=스태프, 서큐버스=채찍, 어쎄신리자드=단검 — [살] 제안(§12.3 A 대기). 트럼프 카드는 시작 무기 없음(레벨업 풀만).
-5. ~~장신구~~ ✅ `AccessoryDef`(`CircularBalance.h`) + `accessories.csv`(6종) + `Simulation::m_accessories`. 스탯 카드(`kStatCards`)는 폐기하지 않고 별개로 유지(§3.3 — 기초 설계가 둘을 공존하는 선택지 종류로 나열).
-6. ~~오버플로우~~ ✅ `LevelChoice::Type::OverflowWeapon`/`OverflowAccessory`, `CardDef.overflowStat`/`overflowValue`(`weapons.csv` 열), `RollLevelUpChoices`가 max-level 무기/장신구를 Upgrade 대신 Overflow로 채운다.
-7. **밸런스 [남음]**: 단검(관통, 단일 대상)이 나머지(광역)보다 시간당 킬이 크게 낮다(§3.2 "알려진 밸런스 격차") — 코드 결함 아님, `weapons.csv` 수치 조정으로 F5 튜닝 가능.
+#### ① M4 — 스폰 패턴 (**다음, 사용자 입력 대기**)
 
-**M2 — HUD 남은 살 (뼈대는 ✅, 아트가 준비되거나 필요해지면)**
+`SpawnPatternKind` 3종(일방통행·사각 포위·좌우 줄) + `spawn_patterns.csv` + `stage_timeline.csv`, 임시 돌진 삭제(§6). **패턴 상세(숫자·모양·순서)를 사용자가 주기로 함 — 착수 전 확인.** 준비된 것: 몹 종류(`mobs.csv` — 방패병 = 탱커 행 하나 더), 패턴이 "어떤 몹을" 부를지는 `mobs.csv` id 로.
 
-1. ~~앵커 배치~~ ✅ `ResolveHudRect`(`SnapshotBuilder.cpp`) — TopLeft/TopRight/BottomCenter, 해상도 무관.
-2. **이미지**: 지금 `DrawHudPanel`의 단색 Quad를 `ImageWidget`/`SpriteDraw`로 교체(아트 필요, [circular-art-guide.md](circular-art-guide.md)).
-3. **`HudState` + 진짜 `ui::Widget`화**(`Gauge`, `CurrencyLabel`, `IconButton`, `HoverPopup`, `SlotStrip`) — 지금은 `SnapshotBuilder`가 직접 그리는 값 표시일 뿐, 클릭도 안 됨(설정/상태 버튼).
-4. **입력 모드 전환**(§7.1: 키보드↔마우스 자동 고정/표시) + **호버 아웃라인** + 상태 팝업의 **실제 호버 게이팅**(지금은 항상 보임).
-5. 착수 전 **§12.3 질문 F**(90초 타이머를 HUD 어디에 둘지) 확인하면 좋음 — 없으면 우상단 상태 버튼 옆에 임시로 [살] 배치.
+#### ② M2 남은 살 (아트가 오거나 필요해질 때)
 
-**다음**: M3(적 종류, `mobs.csv` — 원거리·마법 몹은 `CircularCombat` 의 `effect`×`path` 구조를 재사용 — [circular-combat.md](circular-combat.md) W7) → M4(스폰 패턴, **사용자가 패턴 상세를 추가하기로 함 — 착수 전 확인**) → M6(스테이지) → M8(메타). M7(아트)은 위 어느 단계와도 병행 가능. 위 M5 항목 7(밸런스)이나 M2 의 남은 이미지/인터랙션도 언제든 끼워 넣을 수 있다.
+1. **CardSelect 레이아웃**(§3.4): 좌·중·우 카드 + 티어 색. 티어 확률표(`luck` → 티어)는 [미정] → 제안 CSV 와 함께.
+2. HUD 이미지(`DrawHudPanel` 단색 → `ImageWidget`/`SpriteDraw`, 아트 필요).
+3. `HudState` + 진짜 `ui::Widget`화(`Gauge`·`CurrencyLabel`·`IconButton`·`HoverPopup`·`SlotStrip`) + 설정/상태 버튼 클릭.
+4. 입력 모드 전환(§7.1) + 호버 아웃라인 + 상태 팝업 호버 게이팅.
+5. 90초 타이머 위치(§12.3 F)는 M6 에서 필요 — 없으면 상단 중앙 [살].
+
+#### ③ M6 · M7 · M8 (뒤)
+
+- **M6 스테이지**: `stages.csv`·90초·`StageFlow`·보스(`BossController`)·마계숲 노드·**바이옴별 몹 풀**(§5.2, `mob_pool` → `mobs.csv` id) — 착수 전 §12.3 **B**(90초와 보스)·**C**(노드 세부) 답 필요.
+- **M7 아트**: 월드 스프라이트 경로 + `SpriteAnimator`, 무기·적 공격 W8(`sprite`/`fx_hit` 열은 준비됨), 몹 그림 발밑 정렬.
+- **M8 메타·씬 구조**: 세이브·메타 재화·강화, 로딩·타이틀·난이도 6단계(§7.6). 사망 후 흐름(지금 RETRY/LOBBY)에 "메타 재화 정산"이 붙는 자리.
+
+#### ④ 수시로 (작음)
+
+- **밸런스**: 적 수치 전체([살] — 제자리면 10~12초에 사망, §5.1), 단검 재측정·조정(§3.2 — 전투 구조 개편 전 수치), 움직이는 공격 3종 초기값 검토, 오버플로우 상한(§12.3 D).
+- **구형 무기** PULSE·BOLT 를 레벨업 풀에서 뺄지(사용자 결정).
+- **몹 방어력**: `defense`·`armor_break` 계산식이 정해지면(사용자 "나중에") `mobs.csv` 에 방어력 열 + `HurtPlayer`/`MobField` 피해 식에 반영.
+- **기술 부채**: `Simulation` 나머지 분해(스폰·레벨업·3D 디펜스 — [roadmap.md](roadmap.md) 서큘러 트랙), `Card*` → `Weapon*` 이름 변경(§3.5).
 
 ---
 
@@ -643,11 +665,13 @@ M1·M5 가 끝났고(§9), **M2 는 뼈대(앵커 배치)까지** 끝났다 — 
 
 2026-09-23 화면·필드 결정: 보이는 세계 1920×1080 고정 + 창에 맞춰 확대·축소(레터박스) · **무한 필드**(이동 경계 제거) · 몹 등장 거리 `spawn_radius` 640 → **1150**(화면 밖) · 플레이어 그림 64×128, 히트박스 48×72(그림 바닥에서 8px 위) · 몹 그림의 발밑 기준 정렬은 **M7 때** · BLADE 궤도 반경 80 **유지**.
 
+2026-09-24 이미지 요청(아트 범위): 캐릭터 이동 8프레임 · **바이옴당 일반 몹 6종**(이동 4프레임) · **보스 2종**(이동 4 · 공격 8프레임) + 무기(캐릭터 공격) 이미지 — 목록·크기·템플릿은 [circular-art-guide.md](circular-art-guide.md) §6.6. "스테이지별"은 바이옴별로 해석했다(확인 필요). 보스 수는 전에 [확정]한 "바이옴당 2~3"과 충돌하지 않게 **1차 아트 = 2종**으로만 기록한다.
+
 ### 12.2 계속 [미정] (사용자가 미정이라고 한 것 — 구현하지 않고 자리만)
 
 인간마을(11~15) 진행 방식 · 마계숲·초원·인간마을 보스의 이름/능력(바이옴당 2~3종이라는 수량만 확정) · 궁극기 종류 · 왕국 이름 `xx` · 휴식/상점/이벤트의 세부 내용 · 런/메타 재화 획득처와 메타 재화 사용처 · **난이도 6단계가 각각 무엇을 바꾸는지**(이름만 [기초] 확정, §7.6) · **다회차 강화 트리**(기초 설계 원문이 "차후 추가"라고 적음) · **CardSelect 카드 티어 확률표**(운 → 티어, §3.4).
 
-### 12.3 남은 질문 (제안 [살]의 확정 요청 — A~F)
+### 12.3 남은 질문 (제안 [살]의 확정 요청 — A~G)
 
 - **A. 능력치 세부**: ① 캐릭터↔주력 스텟 배정(제안: 마도기사=체력, 스컬매지션=지력, 서큐버스=오염, 어쎄신리자드=민첩) ② 기초 4스텟이 파생 능력치에 주는 효과(§2.6 표) — 특히 **"오염"의 의미**(제안: 지속피해·상태이상 계열) ③ 상태창(HUD 우상단 팝업)에 보일 능력치 목록.
 - **B. 90초와 보스**: 기본안 = **90초 버티기 → 보스 등장 → 보스 처치로 클리어**(대안: 90초 생존이 곧 클리어, 보스는 바이옴 마지막 스테이지에서만). 또한 ① 바이옴당 보스 2~3종인데 스테이지는 5개 → 보스를 **스테이지마다 풀에서 뽑아 재등장**시킬지, 마지막 스테이지에만 둘지 ② 왕국 성의 방 그래프에서 각 방도 90초 버티기인지(기본안) ③ 보스 등장 시 남은 일반 몹 처리.
@@ -655,6 +679,7 @@ M1·M5 가 끝났고(§9), **M2 는 뼈대(앵커 배치)까지** 끝났다 — 
 - **D. 오버플로우 세부**: 무기별 연관 능력치(`overflow_stat`) 방식으로 구현·장신구에도 적용(§3.4 — 이 둘은 [살]로 구현 완료, 답에 따라 `weapons.csv`만 고치면 됨). **남은 질문 = 중첩 상한**(지금은 무제한 누적).
 - **E. 대쉬 수치**: §2.2 제안값(달리기 15/s, 대쉬 30 + 연속 +50%/2s 창, 무적 0.18 s)의 효율 관계(12.0 > 4.5 > 2.25 px/스태미너)가 의도와 맞는지.
 - **F. 기타**: 90초 타이머의 HUD 위치, 스테이지 클리어 보상.
+- **G. 플레이어 사망 (2026-09-23 추가)** — **기본안 [살]으로 구현함(M3, §2.6)**, 확정은 아님: HP 0 → 시뮬 정지 + 결과 모달(생존 시간·레벨·킬) → **RETRY**(같은 캐릭터 새 런) / **LOBBY**. 부활·목숨 여러 개 같은 규칙은 없음. (M8 에서 "런 실패 → 메타 재화 정산"으로 확장.) 다른 규칙을 원하면 알려 주면 바꾼다.
 
 ---
 
@@ -662,12 +687,12 @@ M1·M5 가 끝났고(§9), **M2 는 뼈대(앵커 배치)까지** 끝났다 — 
 
 - **부팅/씬**: 앱이 곧장 Circular 로 부팅(`Application::Run` → `EnterInGame(DemoScene::Circular)`, 타이틀 화면 없음). ESC → 설정 → LOBBY 로 로비에 돌아갈 수 있다(로비는 GAME/TEST SCENE 2버튼뿐, §7.5). `ENGINE_WITH_3D` 무관하게 항상 사용 가능.
 - **카메라/축**: 플레이어를 화면 중앙에 고정하고 월드를 역스크롤(`SnapshotBuilder::BuildCircularScene` 의 `toScreen`). `PlayerIntent.move.y` 는 "앞 = +" 라 `Simulation::Step` 에서 한 번만 `-y` 로 뒤집는다(W=위) — 다른 곳에서 다시 뒤집지 말 것.
-- **몹**: `game::MobField` — SoA(병렬 벡터 + free-list + dense active list), `ParallelFor` 추적, `DamageInShape`/`Overlapping`/`Damage(MobRef)`/`DamageNearest`/`ClosestWithin`(선형 스캔, 슬롯 세대 번호), 상태 `Seek/Windup/Charge`. capacity 4096(`kActiveMob.capacity`, CSV 로 못 바꿈).
+- **몹**: `game::MobField` — SoA(병렬 벡터 + free-list + dense active list), `ParallelFor` 추적, `DamageInShape`/`Overlapping`/`Damage(MobRef)`/`DamageNearest`/`ClosestWithin`(선형 스캔, 슬롯 세대 번호), 상태 `Seek/Windup/Charge`, 종류 `type`(mobs.csv 행) + `CollectCasts`/`StrongestTouching`/`KillTally`(§5.3). capacity 4096(`kActiveMob.capacity`, CSV 로 못 바꿈).
 - **무기**: `weapons.csv`(§3.2) + `Simulation::StepCombat` → `CircularCombat`([circular-combat.md](circular-combat.md)), 시작 무기는 캐릭터마다 다름(`characters.csv` 의 `start_weapon`). 공격 시각 효과는 글로우 없이 평면 도형만 — 판정 도형 그대로(`AttackVisual`), 데미지 계산과 무관.
 - **XP/레벨업**: 킬 → `AwardKills` → 임계값 → `RollLevelUpChoices` → `m_levelUpPending`(이 동안 `Simulation::Step` 이 Circular 를 정지) → `Application::ServiceLevelUp` 이 `LevelUpScreen` 오버레이. Esc 로 못 닫음. 버튼 콜백은 선택만 기록하고 다음 프레임에 적용(자기 위젯 파괴 방지). 선택지 RNG = 고정 시드 `std::mt19937`(엔진 최초 `<random>`).
 - **임시 패턴**: §6.5. **색 변화 애니메이션 테스트**: 몹(Seek/Windup/Charge)·플레이어 색을 시간·슬롯 해시로 계산([animation-design.md](animation-design.md)).
-- **CSV 밸런싱**: `assets/data/circular/{balance,levels,spawn_curve,player,stats,characters,weapons,accessories}.csv`, 씬 진입 시 로드 + F5(리로드)/F6(재시작)/F7(캐릭터 선택), `tools/run_balance_sim.bat`([circular-balance.md](circular-balance.md)).
-- **테스트 씬**(로비 "TEST SCENE", §7.5): `Simulation::EnterCircularTestScene()` — 체력 99999 더미 몹 1마리만(`kTestDummyHealth`), 스폰 예산·돌진 패턴 없음(`m_circularTestMode`). 무기 데미지/투사체 거동을 스웜 소음 없이 확인하는 용도. HUD 상단에 주황 배너로 항상 표시. `EnterScene(DemoScene::Circular)`(=GAME)로 나가면 자동으로 꺼진다.
+- **CSV 밸런싱**: `assets/data/circular/{balance,levels,spawn_curve,player,stats,characters,weapons,accessories,mob_attacks,mobs}.csv`, 씬 진입 시 로드 + F5(리로드)/F6(재시작)/F7(캐릭터 선택), `tools/run_balance_sim.bat`([circular-balance.md](circular-balance.md)).
+- **테스트 씬**(로비 "TEST SCENE", §7.5): `Simulation::EnterCircularTestScene()` — 체력 99999 더미 몹 1마리만(`kTestDummyHealth`, 종류 = `mobs.csv` 0행), 스폰 예산·돌진 패턴 없음, **플레이어가 피해를 안 받음**(`m_circularTestMode`). 무기 데미지/투사체 거동을 스웜 소음 없이 확인하는 용도. HUD 상단에 주황 배너로 항상 표시. `EnterScene(DemoScene::Circular)`(=GAME)로 나가면 자동으로 꺼진다.
 - **확인 방법**: `Debug|x64` 빌드 → 실행(곧장 Circular). W=위, S=아래, A/D=좌/우.
 
 ---
@@ -690,7 +715,8 @@ M1·M5 가 끝났고(§9), **M2 는 뼈대(앵커 배치)까지** 끝났다 — 
 | 난이도 | ❌ | `difficulty.csv` 한 행 = 한 단계(§7.6). 6단계 이름은 [기초] 고정, 배율 열만 조정 |
 | 능력치(스텟) | `StatId` 열거자 + `kStatDefs` 한 줄 (`game/Stats.h`) | 위 + `stats.csv` 한 행(값만 조정할 땐 CSV 만) — 기초 4스텟 계수·파생 능력치(§2.6). 스탯 카드는 `kStatCards` 한 줄 |
 | 마계숲 노드/보스 | ❌ | `nodes.csv`·`bosses.csv` 행(§4.4). 노드 세부(휴식/상점/이벤트)는 [미정] |
-| 몹 종류 | (단일 몹) `balance.csv` `mob_*` | `mobs.csv` 한 행, 새 행동일 때만 `MobBehavior` + 커널 분기 |
+| 몹 종류 | ✅ `mobs.csv` 한 행 — 추적/거리 유지는 `keep_distance`, 공격은 `attack` 에 `mob_attacks.csv` id(없으면 그 행부터 추가). 몹이 스폰되는 비율은 `weight` | 〃 (완료 — M3). 추적·멈춤 말고 **다른 움직임**(도망·순간이동 …)이 생길 때만 움직임 열거 + `MobField::Step` 표 한 줄 |
+| 적 공격 | ✅ `mob_attacks.csv` 한 행(`weapons.csv` 와 같은 열 — 효과·경로·`delay`·`origin` 그대로, [circular-combat.md](circular-combat.md) §5 "적 공격 추가") | 〃 (완료 — M3) |
 | 스폰 패턴 | 임시 `kChargePattern` 튜닝만 | `SpawnPatternKind` 열거자 + 함수 + `spawn_patterns.csv` 행, 시간표는 `stage_timeline.csv` |
 | 캐릭터 | `characters.csv` 한 행 ✅ | 그 행(+ 시작 무기 이름) + `char/<id>` 아틀라스(아트) |
 | 스테이지 | ❌ | `stages.csv` 한 행(+ 새 진행 방식이면 `StageFlow` 구현) |

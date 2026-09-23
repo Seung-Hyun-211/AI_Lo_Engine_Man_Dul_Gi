@@ -1,0 +1,13 @@
+# Circular scene - mob kinds (docs/circular-design.md 5.3, docs/circular-balance.md "mobs.csv"). One row = one kind.
+# class: melee | tank | ranged | caster - the base design's category (stage pools, colours). Behaviour comes from the numbers:
+#   keep_distance 0 = chase the player; > 0 = stop that far out (ranged/caster hold at range).
+#   attack = a mob_attacks.csv id (blank = none); casts only while the player is within attack_range.
+# weight = share of the ring spawn mix (spawn_curve.csv sets the rate). 0 = never spawns there. At least one row > 0.
+# contact_damage = per touch; the player's hurt_invuln (player.csv) allows one hit per window, dash = no hit.
+# xp = per kill before the XP GAIN stat. Row 0 is also the test scene dummy's kind (its HP is 99999 there).
+# F5 reloads (live mobs take the new speed/contact/attack; HP/size apply to new spawns).
+id,name,class,health,speed,radius,contact_damage,xp,weight,color,keep_distance,attack,attack_range
+grunt,GRUNT,melee,20,90,10,8,1,70,D04050,,,
+brute,BRUTE,tank,140,55,18,16,6,10,3A4FA0,,,
+archer,ARCHER,ranged,14,80,10,5,2,12,50B060,360,arrow,520
+witch,WITCH,caster,18,70,11,5,3,8,A050D0,400,hex,560

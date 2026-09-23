@@ -1,6 +1,6 @@
 # 서큘러 전투 구조 — 판정 · 움직임 · 연출
 
-> 상태: **W1~W16 구현 완료(2026-09-23), W7(적 공격)은 M3, W8(스프라이트)은 M7 때.** 무기·적 공격의 **판정 도형**, **움직임(경로)**, **연출(도형 → 이미지)**, **데이터(CSV)** 를 한 구조로 묶는다.
+> 상태: **W1~W16 구현 완료(2026-09-23) — W7(적 공격)도 M3 에서 완료, 남은 건 W8(스프라이트, M7).** 무기·적 공격의 **판정 도형**, **움직임(경로)**, **연출(도형 → 이미지)**, **데이터(CSV)** 를 한 구조로 묶는다.
 > 결정 D1~D7 은 **전부 권장안 A 로 [확정]**(2026-09-23, §4). 그 밖의 제안은 **[살]** — 기초 설계([# Circular 기초 설계.md](<# Circular 기초 설계.md>))와
 > 사용자 [확정] 사항([circular-design.md](circular-design.md) §12.1)이 우선이다. 충돌하면 사용자에게 먼저 묻는다.
 >
@@ -87,19 +87,22 @@ LSP 는 전투 코드에 상속이 없어 해당 없음. DIP 는 `Simulation`/`C
 weapons.csv 행 ──(CircularBalance 로더)──▶ CardDef{ effect, 크기, 색, path, ... }   ← 숫자의 유일한 출처
       effect ──kEffectSpecs(Card.h)──▶ { form, shape, onHit }                           ← 효과 지식의 유일한 출처
         │
-Simulation::StepCombat ── 쿨다운 끝난 무기마다 CircularCombat::Fire
-        │   path == None ──▶ AreaShape → HitArea: MobField::DamageInShape + AttackVisual(Outline)   (PULSE·검·채찍)
-        │                    Nearest   → DamageNearest + AttackVisual(Travel)                       (BOLT)
+Simulation::StepCombat ── 쿨다운 끝난 무기마다 CircularCombat::Fire                (Team::Player, weapons.csv)
+        │                ── MobField::CollectCasts 로 쿨 찬 몹마다 FireEnemy        (Team::Enemy, mob_attacks.csv — W7)
+        │   path == None ──▶ CastArea: delay 0 → LandArea 즉시 / delay > 0 → 대기 인스턴스 + AttackVisual(Telegraph)
+        │                    LandArea: Player = MobField::DamageInShape / Enemy = ShapeOverlapsRect(플레이어 히트박스) + Outline
+        │                    Nearest   → DamageNearest + AttackVisual(Travel)                       (BOLT, 무기만)
         │   path != None ──▶ SpawnMoving: AttackInstance × count (Polar 만 여러 개)
         ▼
 CircularCombat::Step (고정 스텝마다)
    인스턴스마다: t += dt → pos = kPaths[path](def, inst, anchor)            ← t 로 계산, 누적 없음
-                 Projectile → ResolveContact: 캡슐(prevPos→pos) Overlapping → 기억 제외 → 진행 순 정렬 → onHit
-                 Area       → tick_interval 마다 그 자리 AreaShape → HitArea
+                 Projectile → Player: ResolveContact(캡슐 Overlapping → 기억 제외 → 진행 순 정렬 → onHit)
+                              Enemy: ResolveEnemyContact(캡슐 vs 히트박스, 대쉬 중이면 통과)
+                 Area       → 경로 없음 = delay 가 지나면 LandArea 한 번 / 경로 있음 = tick_interval 마다 LandArea
                  수명(lifetime) 또는 이동 거리(range) 끝 → 제거
    AgeAndErase(visuals)
         ▼
-CombatResult{ kills, heal } ──▶ Simulation: XP·레벨업, HP(흡혈)
+CombatResult{ kills, heal, playerDamage } ──▶ Simulation: XP(종류별 KillTally)·레벨업, HP(흡혈, HurtPlayer)
 SnapshotBuilder: AttackVisual → kOutlineDrawers[shape] / Travel 점, 인스턴스(Projectile) → 사각형 — 크기 = 판정 × visual_scale
 ```
 
@@ -110,7 +113,7 @@ SnapshotBuilder: AttackVisual → kOutlineDrawers[shape] / Travel 점, 인스턴
 - 입력은 값/const 참조: `CombatContext{ balance, stats, playerCenter, facing }` + `MobField&` + `std::mt19937&`(런 RNG — 크리·랜덤 피해, 결정론 유지).
 - `SnapshotBuilder` 는 `Simulation::Combat()` 의 `Visuals()`/`Instances()` 를 읽는다.
 - 메인(시뮬) 스레드 전용. 인스턴스가 많아져 병렬화할 때는 위치 계산만 `ParallelFor`(인스턴스마다 자기 칸, 규칙 6), 판정은 순차.
-- 적 공격용 `team`·`CombatContext` 의 대쉬 무적 값은 **아직 없다** — 쓰는 곳(W7, M3)이 생길 때 넣는다(KISS).
+- **적 공격(W7, M3 ✅)**: `Team{Player, Enemy}` 가 `AttackInstance`·`AttackVisual` 에 있다. 행 표는 `AttackTable(balance, team)`(무기 = `weapons.csv`, 적 = `mob_attacks.csv`) 한 곳에서 고른다. `Simulation` 이 `MobField::CollectCasts` 로 쿨이 찬 몹을 모아 `FireEnemy(attackIndex, 몹 위치, …)` 를 부른다. `CombatContext` 에 `playerBox`(히트박스)·`playerHittable`(대쉬 중 false), `CombatResult` 에 `playerDamage`(그 호출에서 가장 큰 한 방 — 피격 무적은 `Simulation::HurtPlayer` 가 판단).
 
 ### 2.1 판정 도형 `HitShape` (`game/HitShape.h`)
 
@@ -120,6 +123,7 @@ SnapshotBuilder: AttackVisual → kOutlineDrawers[shape] / Travel 점, 인스턴
   `Damage(MobRef)`(한 마리), `DamageNearest`(BOLT), `ClosestWithin`(조준). 옛 `DamageInRadius/Arc/Capsule` 삭제.
 - **몹 반경 포함 [확정 D3]**: `pad` = 몹의 `m_radius`. 부채꼴 각도는 몹 중심 기준(단순함 우선).
 - `MobRef{ slot, generation }`: 슬롯마다 세대 번호가 있고 몹이 죽으면 올라간다 — 오래 들고 있는 참조가 새로 스폰된 몹을 가리키지 않는다.
+- **플레이어 쪽 판정**(W7): `ShapeOverlapsRect(shape, rect)` — 같은 `HitShape` 를 플레이어 **히트박스 사각형**(`player.csv` `hitbox_*`, 48×72)과 검사한다. 종류마다 함수 1개인 표(`kRectTests`, `static_assert`): 원 = 사각형까지 최근접 거리, 캡슐 = 선분-사각형 거리(교차 슬랩 테스트 + 끝점/모서리), 부채꼴 = 근사(사각형에서 중심에 가장 가까운 점이 부채꼴 안). 처음 계획한 "플레이어 = 원 하나"보다 정확하고, 이동·충돌이 쓰는 그 콜라이더 그대로다. 몹 접촉도 같은 식(`PointRectDistanceSq` ≤ 몹 반경²).
 - `CollisionWorld2D` 로 옮기지 않는다: 몹 4096 SoA 를 매 스텝 콜라이더로 재구성하는 건 낭비이고, 질의형이 "탐지만" 규칙(아키텍처 규칙 8)과도 맞다.
   몹 수가 스캔 비용을 넘기면 `MobField` 안에 균일 그리드를 둔다.
 
@@ -135,8 +139,8 @@ SnapshotBuilder: AttackVisual → kOutlineDrawers[shape] / Travel 점, 인스턴
 
 ### 2.3 연출 `AttackVisual`
 
-- `AttackVisual{ HitShape shape; VisualStyle style; defIndex; ageLeft; life }`, `VisualStyle{ Outline, Travel }`.
-  Outline = 판정에 쓴 도형의 외곽(점선), Travel = 캡슐 시작→끝을 날아가는 점(BOLT, 투사체 명중 표시). **보이는 크기 = 맞는 크기** [확정 D2].
+- `AttackVisual{ HitShape shape; VisualStyle style; defIndex; ageLeft; life; team }`, `VisualStyle{ Outline, Travel, Telegraph }`.
+  Outline = 판정에 쓴 도형의 외곽(점선), Travel = 캡슐 시작→끝을 날아가는 점(BOLT, 투사체 명중 표시), **Telegraph** = 늦게 떨어지는 장판(`delay`)이 곧 맞힐 영역 — 떨어질 때까지 점점 진해지고 빨리 깜빡인다(M3). **보이는 크기 = 맞는 크기** [확정 D2].
 - `SnapshotBuilder` 의 `kOutlineDrawers[HitShapeKind]`(원 = 점선 원, 부채꼴 = 부채꼴 테두리, 캡슐 = 두 변 + 반원) — 무기별 분기 없음.
   색 = 무기 행 `color`, 배율 = `visual_scale`. 스프라이트(`sprite`/`fx_hit`)는 M7 에서 이 자리에 들어간다(W8).
 
@@ -144,18 +148,20 @@ SnapshotBuilder: AttackVisual → kOutlineDrawers[shape] / Travel 점, 인스턴
 
 `weapons.csv` 의 열 정의는 [circular-balance.md](circular-balance.md) "weapons.csv — 무기" **한 곳**이다(문서 DRY). 효과 이름 → 동작 표는 `game/Card.h` `kEffectSpecs`:
 
-| `effect` | 형태 | 도형 | 명중 처리 | 무기 |
+| `effect` | 형태 | 도형 | 명중 처리 | 무기 (적 공격) |
 |---|---|---|---|---|
-| `radialpulse` | Area | Circle | — | PULSE, SPIKE(직선 경로) |
+| `radialpulse` | Area | Circle | — | PULSE, SPIKE(직선 경로) (HEX — `origin=target`, `delay`) |
 | `arcswing` | Area | Arc | — | 검 |
 | `lineswing` | Area | Capsule | — | 채찍 |
 | `nearestbolt` | Nearest | — | — | BOLT |
 | `explodingbolt` | Projectile | Circle(폭발) | Explode | 스태프 |
-| `piercingshot` | Projectile | — | Pierce | 단검, BLADE·VORTEX(극좌표 경로) |
+| `piercingshot` | Projectile | — | Pierce | 단검, BLADE·VORTEX(극좌표 경로) (ARROW) |
 | `randomdamageshot` | Projectile | — | Random | 트럼프 |
 
 `CardEffect` 는 이 표의 키로만 남는다 — 실행 코드는 `form`(3)·`onHit`(3)·`path`(3)로만 분기한다.
-적 공격은 `mobs.csv`(M3, [circular-design.md](circular-design.md) §5.3)가 같은 `effect`·`path` 체계를 쓰게 한다(W7).
+적 공격은 `mob_attacks.csv`(M3 ✅)가 **`weapons.csv` 와 같은 열·같은 로더**로 같은 `effect`·`path` 체계를 쓴다(W7) — `mobs.csv` 의 `attack` 이 그 `id` 를 가리킨다([circular-design.md](circular-design.md) §5.3).
+
+**배치 열 (M3에서 추가, 두 표 공통)**: 경로 없는 Area 에만 — `origin`(`self` = 시전자 주위 / `target` = 대상 자리: 적이면 플레이어, 무기면 `kTargetSearch` 540px 안의 가장 가까운 몹, 없으면 발동 안 함), `delay`(초, > 0 이면 그 자리에 Telegraph 를 띄우고 기다렸다가 떨어짐). 다른 조합(투사체에 `delay` 등)은 로더가 거부한다.
 
 ### 2.5 공격 움직임 — 효과(형태) × 경로
 
@@ -198,13 +204,13 @@ MSVC 빌드는 이 환경에 없어 g++ `-Wall -Wextra` 로 2D·3D 두 구성의
 | W11 | `rehit_interval` | ✅ | 제자리 칼날: 재타격 0.5s → 24.4회, 0.25s → 47.7회(비례) |
 | W12 | 움직이는 `Area`(럴커) | ✅ | SPIKE 틱 0.08s → 15.9회, 0.04s → 23.9회(10초) |
 | W6+W13 | `weapons.csv` 열(`id`·색·크기·경로…) + 로더 검증 + BLADE/VORTEX/SPIKE | ✅ | 불가능한 조합은 줄 번호와 함께 행 거부. `characters.csv` 는 무기 `id` 로 참조 |
-| W7 | 적 공격(`team=Enemy`, 플레이어 피격 + 대쉬 무적) | ⏸ M3 착수 때 | 구조는 준비됨(같은 `effect`·`path`, 대상만 플레이어 원) |
+| W7 | 적 공격(`team=Enemy`, 플레이어 피격 + 대쉬 무적) | ✅ (M3) | 화살(투사체) 300px 거리에서 0.72초 뒤 6 명중, 대쉬 중엔 통과·사거리로 소멸 · HEX(예고 장판) 1.1초 뒤 12, 대쉬 중·예고 밖으로 비키면 0 · 적 장판은 몹을 안 다침 — 헤드리스 확인 |
 | W8 | 이미지(`sprite`/`fx_hit` → `SpriteDraw`) | ⏸ M7 월드 스프라이트 경로 때 | 열·이름 규칙은 준비됨 |
 | W9 | 문서 | ✅ | 이 문서, `circular-balance.md` 열 표, `circular-design.md`, `command-playbook.md` |
 
 설계와 달라진 점(전부 KISS/DRY 쪽으로): 경로 표를 `game/AttackPath.*` 새 파일 대신 `CircularCombat.cpp` 안에 둠 ·
 효과 이름 표는 `CardEffect` 열거 + `kEffectSpecs` 한 표(열거 순서를 `static_assert` 로 검사) · 무기 색 `color` 열 추가(무기별 색 분기 제거용) ·
-`team`/대쉬 무적 입력은 W7 까지 보류.
+`team`/대쉬 무적 입력은 W7 까지 보류(→ M3 에서 추가). W7 에서 바뀐 점: 플레이어 판정을 원이 아니라 히트박스 사각형으로(`ShapeOverlapsRect`), 적 공격 표를 `mobs.csv` 열이 아니라 따로 `mob_attacks.csv`(무기와 같은 열)로 — 공격 하나를 여러 몹이 같이 쓸 수 있고 로더를 두 번 만들지 않는다(DRY).
 
 ---
 
@@ -270,10 +276,20 @@ math::Vec2 PathBoomerang(const CardDef& def, const AttackInstance& attack, math:
 constexpr PathFn kPaths[] = { &PathNone, &PathStraight, &PathPolar, &PathBoomerang };
 ```
 
-### 적 공격 추가 (W7, M3 때)
+### 적 공격 추가 (W7 ✅) — CSV 두 줄
 
-`mobs.csv` 의 공격 열이 같은 `effect`·`path` 체계를 쓰게 하고, `AttackInstance` 에 `team` 을 넣는다. 대상 선택은
-`team` switch 2 case(몹 떼 = `MobField` 질의 / 플레이어 = 원 하나 + 대쉬 무적 확인) — 몹 종류별로 따로 검사하지 않는다.
+1. `mob_attacks.csv` 에 한 행(열은 `weapons.csv` 와 같음, 레벨 곡선 열은 비워도 됨). `nearestbolt` 는 적 공격이 될 수 없다.
+2. `mobs.csv` 의 그 몹 행에 `attack`(= 1의 `id`)과 `attack_range`(이 거리 안일 때만 쏨).
+
+```csv
+# mob_attacks.csv - 플레이어 자리에 1.1초 뒤 떨어지는 반경 70 장판 (WITCH 의 HEX)
+id,name,effect,cooldown,damage,range,projectile_speed,hit_radius,color,origin,delay
+hex,HEX,radialpulse,3.8,12,70,,,B060FF,target,1.1
+# 부채꼴로 세 발 도는 칼날을 쏘는 적이 필요하면: effect=piercingshot, path=polar, count=3, lifetime ... (무기와 똑같이)
+```
+
+코드는 안 고친다 — `CircularCombat` 이 `Team::Enemy` 면 대상을 플레이어 히트박스로 바꾸는 것 말고는 무기와 같은 경로를 탄다.
+대상 선택은 `team` 두 갈래(몹 떼 = `MobField` 질의 / 플레이어 = `ShapeOverlapsRect` + `playerHittable`) — 몹 종류별로 따로 검사하지 않는다.
 
 ### 하지 말 것
 

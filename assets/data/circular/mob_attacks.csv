@@ -1,0 +1,10 @@
+# Circular scene - enemy attacks (docs/circular-combat.md W7, docs/circular-balance.md "mob_attacks.csv").
+# Same columns as weapons.csv (same loader). Only id,name,effect,cooldown,damage,range are required here - the
+# level-curve columns (max_level, damage_per_level, ...) are optional: an enemy attack has one level.
+# mobs.csv `attack` names a row by id. cooldown = seconds between one mob's casts.
+# Not allowed here: nearestbolt (no form that reaches the player). overflow_* is ignored.
+# Every onHit ends an enemy projectile on its first contact with the player (there is one target).
+# delay (s) + origin=target: an area that lands on the player's spot after a red telegraph - the dodge window.
+id,name,effect,cooldown,damage,range,projectile_speed,hit_radius,color,origin,delay
+arrow,ARROW,piercingshot,2.4,6,600,380,5,7CE06A,,
+hex,HEX,radialpulse,3.8,12,70,,,B060FF,target,1.1

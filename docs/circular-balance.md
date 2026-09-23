@@ -1,13 +1,13 @@
 # 서큘러 밸런싱 환경 (CSV) — 몹 수 · 경험치 · 레벨
 
-**상태: 구현 완료.** 숫자를 코드가 아니라 CSV 여덟 개(몹/레벨/스폰 곡선 + **M1: 플레이어 이동·능력치·캐릭터** + **M5: 무기·장신구**)로 뺐고, 게임 안에서 F5로 다시 읽고, 창 없이 결과를
+**상태: 구현 완료.** 숫자를 코드가 아니라 CSV 열 개(레벨/스폰 곡선 + **M1: 플레이어 이동·능력치·캐릭터** + **M5: 무기·장신구** + **M3: 몹·적 공격**)로 뺐고, 게임 안에서 F5로 다시 읽고, 창 없이 결과를
 뽑는 시뮬레이터가 있다. 게임 설계(기초 설계 기반: 무기·XP·레벨업·스폰 패턴 등)는 [circular-design.md](circular-design.md), 앞으로 늘릴 표는 이 문서 맨 아래 "확장 계획".
 
 ## 한눈에
 
 ```text
 assets/data/circular/
-  balance.csv       key,value,note            몹 HP·속도·크기·XP, 스폰 거리, 레벨표 밖 성장률
+  balance.csv       key,value,note            스폰 거리, 레벨표 밖 성장률 (런 전체 값만 — 몹 수치는 mobs.csv)
   levels.csv        level,xp_to_next,note     레벨별 필요 XP (1,2,3… 빈틈 없이)
   spawn_curve.csv   time_sec,spawns_per_sec,max_alive   런 시간별 초당 스폰 수 · 살아있는 몹 상한
   player.csv        key,value                 걷기/달리기/대쉬/스태미너 수치 (설계 §2.2) + 그림·히트박스 크기
@@ -15,6 +15,8 @@ assets/data/circular/
   characters.csv    id,name,main_stat,start_vit..start_agi,start_weapon   플레이어블 캐릭터 (설계 §2.3)
   weapons.csv       id,name,effect,cooldown,damage,range,...,path,...   무기 10종(기초 5 + 구형 2 + 움직임 3) (열 정의 아래)
   accessories.csv   name,stat,multiplicative,amount,max_level   장신구 6종 (설계 §3.3)
+  mob_attacks.csv   id,name,effect,cooldown,damage,range,...    적 공격 2종 — weapons.csv 와 같은 열 (M3)
+  mobs.csv          id,name,class,health,speed,radius,...      몹 4종(근접·탱커·원거리·마법), 스폰 비율 (M3, 설계 §5)
 
 game/CircularBalance.{h,cpp}   CSV → CircularBalance (몹/레벨/스폰 곡선 평가기)
 core/CsvFile.{h,cpp}           범용 CSV 리더 (BOM·CRLF·따옴표·# 주석)
@@ -40,14 +42,11 @@ tools/build_balance_sim.sh     Linux(클라우드 세션)에서 g++ 로 빌드 +
 
 | key | 뜻 | 제약 |
 |---|---|---|
-| `mob_health` | 새로 스폰되는 몹 HP | > 0 |
-| `mob_speed` | 몹 속도 px/s (플레이어는 300) | ≥ 0 |
-| `mob_radius` | 몹 충돌/표시 반경 px | > 0 |
-| `mob_xp` | 킬당 XP (플레이어 XP 획득 배율 곱하기 전) | ≥ 0 |
 | `spawn_radius` | 플레이어로부터 스폰 거리 px | > 0 |
 | `xp_growth_after_table` | `levels.csv` 마지막 행 뒤로 레벨마다 곱해지는 배수 | ≥ 1 |
 
-모르는 key 는 경고 후 무시.
+모르는 key 는 경고 후 무시. 예전의 `mob_health`·`mob_speed`·`mob_radius`·`mob_xp` 는 M3 에서 **`mobs.csv` 로 옮겨졌다** —
+옛 파일에 남아 있으면 "unknown key" 경고만 나고 무시된다.
 
 ### levels.csv — level,xp_to_next
 
@@ -90,11 +89,13 @@ tools\run_balance_sim.bat --seconds 300 --interval 10
   다음 레벨 필요 XP, 그 시각 스폰 곡선 값, 덱.
 - `build/tools/balance_levels.csv` — **각 레벨에 도달한 시각**(`seconds_since_prev` 로 "레벨업 간격"이 바로 보임).
   XP 표를 잡을 때 이 열을 원하는 리듬(예: 처음엔 10~20초, 후반 40초+)에 맞춘다.
-- 옵션: `--seconds N`(기본 600) `--interval S`(기본 10) `--out PREFIX`(기본 `build/tools/balance`).
+- 옵션: `--seconds N`(기본 600) `--interval S`(기본 10) `--out PREFIX`(기본 `build/tools/balance`) `--mortal`(아래 "죽음").
   다른 값으로 여러 번 돌려 `--out build\tools\try1` 식으로 이름을 달리하면 Excel 에서 겹쳐 비교하기 좋다.
 - CSV 에 오류가 있으면 실행 첫 줄들에 `[balance] ERROR …` 가 나오고 종료 코드 1.
-- **한계**: 대역 플레이어는 가만히 서 있고 죽지 않으며(플레이어 HP 가 아직 없음), 레벨업마다 "첫 번째 무기(카드)
-  옵션(없으면 첫 옵션)"을 고른다. 돌진 패턴은 돌아가지만 피해가 없다. 곡선의 **모양**을 잡는 도구지 실제
+- **죽음**: 기본은 **갓 모드**(피해 없음) — 가만히 선 대역은 몹 떼에 금방 죽어 곡선을 못 재기 때문이다. `--mortal` 을 붙이면
+  피해를 받고, 죽으면 `player died at 12.2s` 를 찍고 멈춘다("가만히 있으면 몇 초 버티나" 확인용).
+- **한계**: 대역 플레이어는 가만히 서 있고, 레벨업마다 "첫 번째 무기(카드)
+  옵션(없으면 첫 옵션)"을 고른다. 돌진 패턴·적 공격도 그대로 돈다(피해는 `--mortal` 일 때만). 곡선의 **모양**을 잡는 도구지 실제
   난이도 판정 도구가 아니다 — 최종 감각은 A 로 직접 플레이.
 
 ### player.csv — key,value (M1)
@@ -111,6 +112,7 @@ tools\run_balance_sim.bat --seconds 300 --interval 10
 | `dash_cost` / `dash_cooldown` | 30 / 0.5 | 대쉬 소모 / 대쉬 시작 간 최소 간격 s |
 | `dash_chain_window` / `dash_chain_penalty` | 2.0 / 0.5 | 이 창(s) 안의 연속 대쉬마다 소모 +50% |
 | `stamina_regen_per_sec` / `stamina_regen_delay` | 30 / 0.8 | 초당 회복 / 마지막 소모 후 회복 시작까지 s |
+| `hurt_invuln` | 0.5 | 맞은 뒤 이 시간(s) 동안 추가 피해 없음 — 몹 떼에 둘러싸여도 이 간격에 한 번만 맞는다 (M3) |
 
 최대 스태미너는 여기 없고 `stats.csv` 의 `stamina_max`(민첩 계수 포함). **"달리기 ≪ 대쉬, 연타하면 손해" [확정]** 을 깨지 않게 조정할 것 — 기준: 스태미너당 이동 효율이 달리기(12.0) > 대쉬(4.5) > 연속 3번째(2.25) 순서([circular-design.md](circular-design.md) §2.2 표).
 
@@ -118,9 +120,11 @@ tools\run_balance_sim.bat --seconds 300 --interval 10
 
 `stat_id` 만 필수, 나머지 열은 비우면 코드 기본값. `기초 = (base_value + 가산) × (1 + 배율)`,
 `파생 = (base_value + Σ from_x × 기초 스텟 x + 가산) × (1 + 배율)`, 결과는 `min..max` 로 잘림. 가산·배율은 캐릭터
-시작값(`characters.csv`)과 레벨업 스탯 카드에서 온다. `min > max` 행은 오류로 건너뜀, 모르는 `stat_id` 는 경고.
+시작값(`characters.csv`), 장신구, 레벨업 스탯 카드, 오버플로우에서 온다. `min > max` 행은 오류로 건너뜀, 모르는 `stat_id` 는 경고.
 현재 소비되는 능력치: `attack_speed, weapon_damage, attack_size, extra_projectiles, move_speed, xp_gain, stamina_max,
-stamina_regen, dash_cost_mul, dash_chain_penalty_mul, dash_cooldown_mul`. 나머지(`luck, max_hp, crit_*` …)는 값만 있고 시스템 대기.
+stamina_regen, dash_cost_mul, dash_chain_penalty_mul, dash_cooldown_mul, max_hp, hp_regen, crit_chance, crit_damage, life_steal, damage_reduction`(피격, M3).
+값만 있고 시스템 대기: `luck`(CardSelect 티어), `defense`·`armor_break`·`dot_damage`(계산식 [미정]),
+`ultimate_charge_mul`(궁극기), `corruption_power` — 목록·계산식은 [circular-design.md](circular-design.md) §2.6.
 새 능력치 = `Stats.h` 의 `StatId` + `kStatDefs` 한 줄씩 + 이 CSV 한 행.
 
 ### characters.csv — 플레이어블 캐릭터 (M1)
@@ -158,13 +162,16 @@ base_targets,max_level,damage_per_level,range_per_level,cooldown_scale,levels_pe
 | `start_radius` / `radial_speed` / `angular_speed_deg` | px / px·s⁻¹ / °·s⁻¹ | 0 | `polar` 매개변수. `radial_speed` 0 = 궤도, > 0 = 바깥으로 퍼지는 소용돌이. 반경에 `attack_size` 곱함 |
 | `tick_interval` | 초 | 0 | 움직이는 **장판**(효과 형태 Area + 경로)의 판정 간격 — 필수 |
 | `rehit_interval` | 초 | 0 | 시간으로 끝나는 **투사체**가 같은 몹을 다시 때리기까지(0 = 다시 안 때림) |
+| `origin` | `self` `target` | `self` | 경로 없는 **장판**이 떨어지는 곳: 시전자 주위 / 대상 자리(무기 → 540px 안 가장 가까운 몹, 없으면 발동 안 함. 적 → 플레이어) (M3) |
+| `delay` | 초 | 0 | 경로 없는 **장판**이 떨어지기까지 — 그동안 맞을 영역이 예고로 보인다(비키면 안 맞음) (M3) |
 
 `effect` = `radialpulse`(원 장판) · `arcswing`(부채꼴) · `lineswing`(캡슐) · `nearestbolt`(가까운 N체) · `explodingbolt`(닿으면 폭발)
 · `piercingshot`(관통) · `randomdamageshot`(랜덤 피해). 움직임은 `effect` 가 아니라 `path` 로 정한다 — 예: 원 장판 + `straight` =
 럴커식 전진 가시(SPIKE), 관통 + `polar` = 궤도 칼날(BLADE)·소용돌이(VORTEX).
 
 중복 id·모르는 effect/path/anchor·필수 열 파싱 실패, **실행할 수 없는 조합**(`nearestbolt` + 경로, `polar` 인데 `lifetime` 0,
-움직이는 장판인데 `tick_interval` 0, `straight` 인데 속도·수명 둘 다 0)은 그 행만 줄 번호와 함께 오류로 건너뛴다. 유효 행이
+움직이는 장판인데 `tick_interval` 0, `straight` 인데 속도·수명 둘 다 0, 장판이 아니거나 경로가 있는데 `delay`/`origin=target`,
+255행 초과)은 그 행만 줄 번호와 함께 오류로 건너뛴다. 유효 행이
 하나도 없으면 내장 7종(`Card.h` `kCardDefs` — PULSE/BOLT + 기초 설계 5종, CSV 와 같은 숫자로 유지). BLADE/VORTEX/SPIKE 는
 레벨업 풀 전용(D5) — 폴백에는 없다.
 
@@ -175,6 +182,39 @@ base_targets,max_level,damage_per_level,range_per_level,cooldown_scale,levels_pe
 장신구는 효과 실행 코드가 없다 — 순수 스탯 보너스. 유효 행이 하나도 없으면 내장 6종(AMULET/CHARM/RING/BLOODSTONE/
 GAUNTLET/BELT).
 
+### mob_attacks.csv — 적 공격 (M3)
+
+**`weapons.csv` 와 열이 같고 로더도 같다**(위 표 그대로). 차이는 셋: 필수는 `id,name,effect,cooldown,damage,range` 뿐(레벨 곡선 열
+`base_targets`·`max_level`·`*_per_level`·`cooldown_scale`·`levels_per_extra_target` 은 비워도 됨 — 적 공격은 레벨 1 하나),
+`nearestbolt` 는 쓸 수 없고(플레이어에게 닿는 형태가 없음), `overflow_*` 는 무시. `cooldown` = 몹 한 마리가 다시 쏘기까지(s).
+적 투사체는 플레이어에 한 번 닿으면 onHit 종류와 상관없이 끝난다(대상이 하나). 대쉬 중엔 몸을 통과한다.
+
+| id | 효과 | 기본값 [살] |
+|---|---|---|
+| `arrow` | `piercingshot` 직선 투사체 | 쿨 2.4, 피해 6, 사거리 600, 380 px/s, 반경 5 |
+| `hex` | `radialpulse` + `origin=target` + `delay` | 쿨 3.8, 피해 12, 반경 70, 1.1초 뒤 플레이어 자리에 떨어짐 |
+
+유효 행이 없으면 위 내장 2종. 몹이 가리키는 id 가 사라지면 그 몹은 공격 없이 돈다(경고).
+
+### mobs.csv — 몹 (M3)
+
+| 열 | 값 | 기본 | 뜻 |
+|---|---|---|---|
+| `id` `name` | 소문자·숫자·밑줄 / ASCII | (필수) | 식별자(이미지 `mob_<id>_NN`, M7) / 표시 이름 |
+| `class` | `melee` `tank` `ranged` `caster` | (필수) | 기초 설계 분류 — 스테이지 출현 풀(M6)이 읽는 라벨. **움직임·공격은 아래 숫자가 정한다** |
+| `health` `speed` `radius` | HP / px·s⁻¹ / px | (필수) | 반경 = 충돌·그림 반크기 |
+| `contact_damage` | 피해 | 0 | 플레이어 히트박스에 닿으면(피격 무적 `hurt_invuln` 이 빈도를 막음) |
+| `xp` | XP | 1 | 킬당, `xp_gain` 곱하기 전 |
+| `weight` | ≥ 0 | 1 | 링 스폰 비율. 0 = 링 스폰에 안 나옴(패턴 전용 몹 자리). **한 행은 > 0 이어야** 함 |
+| `color` | `RRGGBB` | D04050 | 스프라이트 전 자리표시 색 |
+| `keep_distance` | px | 0 | 0 = 플레이어를 쫓음, > 0 = 그 거리 안에 들어오면 멈춤(원거리·마법) |
+| `attack` / `attack_range` | `mob_attacks.csv` id / px | 없음 | 플레이어가 `attack_range` 안일 때 그 공격을 쿨마다 쏨. `attack` 을 쓰면 `attack_range` > 0 필수 |
+
+기본 4행 [살]: GRUNT(근접 HP 20·90px/s·접촉 8·비율 70) · BRUTE(탱커 HP 140·55px/s·반경 18·접촉 16·XP 6·비율 10) ·
+ARCHER(원거리 360px 에서 멈춤·520px 안이면 화살·비율 12) · WITCH(마법 400px 에서 멈춤·560px 안이면 HEX·비율 8).
+0행 종류가 테스트 씬 더미(HP 만 99999). F5: 살아 있는 몹도 새 속도·접촉 피해·공격을 바로 쓴다(HP·크기는 새로 스폰되는 몹부터).
+중복 id·모르는 class/attack·숫자 오류·255행 초과는 그 행만 오류, 유효 행이 없거나 모든 `weight` 가 0 이면 내장 4종.
+
 ### 튜닝 레시피
 
 | 하고 싶은 것 | 어디를 |
@@ -183,8 +223,10 @@ GAUNTLET/BELT).
 | 후반 레벨업이 너무 빠르다 | `levels.csv` 뒷부분 또는 `xp_growth_after_table` |
 | 시간에 따라 몹이 늘어나게 | `spawn_curve.csv` 에 행 추가(램프) |
 | 화면이 몹으로 터진다 | `spawn_curve.csv` `max_alive` 낮추기 (또는 `spawns_per_sec`) |
-| 몹이 너무 단단하다/무르다 | `balance.csv` `mob_health` (무기 데미지는 `weapons.csv`) |
-| 킬 보상 자체를 키우기 | `balance.csv` `mob_xp` |
+| 몹이 너무 단단하다/무르다 | `mobs.csv` `health` (무기 데미지는 `weapons.csv`) |
+| 킬 보상 자체를 키우기 | `mobs.csv` `xp` |
+| 너무 빨리 죽는다 / 안 죽는다 | `mobs.csv` `contact_damage`·`weight`(원거리·마법 비율), `mob_attacks.csv` `damage`·`cooldown`, `player.csv` `hurt_invuln`, `stats.csv` `max_hp` — `balance_sim --mortal` 로 "가만히 있으면 몇 초" 확인 |
+| 어떤 몹이 얼마나 나오나 | `mobs.csv` `weight` (총량은 `spawn_curve.csv`) |
 | 달리기/대쉬 감각, 스태미너 | `player.csv` (최대치는 `stats.csv` `stamina_max`) |
 | 캐릭터 성격(주력 스텟 강조) | `characters.csv` `start_*`, 스텟 → 효과 계수는 `stats.csv` `from_*` |
 | 무기가 강해지는 정도(공속/피해/크기/투사체) | `stats.csv` 계수, 레벨업 스탯 카드 크기는 `Card.h` `kStatCards` |
@@ -214,7 +256,8 @@ GAUNTLET/BELT).
   없이 텍스트 diff 가 된다. 스칼라도 같은 형식(`key,value`)으로 통일.
 - **왜 씬 진입마다 + F5**: 핫리로드 감시 스레드 없이 "저장 → 키 하나"로 끝나 단순하다. 셰이더의 파일 감시
   핫리로드(`docs/shader-pipeline.md`)와 달리 게임 상태(`m_balance`)를 건드리므로 메인 스레드가 명시적으로 호출.
-- **왜 `core::CsvFile` 가 범용**: 같은 형식을 무기 표(`weapons.csv` ✅)·몹 타입 표 등으로 넓힐 때 재사용. `game/` 은 이 위에
+- **왜 `core::CsvFile` 가 범용**: 같은 형식을 무기 표(`weapons.csv` ✅)·몹 표(`mobs.csv` ✅) 등으로 넓힐 때 재사용.
+  `mob_attacks.csv` 는 한 단계 더 — 무기 표 **로더 함수 자체**(`LoadAttackTable`)를 같이 쓴다(열 뜻이 같으므로). `game/` 은 이 위에
   얇은 로더만 얹는다(`CircularBalance.cpp`).
 - **결정성**: 시뮬레이터는 고정 시드(`kProgression.rngSeed`) + 고정 스텝이라 같은 CSV 면 항상 같은 표가 나온다.
 - 무기 수치는 `weapons.csv` ✅(아래) — `game/Card.h` 의 `kCardDefs` 는 이제 폴백일 뿐.
@@ -225,11 +268,10 @@ GAUNTLET/BELT).
 
 기준 문서 [# Circular 기초 설계.md](<# Circular 기초 설계.md>) 와 [circular-design.md](circular-design.md) 를 위반하지 않는 범위에서,
 **테이블로 설정한다**는 기초 설계 원칙(스폰 패턴의 숫자·속도·모양은 테이블)을 CSV 로 이어 간다. 아래는 **예정(❌)** 이고,
-현재 구현된 것은 위 여덟 파일(`balance`/`levels`/`spawn_curve` + M1 의 `player`/`stats`/`characters` + M5 의 `weapons`/`accessories`, §"weapons.csv — 무기 (M5)"/"accessories.csv — 장신구 (M5)")뿐이다. 태그는 [circular-design.md](circular-design.md) §0 와 같다.
+현재 구현된 것은 위 열 파일(`balance`/`levels`/`spawn_curve` + M1 의 `player`/`stats`/`characters` + M5 의 `weapons`/`accessories` + M3 의 `mob_attacks`/`mobs`)뿐이다. 태그는 [circular-design.md](circular-design.md) §0 와 같다.
 
 | 파일 (예정) | 한 행 = | 열(제안) [살] | 기초 설계 근거 | 단계 |
 |---|---|---|---|---|
-| `mobs.csv` | 몹 1종 | `id, name, class, biome, health, speed, radius, contact_damage, xp, range, projectile, telegraph_sec, zone_radius` | B-적(근접·탱커·원거리·마법) | M3 |
 | `spawn_patterns.csv` | 스폰 패턴 1개 | `pattern_id, kind(oneway\|enclose\|lines_alt), mob, count, speed, shape(arrow\|rect\|line), width, spacing, direction, interval, telegraph_sec` | B-스폰(숫자·속도·모양은 테이블) | M4 |
 | `stage_timeline.csv` | 시간표 1칸 | `timeline_id, time_sec, pattern_id` | B-스폰 + B-스테이지 | M4 |
 | `stages.csv` | 스테이지 1개(20행) | `stage_no, biome, flow, survive_sec(=90), mob_pool, timeline_id, boss_pool` — **`arena` 열 없음: 무한 필드 [확정]** | B-스테이지, B-적(보스) + **[확정]** 90초 버티기 | M6 |
@@ -249,6 +291,6 @@ GAUNTLET/BELT).
 
 ### 지금 코드와의 대응
 
-- 현재 `balance.csv` 의 `mob_*` 한 세트 = **근접 몹 1종**. `mobs.csv`(M3)가 생기면 이 키들은 `mobs.csv` 의 첫 근접 행으로 이관하고 `balance.csv` 에는 스폰 거리 등 전역 값만 남긴다.
+- 몹은 `mobs.csv` ✅(M3) — `balance.csv` 에는 스폰 거리 등 전역 값만 남았다. 바이옴이 생기면(M6) `stages.csv` 의 `mob_pool` 이 `mobs.csv` id 목록으로 스폰 후보를 좁히고, 그 안에서 `weight` 로 고른다.
 - 현재 `kChargePattern`(붉은 구역 예고→돌진)은 **기초 설계 밖 임시 테스트**([circular-design.md](circular-design.md) §6.5) — CSV 로 빼지 않고 정식 스폰 패턴이 대체한다.
 - "카드"는 기초 설계의 **"소지 무기"**다 — 코드 이름 `Card*` 는 그대로이며, 실제 수치는 `weapons.csv` ✅(`kCardDefs` 는 폴백).

@@ -5,8 +5,10 @@
 #include "game/HitShape.h"
 #include "math/Math2D.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 // Structure-of-arrays mob swarm for the 2D "Circular" scene (docs/circular-
@@ -54,22 +56,56 @@ namespace engine::game
         math::Vec2 pos{};
     };
 
+    // Per mob kind (indexed by the mob's type byte), handed in by the caller so
+    // MobField stays ignorant of CSV/balance types. Behaviour is these numbers,
+    // not a per-class code path (docs/circular-design.md §5.3).
+    struct MobMotion
+    {
+        float speed{ 0.0f };          // px/s
+        float keepDistance{ 0.0f };   // 0 = chase; > 0 = stop once this close to the target
+    };
+    struct MobAttackTiming
+    {
+        float cooldown{ 0.0f };       // s between casts; 0 = this kind never casts
+        float range{ 0.0f };          // casts only while the target is within this
+    };
+    // One cast CollectCasts found due this step.
+    struct MobCast
+    {
+        math::Vec2 pos{};
+        std::uint8_t type{ 0 };
+    };
+
     class MobField final : private core::NonCopyable
     {
     public:
         explicit MobField(std::size_t capacity);
 
-        // Recycles a free slot at `pos`. Returns false (silent drop, same
-        // "not fatal" convention as core::ObjectPool::Acquire on a full pool)
-        // when the field is already at capacity.
-        bool Spawn(math::Vec2 pos, float health, float radius);
+        // Recycles a free slot at `pos` as a mob of kind `type` (an index the
+        // caller's per-kind tables use). `attackDelay` = seconds before its
+        // first cast. Returns false (silent drop, same "not fatal" convention
+        // as core::ObjectPool::Acquire on a full pool) when the field is full.
+        bool Spawn(math::Vec2 pos, float health, float radius, std::uint8_t type = 0, float attackDelay = 0.0f);
 
-        // Steers every live mob toward `target` at `speed` and integrates
-        // position, JobSystem::ParallelFor over contiguous ranges of the
-        // dense active-index list (rule 6 - each job's range names a disjoint
-        // set of slot indices, so no two workers ever write the same posX/
-        // posY/velX/velY entry). Blocks until the fence completes.
-        void Step(core::JobSystem& jobs, math::Vec2 target, float speed, float fixedDelta);
+        // Steers every live mob toward `target` at its kind's speed - or holds
+        // it once within its kind's keepDistance - and integrates position,
+        // JobSystem::ParallelFor over contiguous ranges of the dense active-
+        // index list (rule 6 - each job's range names a disjoint set of slot
+        // indices, so no two workers ever write the same posX/posY/velX/velY
+        // entry). A type past the end of `motion` uses entry 0 (an F5 reload
+        // shrank the table). Blocks until the fence completes.
+        void Step(core::JobSystem& jobs, math::Vec2 target, std::span<const MobMotion> motion, float fixedDelta);
+
+        // Counts down every live mob's attack timer; each one that ran out while
+        // `target` is inside its kind's range is appended to `out` (after
+        // clearing it) and re-armed with the cooldown. A due mob out of range
+        // waits, ready to cast the moment the target comes close. Kinds with
+        // cooldown 0 never cast. Main thread only.
+        void CollectCasts(float fixedDelta, math::Vec2 target, std::span<const MobAttackTiming> timing, std::vector<MobCast>& out);
+
+        // Read-only: the largest `contactDamage[type]` among live mobs whose
+        // disc touches `box` (the player's hitbox), 0 when none does. Main thread only.
+        [[nodiscard]] float StrongestTouching(const math::Rect& box, std::span<const float> contactDamage) const;
 
         // Applies `amount` damage to every live mob overlapping `shape` - a
         // mob counts when any part of its disc (own radius) is inside
@@ -134,7 +170,13 @@ namespace engine::game
         [[nodiscard]] const std::vector<float>& Radius() const { return m_radius; }
         [[nodiscard]] const std::vector<float>& Health() const { return m_health; }
         [[nodiscard]] MobState State(std::uint32_t index) const { return static_cast<MobState>(m_state[index]); }
+        [[nodiscard]] std::uint8_t Type(std::uint32_t index) const { return m_type[index]; }
         [[nodiscard]] const std::vector<std::uint32_t>& ActiveIndices() const { return m_active; }
+
+        // Deaths per mob kind since the last ClearKillTally (every Damage* kill
+        // lands here) - the caller turns them into XP by kind, then clears.
+        [[nodiscard]] const std::vector<std::uint32_t>& KillTally() const { return m_killTally; }
+        void ClearKillTally() { std::fill(m_killTally.begin(), m_killTally.end(), 0u); }
 
     private:
         // O(1) swap-remove out of the active list, same idiom as
@@ -148,6 +190,9 @@ namespace engine::game
         std::vector<float>         m_radius;
         std::vector<std::uint8_t>  m_state;       // MobState per slot
         std::vector<float>         m_stateTimer;  // seconds left in Charge
+        std::vector<std::uint8_t>  m_type;        // mob kind per slot (index into the caller's tables)
+        std::vector<float>         m_attackTimer; // seconds until this mob may cast again
+        std::vector<std::uint32_t> m_killTally;   // deaths per kind since ClearKillTally (grown on demand)
         std::vector<std::uint8_t>  m_slotActive;  // per slot 0/1
         std::vector<std::uint32_t> m_generation;  // per slot, bumped on death (MobRef staleness)
         std::vector<std::uint32_t> m_activePos;   // slot index -> its position in m_active (valid while active)

@@ -132,8 +132,8 @@ assets/
 | 색공간 | **sRGB** 로 작업(패커가 `R8G8B8A8_UNORM_SRGB` 로 굽는다). 리니어로 작업하지 말 것 |
 | 투명 픽셀의 RGB | **가장자리 색으로 번지게(dilate)** 저장 — 검정 투명(0,0,0,0)이 경계에 섞이면 테두리가 어두워진다 (패커의 gutter 는 이 색을 그대로 연장) |
 | 클립 안 프레임 | **캔버스 크기가 전부 같아야 함**(같은 클립 `_00`~`_NN`). 캐릭터가 캔버스 안에서 움직이는 양은 그림 안에서 처리 |
-| 캔버스 크기 | **플레이어 64×128 [확정], 히트박스 48×72 는 가로 가운데, 아래 변이 캔버스 바닥에서 8px 위**(`player.csv` `sprite_*`/`hitbox_*`/`hitbox_lift`), [살] 일반 몹 32×32(반경 10 기준 — 탱커 48×48), 보스 128~192, 이펙트 32~128, 타일 64×64, 무기/장신구 아이콘 48×48, 초상화 ≈176×168(HUD 좌상 1 실측) |
-| 원점(pivot) | 캐릭터·몹·보스는 **캔버스 하단 중앙(발밑)** — 그림은 **히트박스(콜라이더) 위에 서 있다**: 가로 가운데 정렬, 캔버스 아래 변 = 히트박스 아래 변(몹, 반경 `mob_radius` 원) — 플레이어만 히트박스가 바닥에서 `hitbox_lift`(8px) 위. 이펙트·투사체·아이콘은 **중앙**. 패커는 pivot 을 안 쓰므로(기본 0.5,0.5) **`anim_clips.csv` 의 `pivot_x/pivot_y` 로 지정**(§6.1) |
+| 캔버스 크기 | **플레이어 64×128 [확정], 히트박스 48×72 는 가로 가운데, 아래 변이 캔버스 바닥에서 8px 위**(`player.csv` `sprite_*`/`hitbox_*`/`hitbox_lift`), [살] 일반 몹 32×32(반경 10~11 — 탱커 반경 18 은 48×48), **보스 이동 128×128 · 공격 192×192**(몸 반경 40, 두 캔버스 모두 발밑 원점이 같은 자리 — `bosses.csv` 가 생기면(M6) 거기서 읽음), 이펙트 32~140, 타일 64×64, 무기/장신구 아이콘 48×48, 초상화 ≈176×168(HUD 좌상 1 실측) |
+| 원점(pivot) | 캐릭터·몹·보스는 **캔버스 하단 중앙(발밑)** — 그림은 **히트박스(콜라이더) 위에 서 있다**: 가로 가운데 정렬, 캔버스 아래 변 = 히트박스 아래 변(몹, `mobs.csv` `radius` 원) — 플레이어만 히트박스가 바닥에서 `hitbox_lift`(8px) 위. 이펙트·투사체·아이콘은 **중앙**. 패커는 pivot 을 안 쓰므로(기본 0.5,0.5) **`anim_clips.csv` 의 `pivot_x/pivot_y` 로 지정**(§6.1) |
 | 방향 | 원본은 top-down 행 순서 그대로(뒤집지 말 것) |
 | 큰 배경 | 페이지(최대 4096)보다 큰 그림은 아틀라스에 못 넣는다(패커 에러). 큰 배경은 타일로 쪼개거나 단독 텍스처 경로가 필요([미정], 지금 없음) |
 
@@ -153,7 +153,9 @@ assets/
 | 파일 | 크기 | 내용 |
 |---|---|---|
 | `char/char_template.png` | 64×128 | 플레이어. 히트박스 48×72, 가로 가운데, 아래 변이 바닥에서 8px 위 |
-| `mob/mob_template.png` | 32×32 | 일반 몹. 충돌 원(반경 10)이 캔버스 맨 아래 가운데 |
+| `mob/mob_<id>_template.png` | 32×32~ | `mobs.csv` 한 행당 하나 — 충돌 원(그 행 `radius`)이 캔버스 맨 아래 가운데, 큰 몹은 캔버스가 8px 단위로 커짐. 지금: GRUNT·ARCHER·WITCH 32×32, BRUTE 48×48. **바이옴 몹(§6.6)은 분류가 같은 이 템플릿을 쓴다**(근접·원거리·마법 = 32×32, 탱커 = 48×48) |
+| `boss/boss_walk_template.png` | 128×128 | 보스 이동. 몸(충돌 원 반경 40)이 캔버스 맨 아래 가운데 |
+| `boss/boss_atk_template.png` | 192×192 | 보스 공격. **같은 몸, 같은 발밑 원점** — 캔버스만 커서 휘두르기·마법이 들어갈 자리가 있다. 이동 프레임과 겹쳐 보면 몸이 정확히 겹친다 |
 | `weapon/prj_<id>_template.png` | 무기마다 | `weapons.csv` 한 행당 하나 — 원 장판(PULSE 240×240), 부채꼴(SWORD 260×260, 중심 = 플레이어), 캡슐(WHIP 226×56, 왼쪽 끝 = 플레이어), 투사체(DAGGER·STAFF·TRUMP 12×12, BLADE·VORTEX 20×20), 전진 가시(SPIKE 48×48), BOLT 날아가는 점 14×14 |
 | `fx/fx_staff_explode_template.png` | 140×140 | 스태프 폭발(`explode_radius` 70) |
 | `weapon/wpn_icon_template.png` | 48×48 | 무기·장신구 아이콘(안쪽 4px 여백) |
@@ -163,7 +165,12 @@ assets/
   [circular-combat.md](circular-combat.md) §2.3). 그래서 템플릿 크기로 그리면 된다. 일부러 판정보다 크게/작게 보이려면 `weapons.csv` `visual_scale`.
 - **회전**: 지금 스프라이트 경로(`SpriteDraw`)는 회전이 없다 — 방향이 있는 공격(부채꼴·캡슐·궤도 칼날)은 오른쪽 방향으로 그려 두고,
   회전은 월드 스프라이트 연결 때(M7, circular-combat W8) 넣는다. 그 전까지는 방향이 없는(원형) 그림이 가장 안전하다.
-- 수치(`player.csv` 크기, `mob_radius`, `weapons.csv` 범위)가 바뀌면 템플릿도 다시 만든다(명령: "템플릿 다시 만들어").
+- 수치(`player.csv` 크기, `mobs.csv` `radius`, `weapons.csv` 범위)가 바뀌면 템플릿도 다시 만든다(명령: "템플릿 다시 만들어"):
+  **`tools\gen_templates.bat`**(Windows) / `tools/gen_templates.sh`(Linux) — `tools/gen_templates.cpp` 를 빌드해 실행한다. 게임과 **같은 CSV 로더**
+  (`LoadCircularBalance`)로 크기를 읽으므로 템플릿 = 게임 크기가 보장된다. CSV 에 오류가 있으면 만들지 않고 멈춘다.
+  기존 `*_template.png` 를 전부 지우고 다시 만든다(없어진 행의 템플릿이 남지 않게). 보스 몸 크기만 아직 코드 상수(`kBossRadius` 등 — M6 `bosses.csv` 전까지).
+- **확대해서 그리고 싶으면**(세밀한 그림): 템플릿을 정수배(×2, ×4)로 키워 그려도 되지만, **엔진이 그 배율을 알아야 한다** — 월드 스프라이트 배율은
+  M7 에서 정하는 [미정](§9 질문 2). 배율을 정하면 알려 줄 것(템플릿도 그 배율로 뽑을 수 있다).
 
 ---
 
@@ -243,9 +250,9 @@ fx_hit,20,once,,0.5,0.5,
 
 | 엔티티 | 엔진 상태 | 클립 상태 | 없을 때 폴백 |
 |---|---|---|---|
-| 플레이어 | `PlayerMotion::Idle/Walk/Run/Dash` ([circular-design.md](circular-design.md) §2.2) | `idle` / `walk` / `run` / `dash` | `run`→`walk`→`idle`, `dash`→`run` |
+| 플레이어 | `PlayerMotion::Idle/Walk/Run/Dash` ([circular-design.md](circular-design.md) §2.2) | `idle` / `walk` / `run` / `dash` | `run`→`walk`, `dash`→`run`→`walk`, `idle` 없으면 **`walk` 0번 프레임에서 정지** — 즉 **`walk` 하나만 있어도 전부 돈다**(지금 요청 범위, §6.6) |
 | 플레이어 | 피격 / 사망 / 궁극기 | `hit` / `die` / `ult` | `hit` 없으면 색 번쩍임 |
-| 몹 | `MobState::Seek` | `walk` | `idle` |
+| 몹 | `MobState::Seek` (멈춰 있는 원거리·마법 포함) | `walk` | `idle` |
 | 몹 | `MobState::Windup`(예고 정지) | `telegraph`(없으면 `idle`) — `fit_sec` = 예고 시간 | `idle` |
 | 몹 | `MobState::Charge`/`March`(직진) | `run` | `walk` |
 | 몹 | 원거리/마법의 발사·시전 | `atk` / `cast` | `idle` |
@@ -254,17 +261,19 @@ fx_hit,20,once,,0.5,0.5,
 
 - 클립 이름은 **`<분류>_<id>_<상태>`** 로 조립해서 찾는다 → 새 캐릭터/몹은 **이름만 규칙대로 지으면 코드 변경 없이** 연결된다(OCP).
 
-### 6.3 프레임 수 · 속도 가이드 [살]
+### 6.3 프레임 수 · 속도 가이드 [살] (+ 2026-09-24 사용자 지정 [확정])
+
+**사용자 지정 [확정 2026-09-24]**: 캐릭터 이동 **8프레임** · 일반 몹 이동 **4프레임** · 보스 이동 **4프레임** / 공격 **8프레임**. 아래 표는 그 밖의 기본값.
 
 | 상태 | 프레임 | fps | mode |
 |---|---|---|---|
 | idle | 4 | 6 | loop (부드럽게 하려면 pingpong) |
-| walk | 6 | 10 | loop |
+| walk | **캐릭터 8 · 몹 4 · 보스 4** [확정] | 캐릭터 12 · 몹 8 · 보스 6 | loop |
 | run | 6~8 | 12~14 | loop |
 | dash | 3~4 | `fit_sec`=대쉬 시간 | once |
 | hit | 2~3 | 20 | once |
 | die | 6 | 12 | once (마지막 프레임 유지 후 제거) |
-| atk / cast | 6~8 | 12~14 / 10 | once |
+| atk / cast | 6~8 (**보스 atk 8** [확정]) | 12~14 / 10 | once |
 | telegraph | 3~4 | `fit_sec`=예고 시간 | once (또는 loop) |
 | 이펙트(fx) | 4~8 | 16~24 | once |
 
@@ -286,19 +295,49 @@ fx_hit,20,once,,0.5,0.5,
 4. 그룹에 들어 있고 패킹했는가 (§5).
 5. 폴백(§6.2)이 없어도 게임이 안 깨지는지(누락 → 색 자리표시자) 확인.
 
-### 6.6 필요한 클립 목록 (기초 설계 기준)
+### 6.6 필요한 이미지 목록 — 2026-09-24 요청 기준
 
-| 대상 | 필수 | 선택 |
-|---|---|---|
-| 플레이어블 4종 | `idle walk run dash` + `portrait` | `hit die ult` |
-| 근접 몹 | `walk` | `hit die` |
-| 탱커 몹 | `walk` | `hit die` (느리고 묵직한 프레임) |
-| 원거리 몹 | `walk atk` (+ 투사체 `prj_*`) | `hit die` |
-| 마법 몹 | `walk cast` (+ 예고 `fx_telegraph_*`) | `hit die` |
-| 보스 (**바이옴당 2~3체 [확정]** — 체마다 별도 그룹 `boss/<id>`) | `idle walk atk` | `cast hit die` |
-| HUD | §3.4 표 | |
+**요청 [확정]**: 캐릭터별 이동 8프레임 · 스테이지별 일반 몹 6종 이동 4프레임 · 보스 2종(이동 4프레임, 공격 8프레임) + 캐릭터 공격.
+**해석(확인 필요)**: "스테이지별" = 스테이지 묶음 = **바이옴 4개**(마계숲 1~5 · 초원 6~10 · 인간마을 11~15 · 왕국 성 16~20) → 일반 몹 **4 × 6 = 24종**, 보스 **4 × 2 = 8체**. 스테이지 20개 각각이라면 몹·보스 수만 5배가 되고 템플릿·이름 규칙은 그대로다.
+**"캐릭터 공격" = 무기 이미지**: 서큘러는 직접 공격이 없고([기초]) 소지 무기가 자동으로 나가므로, 캐릭터가 휘두르는 모션이 아니라 무기의 휘두르기·투사체·폭발 그림이다.
 
----
+**① 캐릭터 · 몹 · 보스**
+
+| 대상 | 수 | 클립 × 프레임 | 파일 이름 (stem, `.png`) | 캔버스 | 템플릿 (`assets/templates/`) | 그룹 |
+|---|---|---|---|---|---|---|
+| 캐릭터 이동 | 4 | `walk` × **8** | `char_<id>_walk_00` ~ `_07` | 64×128 | `char/char_template.png` | `char/<id>` |
+| 일반 몹 이동 | 24 | `walk` × **4** | `mob_<biome>_<이름>_walk_00` ~ `_03` | 32×32 · **탱커 48×48** | 근접·원거리·마법 `mob/mob_grunt_template.png` · 탱커 `mob/mob_brute_template.png` | `mob/<biome>` |
+| 보스 이동 | 8 | `walk` × **4** | `boss_<id>_walk_00` ~ `_03` | 128×128 | `boss/boss_walk_template.png` | `boss/<id>` |
+| 보스 공격 | 8 | `atk` × **8** | `boss_<id>_atk_00` ~ `_07` | 192×192 | `boss/boss_atk_template.png` | `boss/<id>` |
+
+- 캐릭터 `<id>`: `magic_knight` `skull_magician` `succubus` `assassin_lizard`(`characters.csv`).
+- 몹 `<이름>` 은 [미정] — 정해지기 전엔 **임시 `a`~`f`**(`mob_forest_a_walk_00` … `mob_castle_f_walk_03`). 이름이 정해지면 파일 이름과 `mobs.csv` 행을 같이 바꾼다.
+- 바이옴별 분류([기초] — [circular-design.md](circular-design.md) §5.2): 마계숲 = 근접만(6종 전부 32×32) · 초원 = 근접·탱커 · 인간마을·왕국 성 = 근접·원거리·탱커·마법. **탱커만 48×48.**
+- 보스 `<id>`: `forest_boss_a/_b` `meadow_boss_a/_b` `village_boss_a/_b`, 왕국 성은 **`kingknight`(왕의 기사 [기초])** + `castle_boss_b`.
+- 보스 이동·공격 캔버스는 크기가 달라도 **몸(발밑 원점)이 같은 자리**다 — 두 템플릿을 겹쳐 보면 몸이 정확히 겹친다. 공격 모션이 몸 아래로 내려가는 건 캔버스 밖이라 안 된다.
+- 요청 밖(없어도 돈다 — §6.2 폴백): 캐릭터 `idle/run/dash`(→ `walk`), 원거리·마법 몹의 `atk/cast`(→ `walk`), `hit/die`.
+
+**② 캐릭터 공격 = 무기** — 프레임 수는 요청에 없어 [살] 기본값(§6.3 이펙트 4~8). 크기는 레벨 1·`attack_size` 1 의 **판정 크기**(그림 = 판정, 레벨이 오르면 엔진이 늘림).
+
+| 무기 | 파일 이름 | 프레임 | 캔버스 | 템플릿 | 비고 |
+|---|---|---|---|---|---|
+| 검 SWORD | `prj_sword_00`~`_05` | 6 · once | 260×260 | `weapon/prj_sword_template.png` | 중심 = 플레이어, 오른쪽 70° 부채꼴이 판정. 휘두르기 한 번 |
+| 채찍 WHIP | `prj_whip_00`~`_05` | 6 · once | 226×56 | `weapon/prj_whip_template.png` | 왼쪽 끝 = 플레이어, 오른쪽으로 뻗는 채찍 |
+| 스태프 STAFF | `prj_staff_00`~`_03` / `fx_staff_explode_00`~`_05` | 4 · loop / 6 · once | 12×12 / 140×140 | `weapon/prj_staff_template.png` / `fx/fx_staff_explode_template.png` | 날아가는 전기볼트 / 닿으면 폭발 |
+| 단검 DAGGER | `prj_dagger_00`~`_03` | 4 · loop | 12×12 | `weapon/prj_dagger_template.png` | 관통 투사체 |
+| 트럼프 TRUMP | `prj_trump_00`~`_03` | 4 · loop | 12×12 | `weapon/prj_trump_template.png` | 도는 카드 |
+| BLADE | `prj_blade_00`~`_03` | 4 · loop | 20×20 | `weapon/prj_blade_template.png` | 플레이어 주위를 도는 칼날 |
+| VORTEX | `prj_vortex_00`~`_03` | 4 · loop | 20×20 | `weapon/prj_vortex_template.png` | 소용돌이로 퍼지는 칼날 |
+| SPIKE | `prj_spike_00`~`_03` | 4 · once | 48×48 | `weapon/prj_spike_template.png` | 전진하며 한 칸씩 솟는 가시(한 번 솟을 때 재생) |
+| 무기 아이콘 | `wpn_<id>_icon` × 8 | 1 | 48×48 | `weapon/wpn_icon_template.png` | HUD 슬롯·레벨업 카드. 안쪽 4px 여백 |
+| 명중 이펙트 | `fx_hit_00`~`_03` | 4 · once | 32×32 | `fx/fx_hit_template.png` | 모든 무기 공용 |
+
+- 구형 PULSE·BOLT(`prj_pulse_*` 240×240 · `prj_bolt_*` 14×14)는 레벨업 풀에서 뺄지 결정 전이라 **선택**.
+- 12×12 투사체가 너무 작으면: 그림만 키우려면 `weapons.csv` 의 `visual_scale`(예 2 → 24×24 로 그림, 판정은 그대로). 판정까지 키우려면 `hit_radius`. 둘 다 바꾸면 "템플릿 다시 만들어".
+
+**③ 합계** — 캐릭터 32장 · 일반 몹 96장 · 보스 96장 · 무기 54장(프레임 42 + 아이콘 8 + 명중 4) = **278장**.
+
+**다음에 필요한 것(이번 요청 밖)**: 초상화 4(`char_<id>_portrait`, ≈176×168) · 장신구 아이콘 6(`acc_<name>_icon`, 48×48) · HUD 조각(§3.4) · 적 공격(ARCHER 화살·WITCH 예고 원 — 이름 규칙 미정) · 바닥 타일(`tile/<biome>`).
 
 ## 7. 픽셀 아트 / 해상도 주의 (알아둘 것)
 
@@ -334,6 +373,6 @@ fx_hit,20,once,,0.5,0.5,
 
 1. **아트 스타일**: 픽셀 아트인가, 고해상도 일러스트인가? (샘플러·캔버스 크기·배율이 여기서 결정 — §7)
 2. 캔버스 크기(§4 제안값)와 월드 스프라이트 화면 배율.
-3. 몹 이름(id) 목록과 바이옴별 개수 — 이름 규칙(`mob_<바이옴>_<이름>`)은 위로 확정해도 되는지.
+3. 몹 이름(id) 목록 — 개수는 **바이옴당 일반 몹 6종·보스 2종**(2026-09-24, §6.6 — "스테이지별"을 바이옴별로 해석, 확인 필요). 이름이 정해질 때까지 임시 `a`~`f`. 이름 규칙(`mob_<바이옴>_<이름>`)은 위로 확정해도 되는지.
 4. 큰 배경(스테이지 배경)의 처리 방식 — 타일로 쪼갤지, 단독 텍스처 경로를 둘지.
 5. `anim_clips.csv` 형식(열)과 `fit_sec`/`hit_frame` 필요 여부.

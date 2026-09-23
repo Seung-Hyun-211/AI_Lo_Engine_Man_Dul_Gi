@@ -113,6 +113,7 @@ namespace engine::game
                 const int steps = m_timestep.Advance(delta * m_globalTimeScale);
                 ServiceLevelUp();
                 ServiceCharacterSelect();
+                ServiceRunOver();
 
                 // The world only advances in-game, and not while Settings (or
                 // any future modal) sits on top of it - both read as "paused".
@@ -321,6 +322,8 @@ namespace engine::game
         m_window.SetPointerLocked(true);   // mouse-look / centre-locked cursor
         m_characterSelectOpen = false;
         m_pendingCharacter.reset();
+        m_runOverOpen = false;
+        m_pendingRunOver.reset();
         if (scene == DemoScene::Circular) OpenCharacterSelect();   // pick who to play; the run waits behind the modal
         // Demo hook (docs/audio-design.md §4/§5): exercises the streaming music
         // path end-to-end. blip.wav is a placeholder loop - swap for a real
@@ -360,8 +363,43 @@ namespace engine::game
         }
 
         // Also covers "Settings was open when the level-up armed": the modal
-        // waits until that overlay closes, then appears.
-        if (m_simulation.LevelUpPending() && !m_ui.HasOverlay()) OpenLevelUp();
+        // waits until that overlay closes, then appears. Death wins over a
+        // level-up armed in the same step (the run-over modal resets both).
+        if (m_simulation.LevelUpPending() && !m_simulation.RunOver() && !m_ui.HasOverlay()) OpenLevelUp();
+    }
+
+    void Application::ServiceRunOver()
+    {
+        if (m_state != GameState::InGame || m_simulation.ActiveScene() != DemoScene::Circular)
+        {
+            m_pendingRunOver.reset();
+            m_runOverOpen = false;
+            return;
+        }
+        if (m_pendingRunOver)
+        {
+            const std::size_t pick = *m_pendingRunOver;
+            m_pendingRunOver.reset();
+            m_runOverOpen = false;
+            m_ui.ClearOverlay();
+            if (pick == 1) { EnterLobby(); return; }
+            m_simulation.RestartCircularRun();   // same character, fresh run
+            m_window.SetPointerLocked(true);
+            LogBalanceReport();
+        }
+        if (m_simulation.RunOver() && !m_ui.HasOverlay()) OpenRunOver();
+    }
+
+    void Application::OpenRunOver()
+    {
+        const int seconds = static_cast<int>(m_simulation.RunTime());
+        char title[64];
+        std::snprintf(title, sizeof(title), "YOU DIED  %d:%02d  LV %d", seconds / 60, seconds % 60, m_simulation.PlayerLevel());
+        char retry[64];
+        std::snprintf(retry, sizeof(retry), "RETRY - %d KILLS", m_simulation.MobKillCount());
+        m_window.SetPointerLocked(false);
+        m_runOverOpen = true;
+        m_ui.SetOverlay(BuildLevelUpScreen({ retry, "LOBBY" }, [this](std::size_t index) { m_pendingRunOver = index; }, title));
     }
 
     void Application::ServiceCharacterSelect()
@@ -479,8 +517,8 @@ namespace engine::game
     {
         if (down && virtualKey == VK_ESCAPE)
         {
-            // Esc must not dismiss the level-up modal - a pick is mandatory.
-            if (m_levelUpOverlayOpen) return;
+            // Esc must not dismiss the level-up / run-over modals - a pick is mandatory.
+            if (m_levelUpOverlayOpen || m_runOverOpen) return;
             if (m_characterSelectOpen)
             {
                 // Keep the current character/run and go back to playing.
@@ -499,7 +537,7 @@ namespace engine::game
         // assets/data/circular/*.csv and keeps the run going, F6 re-reads and
         // restarts the run from zero. Not while the level-up modal is up.
         if (down && (virtualKey == VK_F5 || virtualKey == VK_F6) && m_state == GameState::InGame &&
-            m_simulation.ActiveScene() == DemoScene::Circular && !m_levelUpOverlayOpen && !m_characterSelectOpen)
+            m_simulation.ActiveScene() == DemoScene::Circular && !m_levelUpOverlayOpen && !m_characterSelectOpen && !m_runOverOpen)
         {
             if (virtualKey == VK_F5) m_simulation.ReloadBalance();
             else m_simulation.RestartCircularRun();

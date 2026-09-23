@@ -900,11 +900,11 @@ namespace engine::game
             for (const std::uint32_t idx : mobs.ActiveIndices())
                 DrawDottedRing(quads, view.ToScreen({ mobs.PosX()[idx], mobs.PosY()[idx] }), view.Size(mobs.Radius()[idx]), dot, color);
 
-            const std::vector<CardDef>& weapons = simulation.Balance().weapons;
             for (const AttackInstance& attack : simulation.Combat().Instances())
             {
-                if (attack.defIndex >= weapons.size()) continue;
-                const CardDef& def = weapons[attack.defIndex];
+                const std::vector<CardDef>& table = AttackTable(simulation.Balance(), attack.team);
+                if (attack.defIndex >= table.size()) continue;
+                const CardDef& def = table[attack.defIndex];
                 if (SpecOf(def.effect).form != AttackForm::Projectile) continue;
                 DrawDottedRing(quads, view.ToScreen(attack.pos), view.Size(def.hitRadius * attack.scale), dot, color);
             }
@@ -946,10 +946,11 @@ namespace engine::game
             }
 
             // Mob colours double as the colour-cycling animation test (no
-            // sprites yet, docs/circular-design.md §7/C4): Seek breathes
-            // between two reds on a per-mob phase, Windup blinks orange/white,
-            // Charge is solid orange. Phase = hash of the slot index, so no
-            // per-mob animation state is stored.
+            // sprites yet, docs/circular-design.md §7/C4): Seek breathes around
+            // its kind's mobs.csv `color` on a per-mob phase, Windup blinks
+            // orange/white, Charge is solid orange. Phase = hash of the slot
+            // index, so no per-mob animation state is stored.
+            const std::vector<MobDef>& mobKinds = simulation.Balance().mobs;
             const MobField& mobs = simulation.Mobs();
             const std::vector<float>& mobX = mobs.PosX();
             const std::vector<float>& mobY = mobs.PosY();
@@ -976,7 +977,10 @@ namespace engine::game
                 {
                     const float phase = static_cast<float>(((idx * 2654435761u) >> 16) & 0xffffu) * (6.2831853f / 65535.0f);
                     const float t = 0.5f + 0.5f * std::sin(time * 6.0f + phase);
-                    r = 0.55f + 0.40f * t; g = 0.18f + 0.17f * t; b = 0.24f + 0.18f * t;
+                    const std::uint8_t kind = mobs.Type(idx);
+                    const math::Color base = RgbColor(kind < mobKinds.size() ? mobKinds[kind].color : 0xD04050u, 1.0f);
+                    const float light = 0.70f + 0.30f * t;
+                    r = base.r * light; g = base.g * light; b = base.b * light;
                     break;
                 }
                 }
@@ -992,6 +996,8 @@ namespace engine::game
             const float playerPulse = 0.85f + 0.15f * std::sin(time * 5.0f);
             math::Color playerColor{ 0.20f * playerPulse, 0.75f * playerPulse, 1.0f * playerPulse, 1.0f };
             if (simulation.Motion() == PlayerMotion::Dash) playerColor = { 0.90f, 0.95f, 1.0f, 0.55f };
+            else if (simulation.PlayerHurt()) playerColor = std::sin(time * 40.0f) > 0.0f ? math::Color{ 1.0f, 0.25f, 0.2f, 1.0f }
+                                                                                          : math::Color{ 1.0f, 1.0f, 1.0f, 0.6f };   // hurt i-frames
             else if (simulation.Motion() == PlayerMotion::Run) playerColor = { 0.30f, 0.95f, 0.70f, 1.0f };
             {
                 const math::Vec2 topLeft = view.ToScreen({ spriteCenter.x - body.spriteWidth * 0.5f, spriteCenter.y - body.spriteHeight * 0.5f });
@@ -1003,17 +1009,29 @@ namespace engine::game
             // HitShape its hit used, drawn through the one drawer table, in its
             // weapon row's colour and visual_scale. Plain flat shapes, no glow
             // (docs/circular-design.md §7 "이펙트 없음"). Sprites replace these in M7.
-            const std::vector<CardDef>& weapons = simulation.Balance().weapons;
-            const auto weaponOf = [&](std::uint8_t defIndex) -> const CardDef* {
-                return defIndex < weapons.size() ? &weapons[defIndex] : nullptr;   // F5 can shrink the table mid-run
+            // Enemy attacks (mob_attacks.csv) go through the very same drawers.
+            const CircularBalance& balance = simulation.Balance();
+            const auto rowOf = [&](Team team, std::uint8_t defIndex) -> const CardDef* {
+                const std::vector<CardDef>& table = AttackTable(balance, team);
+                return defIndex < table.size() ? &table[defIndex] : nullptr;   // F5 can shrink a table mid-run
             };
             for (const AttackVisual& visual : simulation.Combat().Visuals())
             {
-                const CardDef* def = weaponOf(visual.defIndex);
+                const CardDef* def = rowOf(visual.team, visual.defIndex);
                 const std::uint32_t rgb = def ? def->color : 0xFFFFFFu;
                 const float scale = def ? def->visualScale : 1.0f;
                 switch (visual.style)
                 {
+                case VisualStyle::Telegraph:
+                {
+                    // The area a delayed attack will hit: fades in and blinks
+                    // faster as it lands (the dodge window reads at a glance).
+                    const float progress = visual.life > 0.0f ? math::Clamp(1.0f - visual.ageLeft / visual.life, 0.0f, 1.0f) : 1.0f;
+                    const float blink = std::sin(visual.ageLeft * (12.0f + 40.0f * progress)) > 0.0f ? 1.0f : 0.55f;
+                    kOutlineDrawers[static_cast<std::size_t>(visual.shape.kind)](
+                        snapshot.worldQuads, visual.shape, view, scale, RgbColor(rgb, (0.35f + 0.65f * progress) * blink));
+                    break;
+                }
                 case VisualStyle::Outline:
                 {
                     const float t = visual.life > 0.0f ? math::Clamp(visual.ageLeft / visual.life, 0.0f, 1.0f) : 0.0f;
@@ -1039,7 +1057,7 @@ namespace engine::game
             // ticks show up as Outline visuals above.
             for (const AttackInstance& shot : simulation.Combat().Instances())
             {
-                const CardDef* def = weaponOf(shot.defIndex);
+                const CardDef* def = rowOf(shot.team, shot.defIndex);
                 if (def == nullptr || SpecOf(def->effect).form != AttackForm::Projectile) continue;
                 PushWorldSquare(snapshot.worldQuads, view, shot.pos, 2.0f * def->hitRadius * shot.scale * def->visualScale,
                                 RgbColor(def->color, 1.0f));
@@ -1391,7 +1409,7 @@ namespace engine::game
             // glance so it never reads as the real run.
             if (simulation.IsCircularTestMode())
             {
-                const char* text = "TEST SCENE - 99999 HP DUMMY, NO SPAWN/CHARGE";
+                const char* text = "TEST SCENE - 99999 HP DUMMY, NO SPAWN/CHARGE, NO DAMAGE";
                 constexpr float scale = 1.75f;
                 const float glyph = 6.0f * scale;
                 const float width = static_cast<float>(std::strlen(text)) * glyph;

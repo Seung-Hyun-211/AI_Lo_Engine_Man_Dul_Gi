@@ -14,6 +14,8 @@ namespace engine::game
         m_radius.assign(capacity, 0.0f);
         m_state.assign(capacity, static_cast<std::uint8_t>(MobState::Seek));
         m_stateTimer.assign(capacity, 0.0f);
+        m_type.assign(capacity, 0u);
+        m_attackTimer.assign(capacity, 0.0f);
         m_slotActive.assign(capacity, 0u);
         m_generation.assign(capacity, 0u);
         m_activePos.assign(capacity, 0u);
@@ -24,7 +26,7 @@ namespace engine::game
             m_free.push_back(static_cast<std::uint32_t>(i));
     }
 
-    bool MobField::Spawn(math::Vec2 pos, float health, float radius)
+    bool MobField::Spawn(math::Vec2 pos, float health, float radius, std::uint8_t type, float attackDelay)
     {
         if (m_free.empty()) return false;
 
@@ -39,6 +41,8 @@ namespace engine::game
         m_radius[index] = radius;
         m_state[index] = static_cast<std::uint8_t>(MobState::Seek);
         m_stateTimer[index] = 0.0f;
+        m_type[index] = type;
+        m_attackTimer[index] = attackDelay;
 
         m_slotActive[index] = 1u;
         m_activePos[index] = static_cast<std::uint32_t>(m_active.size());
@@ -52,6 +56,9 @@ namespace engine::game
 
         m_slotActive[index] = 0u;
         ++m_generation[index];   // any MobRef to this mob is stale from now on
+        const std::uint8_t type = m_type[index];
+        if (type >= m_killTally.size()) m_killTally.resize(static_cast<std::size_t>(type) + 1, 0u);
+        ++m_killTally[type];
         const std::uint32_t pos = m_activePos[index];
         const std::uint32_t moved = m_active.back();
         m_active[pos] = moved;
@@ -61,9 +68,9 @@ namespace engine::game
         m_free.push_back(index);
     }
 
-    void MobField::Step(core::JobSystem& jobs, math::Vec2 target, float speed, float fixedDelta)
+    void MobField::Step(core::JobSystem& jobs, math::Vec2 target, std::span<const MobMotion> motion, float fixedDelta)
     {
-        if (m_active.empty()) return;
+        if (m_active.empty() || motion.empty()) return;
 
         float* posX = m_posX.data();
         float* posY = m_posY.data();
@@ -71,7 +78,10 @@ namespace engine::game
         float* velY = m_velY.data();
         std::uint8_t* state = m_state.data();
         float* stateTimer = m_stateTimer.data();
+        const std::uint8_t* type = m_type.data();
         const std::uint32_t* active = m_active.data();
+        const MobMotion* kinds = motion.data();
+        const std::size_t kindCount = motion.size();
 
         constexpr std::size_t kGrainSize = 256;
         jobs.ParallelFor(0, m_active.size(), kGrainSize,
@@ -95,19 +105,62 @@ namespace engine::game
                         continue;
                     }
 
+                    // Seek: chase, or hold once inside the kind's keepDistance
+                    // (ranged/caster mobs stop at their firing range).
+                    const MobMotion& kind = kinds[type[idx] < kindCount ? type[idx] : 0];
                     const float dx = target.x - posX[idx];
                     const float dy = target.y - posY[idx];
                     const float lenSq = dx * dx + dy * dy;
+                    if (kind.keepDistance > 0.0f && lenSq <= kind.keepDistance * kind.keepDistance)
+                    {
+                        velX[idx] = 0.0f;
+                        velY[idx] = 0.0f;
+                        continue;
+                    }
                     if (lenSq > 1e-6f)
                     {
                         const float invLen = 1.0f / std::sqrt(lenSq);
-                        velX[idx] = dx * invLen * speed;
-                        velY[idx] = dy * invLen * speed;
+                        velX[idx] = dx * invLen * kind.speed;
+                        velY[idx] = dy * invLen * kind.speed;
                     }
                     posX[idx] += velX[idx] * fixedDelta;
                     posY[idx] += velY[idx] * fixedDelta;
                 }
             }).Wait();
+    }
+
+    void MobField::CollectCasts(float fixedDelta, math::Vec2 target, std::span<const MobAttackTiming> timing,
+                                std::vector<MobCast>& out)
+    {
+        out.clear();
+        if (timing.empty()) return;
+        for (const std::uint32_t idx : m_active)
+        {
+            const MobAttackTiming& kind = timing[m_type[idx] < timing.size() ? m_type[idx] : 0];
+            if (kind.cooldown <= 0.0f) continue;
+            // A frozen/charging mob (the temporary charge pattern) doesn't cast.
+            if (m_state[idx] != static_cast<std::uint8_t>(MobState::Seek)) continue;
+            if (m_attackTimer[idx] > 0.0f) m_attackTimer[idx] -= fixedDelta;
+            if (m_attackTimer[idx] > 0.0f) continue;
+            const float dx = target.x - m_posX[idx];
+            const float dy = target.y - m_posY[idx];
+            if (dx * dx + dy * dy > kind.range * kind.range) continue;   // due, waiting for the target to come close
+            m_attackTimer[idx] = kind.cooldown;
+            out.push_back({ { m_posX[idx], m_posY[idx] }, m_type[idx] });
+        }
+    }
+
+    float MobField::StrongestTouching(const math::Rect& box, std::span<const float> contactDamage) const
+    {
+        float strongest = 0.0f;
+        if (contactDamage.empty()) return strongest;
+        for (const std::uint32_t idx : m_active)
+        {
+            const float damage = contactDamage[m_type[idx] < contactDamage.size() ? m_type[idx] : 0];
+            if (damage <= strongest) continue;
+            if (PointRectDistanceSq({ m_posX[idx], m_posY[idx] }, box) <= m_radius[idx] * m_radius[idx]) strongest = damage;
+        }
+        return strongest;
     }
 
     std::uint32_t MobField::DamageInShape(const HitShape& shape, float amount)
@@ -251,6 +304,7 @@ namespace engine::game
 
     void MobField::Clear()
     {
+        ClearKillTally();   // a reset is not a kill
         m_active.clear();
         m_free.clear();
         for (std::size_t i = m_posX.size(); i-- > 0; )

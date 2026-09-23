@@ -6,11 +6,13 @@
 //   <out>_timeline.csv  one row per --interval seconds (mobs alive, kills, level, XP ...)
 //   <out>_levels.csv    the second each level was reached (the XP curve, as felt)
 //
-// The stand-in player never moves and cannot die (the game has no player HP
-// yet), and every level-up takes the first card option offered (else the first
-// stat). Good for tuning pacing curves, not a substitute for playing.
+// The stand-in player never moves and, by default, takes no damage (god mode -
+// it measures pacing, and a bot standing in a swarm would just die). --mortal
+// turns damage on: the run stops at death and reports when. Every level-up takes
+// the first card option offered (else the first stat). Good for tuning pacing
+// curves, not a substitute for playing.
 //
-// Build/run: tools\run_balance_sim.bat [--seconds N] [--interval S] [--out PREFIX]
+// Build/run: tools\run_balance_sim.bat [--seconds N] [--interval S] [--out PREFIX] [--mortal]
 // It reads assets/data/circular/*.csv from wherever it finds an `assets` folder
 // (run it from the repo root).
 
@@ -50,15 +52,17 @@ int main(int argc, char** argv)
     float seconds = 600.0f;
     float interval = 10.0f;
     std::string outPrefix = "build/tools/balance";
+    bool mortal = false;
     for (int i = 1; i < argc; ++i)
     {
         const bool hasValue = i + 1 < argc;
         if (!std::strcmp(argv[i], "--seconds") && hasValue) seconds = static_cast<float>(std::atof(argv[++i]));
         else if (!std::strcmp(argv[i], "--interval") && hasValue) interval = static_cast<float>(std::atof(argv[++i]));
         else if (!std::strcmp(argv[i], "--out") && hasValue) outPrefix = argv[++i];
+        else if (!std::strcmp(argv[i], "--mortal")) mortal = true;
         else
         {
-            std::fprintf(stderr, "usage: balance_sim [--seconds N] [--interval S] [--out PREFIX]\n");
+            std::fprintf(stderr, "usage: balance_sim [--seconds N] [--interval S] [--out PREFIX] [--mortal]\n");
             return 2;
         }
     }
@@ -70,6 +74,7 @@ int main(int argc, char** argv)
 
     core::JobSystem jobs(core::RecommendedWorkerCount());
     Simulation sim(jobs, 1280, 720);
+    sim.SetGodMode(!mortal);
     sim.EnterScene(DemoScene::Circular);   // loads the CSVs
 
     const BalanceLoadReport& report = sim.BalanceReport();
@@ -103,6 +108,11 @@ int main(int argc, char** argv)
 
     while (sim.RunTime() < seconds)
     {
+        if (sim.RunOver())
+        {
+            std::printf("\nplayer died at %.1fs (--mortal)\n", sim.RunTime());
+            break;
+        }
         if (sim.LevelUpPending())
         {
             // Bot policy: first card option (new or upgrade), else whatever is first.

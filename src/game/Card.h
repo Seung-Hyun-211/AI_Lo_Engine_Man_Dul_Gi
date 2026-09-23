@@ -93,6 +93,10 @@ namespace engine::game
     // Polar path centre: the caster's spot at fire time, or the player every step.
     enum class PathAnchor : std::uint8_t { Cast, Player };
 
+    // Where an Area attack without a path lands: around the caster (a swing,
+    // a pulse) or on its target (a mortar, a caster mob's hex on the player).
+    enum class AttackOrigin : std::uint8_t { Self, Target };
+
     struct CardDef
     {
         std::string id;                  // lower-case identity: weapons.csv / characters.csv key, image names wpn_<id>_icon / prj_<id>_NN
@@ -136,6 +140,10 @@ namespace engine::game
         float       angularSpeedDeg{ 0.0f };   // Polar, deg/s
         float       tickInterval{ 0.0f };      // moving Area: s between hits along the path
         float       rehitInterval{ 0.0f };     // Projectile: s before the same mob can be hit again (0 = never)
+
+        // --- placement (Area without a path) ---
+        AttackOrigin origin{ AttackOrigin::Self };   // around the caster, or on the target
+        float       delay{ 0.0f };             // s between cast and hit; a telegraph outline shows the area meanwhile (0 = instant)
     };
 
     // A Projectile always moves; everything else only moves when told to.

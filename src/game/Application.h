@@ -100,6 +100,11 @@ namespace engine::game
         // the current run/character.
         void ServiceCharacterSelect();
         void OpenCharacterSelect();
+        // Run-over modal (docs/circular-design.md §12.3 G): when the player's HP
+        // hits 0 the simulation freezes; this offers RETRY (same character, fresh
+        // run) or LOBBY. Same deferred-pick pattern; Esc does not close it.
+        void ServiceRunOver();
+        void OpenRunOver();
         // Writes the last CSV balance load (docs/circular-balance.md) to the
         // debugger Output window: one line per problem, plus a summary.
         void LogBalanceReport() const;
@@ -147,5 +152,7 @@ namespace engine::game
         bool m_levelUpOverlayOpen{ false };                // the current overlay IS the level-up modal (Esc must not close it)
         std::optional<std::size_t> m_pendingCharacter;     // set by the character-select modal's button, consumed by ServiceCharacterSelect
         bool m_characterSelectOpen{ false };               // the current overlay IS the character-select modal
+        std::optional<std::size_t> m_pendingRunOver;       // run-over modal: 0 = retry, 1 = lobby (ServiceRunOver)
+        bool m_runOverOpen{ false };                       // the current overlay IS the run-over modal
     };
 }

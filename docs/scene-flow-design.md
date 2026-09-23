@@ -107,6 +107,12 @@ if (m_state == GameState::InGame && !m_ui.HasOverlay())
 (호출 중인 위젯을 자기 콜백에서 파괴하지 않으려고 — 새 모달을 만들 때 같은 패턴을 쓸 것). 설정 오버레이가 열린
 채 레벨업이 걸리면 설정을 닫은 뒤에 모달이 뜬다.
 
+**예외 — 서큘러 런 종료 모달(M3, [circular-design.md](circular-design.md) §2.6·§12.3 G)**: 플레이어 HP 가 0 이 되면
+`Simulation::RunOver()` 가 참이 되고 서큘러 월드가 정지한다(레벨업 대기와 같은 조기 반환). `Application::ServiceRunOver`
+가 오버레이로 **"YOU DIED 분:초 LV n"** + **RETRY(n KILLS)**·**LOBBY** 를 띄운다 — 레벨업 모달과 같은 모양(`BuildLevelUpScreen`),
+같은 "기록만 하고 다음 프레임에 적용" 패턴(`m_pendingRunOver`), **ESC 로 안 닫히고** F5/F6 도 막힌다. RETRY = 같은
+캐릭터로 `RestartCircularRun`, LOBBY = `EnterLobby`. 같은 스텝에 레벨업과 사망이 겹치면 사망 모달이 이긴다(재시작이 둘 다 지움).
+
 **서큘러 밸런싱 핫키**(InGame + Circular 한정, 모달이 없을 때): **F5** = `assets/data/circular/*.csv` 다시 읽기(런
 유지), **F6** = 다시 읽고 런 재시작 — [circular-balance.md](circular-balance.md).
 

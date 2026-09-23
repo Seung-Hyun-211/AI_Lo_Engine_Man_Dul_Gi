@@ -106,4 +106,101 @@ namespace engine::game
     {
         return hit_shape_detail::kShapeTests[static_cast<std::size_t>(shape.kind)](shape, p, pad);
     }
+
+    // Squared distance from `p` to the nearest point of `box` (0 when inside).
+    [[nodiscard]] inline float PointRectDistanceSq(math::Vec2 p, const math::Rect& box)
+    {
+        const float dx = p.x < box.x ? box.x - p.x : (p.x > box.x + box.width ? p.x - (box.x + box.width) : 0.0f);
+        const float dy = p.y < box.y ? box.y - p.y : (p.y > box.y + box.height ? p.y - (box.y + box.height) : 0.0f);
+        return dx * dx + dy * dy;
+    }
+
+    // Shape-vs-box tests: the player's body is its hitbox rect (player.csv
+    // hitbox_*), so enemy attacks test the very collider the player moves with
+    // (docs/circular-combat.md §2.1, W7) - same HitShape value as mob hits.
+    namespace hit_shape_detail
+    {
+        inline math::Vec2 ClosestOnRect(math::Vec2 p, const math::Rect& box)
+        {
+            return { p.x < box.x ? box.x : (p.x > box.x + box.width ? box.x + box.width : p.x),
+                     p.y < box.y ? box.y : (p.y > box.y + box.height ? box.y + box.height : p.y) };
+        }
+
+        inline float PointSegmentDistanceSq(math::Vec2 p, math::Vec2 a, math::Vec2 b)
+        {
+            const math::Vec2 seg = b - a;
+            const float lenSq = math::Dot(seg, seg);
+            float t = lenSq > 1e-6f ? math::Dot(p - a, seg) / lenSq : 0.0f;
+            t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+            const math::Vec2 d = p - (a + seg * t);
+            return math::Dot(d, d);
+        }
+
+        // Slab test: does segment a->b cross the box?
+        inline bool SegmentHitsRect(math::Vec2 a, math::Vec2 b, const math::Rect& box)
+        {
+            float t0 = 0.0f, t1 = 1.0f;
+            const float d[2] = { b.x - a.x, b.y - a.y };
+            const float o[2] = { a.x, a.y };
+            const float lo[2] = { box.x, box.y };
+            const float hi[2] = { box.x + box.width, box.y + box.height };
+            for (int axis = 0; axis < 2; ++axis)
+            {
+                if (std::fabs(d[axis]) < 1e-6f)
+                {
+                    if (o[axis] < lo[axis] || o[axis] > hi[axis]) return false;
+                    continue;
+                }
+                float tNear = (lo[axis] - o[axis]) / d[axis];
+                float tFar = (hi[axis] - o[axis]) / d[axis];
+                if (tNear > tFar) { const float tmp = tNear; tNear = tFar; tFar = tmp; }
+                t0 = tNear > t0 ? tNear : t0;
+                t1 = tFar < t1 ? tFar : t1;
+                if (t0 > t1) return false;
+            }
+            return true;
+        }
+
+        inline bool CircleOverlapsRect(const HitShape& s, const math::Rect& box)
+        {
+            return PointRectDistanceSq(s.center, box) <= s.radius * s.radius;
+        }
+
+        // Approximate on purpose (KISS): in reach, and the box point nearest the
+        // centre lies inside the fan (or the centre is inside the box).
+        inline bool ArcOverlapsRect(const HitShape& s, const math::Rect& box)
+        {
+            if (s.dir.x == 0.0f && s.dir.y == 0.0f) return false;
+            const math::Vec2 q = ClosestOnRect(s.center, box);
+            const math::Vec2 d = q - s.center;
+            const float distSq = math::Dot(d, d);
+            if (distSq > s.radius * s.radius) return false;
+            if (distSq <= 1e-6f) return true;
+            return math::Dot(d, s.dir) / std::sqrt(distSq) >= std::cos(s.halfAngle);
+        }
+
+        // Segment-vs-box distance: 0 when they cross, else the nearest of
+        // (segment ends -> box) and (box corners -> segment).
+        inline bool CapsuleOverlapsRect(const HitShape& s, const math::Rect& box)
+        {
+            if (SegmentHitsRect(s.center, s.end, box)) return true;
+            const float rSq = s.radius * s.radius;
+            if (PointRectDistanceSq(s.center, box) <= rSq || PointRectDistanceSq(s.end, box) <= rSq) return true;
+            const math::Vec2 corners[4] = { { box.x, box.y }, { box.x + box.width, box.y },
+                                            { box.x, box.y + box.height }, { box.x + box.width, box.y + box.height } };
+            for (const math::Vec2& c : corners)
+                if (PointSegmentDistanceSq(c, s.center, s.end) <= rSq) return true;
+            return false;
+        }
+
+        using RectFn = bool (*)(const HitShape&, const math::Rect&);
+        inline constexpr RectFn kRectTests[] = { &CircleOverlapsRect, &ArcOverlapsRect, &CapsuleOverlapsRect };
+        static_assert(std::size(kRectTests) == static_cast<std::size_t>(HitShapeKind::Count), "one rect test per HitShapeKind");
+    }
+
+    // True when the shape overlaps the box (the player's hitbox).
+    [[nodiscard]] inline bool ShapeOverlapsRect(const HitShape& shape, const math::Rect& box)
+    {
+        return hit_shape_detail::kRectTests[static_cast<std::size_t>(shape.kind)](shape, box);
+    }
 }

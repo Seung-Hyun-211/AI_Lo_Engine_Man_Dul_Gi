@@ -321,6 +321,8 @@ namespace engine::game
         m_motion = PlayerMotion::Idle;
         m_stamina = m_stats[StatId::StaminaMax];
         m_playerHp = m_stats[StatId::MaxHp];   // fresh run/character: full heal
+        m_hurtTimeLeft = 0.0f;
+        m_runOver = false;
         m_staminaRegenDelay = 0.0f;
         m_runLocked = false;
         m_dashQueued = false;
@@ -338,8 +340,8 @@ namespace engine::game
         {
             // One very tough dummy instead of the swarm (StepCircularScene
             // skips the spawn budget in test mode) - a fixed spot in front of
-            // the player so a fresh run always starts facing it.
-            m_mobs.Spawn(PlayerCenter() + math::Vec2{ kTestDummySpawnOffset, 0.0f }, kTestDummyHealth, m_balance.mobRadius);
+            // the player so a fresh run always starts facing it. Kind = mobs.csv row 0.
+            m_mobs.Spawn(PlayerCenter() + math::Vec2{ kTestDummySpawnOffset, 0.0f }, kTestDummyHealth, m_balance.mobs[0].radius);
         }
     }
 
@@ -359,6 +361,38 @@ namespace engine::game
             if (owned.defIndex >= m_balance.accessories.size())
                 owned.defIndex = m_balance.accessories.empty() ? 0 : static_cast<std::uint8_t>(m_balance.accessories.size() - 1);
         RecomputeStats();   // stats.csv / characters.csv / accessories.csv edits apply mid-run (F5)
+        RebuildMobTables(); // mobs.csv edits apply to live mobs too (MobField reads these every step)
+    }
+
+    void Simulation::RebuildMobTables()
+    {
+        m_mobMotion.clear();
+        m_mobAttackTiming.clear();
+        m_mobContact.clear();
+        for (const MobDef& mob : m_balance.mobs)
+        {
+            m_mobMotion.push_back({ mob.speed, mob.keepDistance });
+            const bool casts = mob.attack >= 0 && static_cast<std::size_t>(mob.attack) < m_balance.mobAttacks.size();
+            m_mobAttackTiming.push_back({ casts ? m_balance.mobAttacks[static_cast<std::size_t>(mob.attack)].cooldown : 0.0f,
+                                          mob.attackRange });
+            m_mobContact.push_back(mob.contactDamage);
+        }
+    }
+
+    void Simulation::HurtPlayer(float amount)
+    {
+        if (amount <= 0.0f || m_runOver) return;
+        if (m_godMode || m_circularTestMode) return;
+        if (PlayerInvulnerable() || m_hurtTimeLeft > 0.0f) return;   // dash i-frames [확정] / hurt i-frames
+        // damage_reduction (§2.6, vit-derived, clamped 0..0.8 by stats.csv).
+        // defense / armor_break stay out until their formulas exist ([미정]).
+        m_playerHp -= amount * (1.0f - m_stats[StatId::DamageReduction]);
+        m_hurtTimeLeft = m_balance.player.hurtInvuln;
+        if (m_playerHp <= 0.0f)
+        {
+            m_playerHp = 0.0f;
+            m_runOver = true;   // Step freezes the run; Application offers retry / lobby
+        }
     }
 
     const CharacterDef& Simulation::Character() const
@@ -441,6 +475,7 @@ namespace engine::game
 
         m_dashCooldownLeft = std::max(0.0f, m_dashCooldownLeft - dt);
         m_staminaRegenDelay = std::max(0.0f, m_staminaRegenDelay - dt);
+        m_hurtTimeLeft = std::max(0.0f, m_hurtTimeLeft - dt);
         if (m_dashChainTimer > 0.0f)
         {
             m_dashChainTimer -= dt;
@@ -523,7 +558,7 @@ namespace engine::game
             // died (an absurd overflow-stacked build, or a future weapon),
             // so a test session never runs dry.
             if (m_mobs.LiveCount() == 0)
-                m_mobs.Spawn(playerCenter + math::Vec2{ kTestDummySpawnOffset, 0.0f }, kTestDummyHealth, m_balance.mobRadius);
+                m_mobs.Spawn(playerCenter + math::Vec2{ kTestDummySpawnOffset, 0.0f }, kTestDummyHealth, m_balance.mobs[0].radius);
         }
         else
         {
@@ -548,23 +583,33 @@ namespace engine::game
                 // so several mobs spawned in the same step land apart. double for
                 // the multiply: the counter grows without bound and float would
                 // lose the fractional turn.
+                const std::uint32_t spawnIndex = m_mobSpawnCounter++;
                 const float angle = static_cast<float>(
-                    std::fmod(static_cast<double>(m_mobSpawnCounter++) * 2.399963229728653, 6.283185307179586));
+                    std::fmod(static_cast<double>(spawnIndex) * 2.399963229728653, 6.283185307179586));
                 const math::Vec2 spawnPos = playerCenter
                     + math::Vec2{ std::cos(angle), std::sin(angle) } * m_balance.spawnRadius;
-                m_mobs.Spawn(spawnPos, m_balance.mobHealth, m_balance.mobRadius);
+                // Which kind, by mobs.csv `weight` - a scrambled hash of the
+                // spawn index (murmur3 finalizer), not the run RNG: spawning must
+                // not shift the level-up/crit roll sequence, and a plain golden-
+                // ratio step would tie the kind to the ring angle above.
+                std::uint32_t h = spawnIndex * 0x9E3779B9u;
+                h ^= h >> 16; h *= 0x85EBCA6Bu; h ^= h >> 13; h *= 0xC2B2AE35u; h ^= h >> 16;
+                const std::uint8_t kind = m_balance.PickSpawnMob(static_cast<float>(h >> 8) / 16777216.0f);
+                const MobDef& mob = m_balance.mobs[kind];
+                const float firstCast = kind < m_mobAttackTiming.size() ? m_mobAttackTiming[kind].cooldown : 0.0f;
+                m_mobs.Spawn(spawnPos, mob.health, mob.radius, kind, firstCast);
             }
 
             StepChargePattern(fixedDelta, playerCenter);
         }
-        m_mobs.Step(m_jobs, playerCenter, m_balance.mobSpeed, fixedDelta);
+        m_mobs.Step(m_jobs, playerCenter, m_mobMotion, fixedDelta);
 
         StepCombat(fixedDelta, playerCenter);
     }
 
     void Simulation::StepCombat(float fixedDelta, math::Vec2 playerCenter)
     {
-        const CombatContext context{ m_balance, m_stats, playerCenter, m_lastMoveDir };
+        const CombatContext context{ m_balance, m_stats, playerCenter, m_lastMoveDir, PlayerHitbox(), !PlayerInvulnerable() };
         CombatResult result;
         for (CardInstance& card : m_deck)
         {
@@ -574,11 +619,24 @@ namespace engine::game
             card.cooldownLeft = CardCooldown(m_balance.weapons[card.defIndex], card.level) / std::max(m_stats[StatId::AttackSpeed], 0.05f);
             result += m_combat.Fire(card, context, m_mobs, m_rng);
         }
+
+        // Enemy attacks (M3, docs/circular-combat.md W7): every mob whose cast
+        // came due with the player in range fires its mobs.csv `attack` row.
+        m_mobs.CollectCasts(fixedDelta, playerCenter, m_mobAttackTiming, m_castScratch);
+        for (const MobCast& cast : m_castScratch)
+        {
+            const int attack = cast.type < m_balance.mobs.size() ? m_balance.mobs[cast.type].attack : -1;
+            if (attack >= 0) result += m_combat.FireEnemy(static_cast<std::uint8_t>(attack), cast.pos, context, m_mobs);
+        }
+
         result += m_combat.Step(fixedDelta, context, m_mobs, m_rng);
 
         // life_steal (§2.6) - CircularCombat reports the heal, HP stays ours.
         if (result.heal > 0.0f) m_playerHp = std::min(m_stats[StatId::MaxHp], m_playerHp + result.heal);
-        AwardKills(result.kills);
+        // Contact (§5.1): the hardest-hitting mob touching the hitbox, then one
+        // hurt per i-frame window whichever source it came from.
+        HurtPlayer(std::max(result.playerDamage, m_mobs.StrongestTouching(PlayerHitbox(), m_mobContact)));
+        CollectKills();
     }
 
     float Simulation::XpNeeded() const
@@ -586,11 +644,23 @@ namespace engine::game
         return m_balance.XpForLevel(m_level);
     }
 
-    void Simulation::AwardKills(std::uint32_t kills)
+    void Simulation::CollectKills()
     {
+        const std::vector<std::uint32_t>& tally = m_mobs.KillTally();
+        std::uint32_t kills = 0;
+        float xp = 0.0f;
+        for (std::size_t kind = 0; kind < tally.size(); ++kind)
+        {
+            if (tally[kind] == 0) continue;
+            kills += tally[kind];
+            // An F5 that shrank mobs.csv can leave a kind past the table: row 0's xp.
+            const MobDef& mob = m_balance.mobs[kind < m_balance.mobs.size() ? kind : 0];
+            xp += static_cast<float>(tally[kind]) * mob.xp;
+        }
+        m_mobs.ClearKillTally();
         if (kills == 0) return;
         m_mobKillCount += static_cast<int>(kills);
-        m_xp += static_cast<float>(kills) * m_balance.mobXp * m_stats[StatId::XpGain];
+        m_xp += xp * m_stats[StatId::XpGain];
         CheckLevelUp();
     }
 
@@ -842,9 +912,10 @@ namespace engine::game
             return;
         }
 
-        // Level-up modal is open (or about to be): the whole Circular world
-        // freezes, including the clock, until ChooseLevelUpOption resumes it.
-        if (m_demoScene == DemoScene::Circular && m_levelUpPending)
+        // Level-up modal is open (or about to be), or the player died: the whole
+        // Circular world freezes, including the clock, until ChooseLevelUpOption
+        // resumes it / a retry resets the run.
+        if (m_demoScene == DemoScene::Circular && (m_levelUpPending || m_runOver))
         {
             m_dashQueued = false;   // a press made while the modal opened must not fire after it
             return;

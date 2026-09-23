@@ -17,10 +17,6 @@ namespace engine::game
     CircularBalance CircularBalance::Defaults()
     {
         CircularBalance b;
-        b.mobHealth = kActiveMob.health;
-        b.mobSpeed = kActiveMob.speed;
-        b.mobRadius = kActiveMob.radius;
-        b.mobXp = static_cast<float>(kActiveMob.xpValue);
         b.spawnRadius = kActiveMob.spawnRadius;
         b.xpGrowthAfterTable = kProgression.xpGrowth;
         // No levels.csv table: XpForLevel falls back to baseXp * growth^(n-1).
@@ -61,7 +57,84 @@ namespace engine::game
             accessory("GAUNTLET",  StatId::WeaponDamage, true,  0.08f),
             accessory("BELT",      StatId::StaminaMax,   false, 15.0f),
         };
+
+        // Built-in enemy attacks + mob kinds (docs/circular-design.md §5, M3) -
+        // [살] numbers, kept equal to mob_attacks.csv / mobs.csv (the same
+        // allowed fallback duplicate as kCardDefs).
+        const auto mobAttack = [](const char* id, CardEffect effect, float cooldown, float damage, float range, std::uint32_t color) {
+            CardDef a{};
+            a.id = id;
+            a.name = id;
+            a.kind = CardKind::Attack;
+            a.effect = effect;
+            a.cooldown = cooldown;
+            a.damage = damage;
+            a.range = range;
+            a.baseTargets = 1;
+            a.maxLevel = 1;
+            a.cooldownScalePerLevel = 1.0f;
+            a.color = color;
+            return a;
+        };
+        CardDef arrow = mobAttack("arrow", CardEffect::PiercingShot, 2.4f, 6.0f, 600.0f, 0x7CE06A);
+        arrow.projectileSpeed = 380.0f;
+        arrow.hitRadius = 5.0f;
+        CardDef hex = mobAttack("hex", CardEffect::RadialPulse, 3.8f, 12.0f, 70.0f, 0xB060FF);
+        hex.origin = AttackOrigin::Target;
+        hex.delay = 1.1f;
+        b.mobAttacks = { arrow, hex };
+
+        const auto mob = [](const char* id, const char* name, MobClass mobClass, float health, float speed, float radius,
+                            float contact, float xp, float weight, std::uint32_t color) {
+            MobDef m;
+            m.id = id;
+            m.name = name;
+            m.mobClass = mobClass;
+            m.health = health;
+            m.speed = speed;
+            m.radius = radius;
+            m.contactDamage = contact;
+            m.xp = xp;
+            m.weight = weight;
+            m.color = color;
+            return m;
+        };
+        MobDef archer = mob("archer", "ARCHER", MobClass::Ranged, 14.0f, 80.0f, 10.0f, 5.0f, 2.0f, 12.0f, 0x50B060);
+        archer.keepDistance = 360.0f;
+        archer.attackId = "arrow";
+        archer.attackRange = 520.0f;
+        MobDef witch = mob("witch", "WITCH", MobClass::Caster, 18.0f, 70.0f, 11.0f, 5.0f, 3.0f, 8.0f, 0xA050D0);
+        witch.keepDistance = 400.0f;
+        witch.attackId = "hex";
+        witch.attackRange = 560.0f;
+        b.mobs = {
+            mob("grunt", "GRUNT", MobClass::Melee, kActiveMob.health, kActiveMob.speed, kActiveMob.radius, 8.0f,
+                static_cast<float>(kActiveMob.xpValue), 70.0f, 0xD04050),
+            mob("brute", "BRUTE", MobClass::Tank, 140.0f, 55.0f, 18.0f, 16.0f, 6.0f, 10.0f, 0x3A4FA0),
+            archer,
+            witch,
+        };
+        b.mobs[2].attack = 0;   // arrow
+        b.mobs[3].attack = 1;   // hex
         return b;
+    }
+
+    std::uint8_t CircularBalance::PickSpawnMob(float u01) const
+    {
+        float total = 0.0f;
+        for (const MobDef& m : mobs) total += m.weight;
+        if (total <= 0.0f) return 0;
+        float pick = u01 * total;
+        for (std::size_t i = 0; i < mobs.size(); ++i)
+        {
+            if (mobs[i].weight <= 0.0f) continue;
+            if (pick < mobs[i].weight) return static_cast<std::uint8_t>(i);
+            pick -= mobs[i].weight;
+        }
+        // Float round-off at u01 ~ 1: the last spawnable kind.
+        for (std::size_t i = mobs.size(); i-- > 0; )
+            if (mobs[i].weight > 0.0f) return static_cast<std::uint8_t>(i);
+        return 0;
     }
 
     CircularBalance::SpawnRate CircularBalance::SpawnAt(float secondsIntoRun) const
@@ -202,6 +275,394 @@ namespace engine::game
                 if (!known) loader.Warn(file, row.line, "unknown key '" + key + "' ignored");
             }
         }
+
+        // One weapons.csv-shaped table (docs/circular-balance.md "weapons.csv" is
+        // the column list): weapons.csv itself, and mob_attacks.csv for enemy
+        // attacks (docs/circular-combat.md W7) - the same columns, parsed once.
+        // `forMobs`: the level-curve columns become optional (an enemy attack has
+        // one level), overflow is ignored, and nearestbolt is refused (it has no
+        // form that reaches the player). Returns false and leaves `out` alone
+        // when the file is absent or has no valid row.
+        bool LoadAttackTable(Loader& loader, const std::string& dir, const std::string& file, bool forMobs,
+                             std::vector<CardDef>& out)
+        {
+            core::CsvTable table;
+            if (!loader.Open(dir, file, table)) return false;
+
+            const int idCol = table.Column("id");
+            const int nameCol = table.Column("name");
+            const int effectCol = table.Column("effect");
+            const int cdCol = table.Column("cooldown");
+            const int dmgCol = table.Column("damage");
+            const int rangeCol = table.Column("range");
+            const int baseTargetsCol = table.Column("base_targets");
+            const int maxLevelCol = table.Column("max_level");
+            const int dmgPerLevelCol = table.Column("damage_per_level");
+            const int rangePerLevelCol = table.Column("range_per_level");
+            const int cdScaleCol = table.Column("cooldown_scale");
+            const int extraEveryCol = table.Column("levels_per_extra_target");
+            const int overflowStatCol = table.Column("overflow_stat");
+            const int overflowValueCol = table.Column("overflow_value");
+            const int colorCol = table.Column("color");
+            const int spriteCol = table.Column("sprite");
+            const int fxHitCol = table.Column("fx_hit");
+            const int pathCol = table.Column("path");
+            const int anchorCol = table.Column("anchor");
+            const int countCol = table.Column("count");
+            const int originCol = table.Column("origin");
+
+            const bool baseOk = idCol >= 0 && nameCol >= 0 && effectCol >= 0 && cdCol >= 0 && dmgCol >= 0 && rangeCol >= 0;
+            const bool levelsOk = baseTargetsCol >= 0 && maxLevelCol >= 0 && dmgPerLevelCol >= 0 &&
+                                  rangePerLevelCol >= 0 && cdScaleCol >= 0 && extraEveryCol >= 0;
+            if (!baseOk || (!forMobs && !levelsOk))
+            {
+                loader.Error(file, 1, forMobs
+                    ? "header must contain id,name,effect,cooldown,damage,range (the rest are optional)"
+                    : "header must contain id,name,effect,cooldown,damage,range,base_targets,max_level,"
+                      "damage_per_level,range_per_level,cooldown_scale,levels_per_extra_target (the rest are optional)");
+                return false;
+            }
+
+            std::vector<CardDef> rows;
+            for (const core::CsvRow& row : table.rows)
+            {
+                CardDef def{};
+                def.kind = CardKind::Attack;
+                def.cooldownScalePerLevel = 1.0f;
+                const std::string id = Lower(Cell(row, idCol));
+                const std::string name = Cell(row, nameCol);
+                if (!IsIdentifier(id) || name.empty())
+                {
+                    loader.Error(file, row.line, "id (a-z 0-9 _) and name are required - row skipped");
+                    continue;
+                }
+                const bool duplicate = std::any_of(rows.begin(), rows.end(),
+                    [&](const CardDef& other) { return other.id == id; });
+                if (duplicate)
+                {
+                    loader.Error(file, row.line, "duplicate id '" + id + "' - row skipped");
+                    continue;
+                }
+
+                const std::string effectName = Lower(Cell(row, effectCol));
+                const EffectSpec* spec = nullptr;
+                for (const EffectSpec& candidate : kEffectSpecs)
+                    if (effectName == candidate.name) spec = &candidate;
+                if (spec == nullptr)
+                {
+                    loader.Error(file, row.line, "unknown effect '" + effectName + "' - row skipped");
+                    continue;
+                }
+
+                bool valid = true;
+                // Level-curve defaults = "one level, one target" (what an enemy
+                // attack gets when mob_attacks.csv leaves those columns out).
+                float maxLevelF = 1.0f, baseTargetsF = 1.0f, extraEveryF = 0.0f;
+                struct Req { const char* label; int col; float* target; float minValue; bool minInclusive; bool levelCurve; };
+                const Req required[] = {
+                    { "cooldown",                cdCol,            &def.cooldown,              0.0f,  false, false },
+                    { "damage",                  dmgCol,           &def.damage,                0.0f,  true,  false },
+                    { "range",                   rangeCol,         &def.range,                 0.0f,  false, false },
+                    { "base_targets",            baseTargetsCol,   &baseTargetsF,              0.0f,  true,  true  },
+                    { "max_level",               maxLevelCol,      &maxLevelF,                 1.0f,  true,  true  },
+                    { "damage_per_level",        dmgPerLevelCol,   &def.damagePerLevel,       -1e9f,  true,  true  },
+                    { "range_per_level",         rangePerLevelCol, &def.rangePerLevel,        -1e9f,  true,  true  },
+                    { "cooldown_scale",          cdScaleCol,       &def.cooldownScalePerLevel, 0.0f,  false, true  },
+                    { "levels_per_extra_target", extraEveryCol,    &extraEveryF,               0.0f,  true,  true  },
+                };
+                for (const Req& req : required)
+                {
+                    const std::string cell = Cell(row, req.col);
+                    if (forMobs && req.levelCurve && cell.empty()) continue;   // keep the one-level default
+                    if (!core::ParseFloat(cell, *req.target))
+                    {
+                        loader.Error(file, row.line, std::string(req.label) + " must be a number - row skipped");
+                        valid = false;
+                        break;
+                    }
+                    const bool ok = req.minInclusive ? *req.target >= req.minValue : *req.target > req.minValue;
+                    if (!ok)
+                    {
+                        loader.Error(file, row.line, std::string(req.label) + " out of range - row skipped");
+                        valid = false;
+                        break;
+                    }
+                }
+                if (!valid) continue;
+
+                // Optional numbers - blank cell keeps the CardDef default.
+                struct Opt { const char* label; float* target; float minValue; };
+                const Opt optional[] = {
+                    { "cone_half_angle_deg", &def.coneHalfAngleDeg, 0.0f },
+                    { "line_half_width",     &def.lineHalfWidth,    0.0f },
+                    { "projectile_speed",    &def.projectileSpeed,  0.0f },
+                    { "explode_radius",      &def.explodeRadius,    0.0f },
+                    { "damage_max",          &def.damageMax,        0.0f },
+                    { "hit_radius",          &def.hitRadius,        0.0f },
+                    { "visual_scale",        &def.visualScale,      0.0f },
+                    { "lifetime",            &def.lifetime,         0.0f },
+                    { "start_radius",        &def.startRadius,      0.0f },
+                    { "radial_speed",        &def.radialSpeed,   -1e9f },
+                    { "angular_speed_deg",   &def.angularSpeedDeg, -1e9f },
+                    { "tick_interval",       &def.tickInterval,     0.0f },
+                    { "rehit_interval",      &def.rehitInterval,    0.0f },
+                    { "delay",               &def.delay,            0.0f },
+                };
+                for (const Opt& opt : optional)
+                {
+                    const int col = table.Column(opt.label);
+                    const std::string cell = Cell(row, col);
+                    if (col < 0 || cell.empty()) continue;
+                    if (!core::ParseFloat(cell, *opt.target) || *opt.target < opt.minValue)
+                    {
+                        loader.Error(file, row.line, std::string(opt.label) + " must be a number (>= 0 unless it is a speed) - row skipped");
+                        valid = false;
+                        break;
+                    }
+                }
+                if (!valid) continue;
+
+                // Movement (docs/circular-combat.md §2.5). Blank = CardDef default.
+                const std::string pathName = Lower(Cell(row, pathCol));
+                if (pathName == "straight") def.path = AttackPath::Straight;
+                else if (pathName == "polar") def.path = AttackPath::Polar;
+                else if (!pathName.empty() && pathName != "none")
+                {
+                    loader.Error(file, row.line, "path must be none, straight or polar - row skipped");
+                    continue;
+                }
+                const std::string anchorName = Lower(Cell(row, anchorCol));
+                if (anchorName == "player") def.anchor = PathAnchor::Player;
+                else if (!anchorName.empty() && anchorName != "cast")
+                {
+                    loader.Error(file, row.line, "anchor must be cast or player - row skipped");
+                    continue;
+                }
+                const std::string originName = Lower(Cell(row, originCol));
+                if (originName == "target") def.origin = AttackOrigin::Target;
+                else if (!originName.empty() && originName != "self")
+                {
+                    loader.Error(file, row.line, "origin must be self or target - row skipped");
+                    continue;
+                }
+                const std::string countCell = Cell(row, countCol);
+                float countF = 1.0f;
+                if (!countCell.empty() && (!core::ParseFloat(countCell, countF) || countF < 1.0f))
+                {
+                    loader.Error(file, row.line, "count must be a number >= 1 - row skipped");
+                    continue;
+                }
+                def.count = static_cast<int>(countF);
+
+                // Combinations the combat code can't run - rejected here, not guessed at.
+                def.effect = spec->effect;
+                const AttackForm form = spec->form;
+                const AttackPath path = EffectivePath(def);
+                const bool placedArea = form == AttackForm::Area && path == AttackPath::None;
+                const char* problem = nullptr;
+                if (form == AttackForm::Nearest && path != AttackPath::None) problem = "nearestbolt can't have a path";
+                else if (forMobs && form == AttackForm::Nearest) problem = "nearestbolt can't be an enemy attack";
+                else if (path == AttackPath::Straight && def.projectileSpeed <= 0.0f && def.lifetime <= 0.0f)
+                    problem = "a straight path needs projectile_speed > 0 (or a lifetime)";
+                else if (path == AttackPath::Polar && def.lifetime <= 0.0f) problem = "a polar path needs lifetime > 0";
+                else if (form == AttackForm::Area && path != AttackPath::None && def.tickInterval <= 0.0f)
+                    problem = "a moving area needs tick_interval > 0";
+                else if ((def.delay > 0.0f || def.origin == AttackOrigin::Target) && !placedArea)
+                    problem = "delay / origin=target only apply to an area effect without a path";
+                if (problem != nullptr)
+                {
+                    loader.Error(file, row.line, std::string(problem) + " - row skipped");
+                    continue;
+                }
+
+                const std::string colorCell = Cell(row, colorCol);
+                if (!colorCell.empty() && !ParseHexColor(colorCell, def.color))
+                {
+                    loader.Error(file, row.line, "color must be RRGGBB hex - row skipped");
+                    continue;
+                }
+
+                // Overflow (§3.4, weapons only) - blank overflow_stat keeps
+                // overflowValue at 0 (no bonus configured, so this weapon is never
+                // offered as an overflow choice once maxed). overflow_value alone
+                // without a recognised stat is an error - it would silently do nothing.
+                const std::string overflowStatName = forMobs ? std::string{} : Lower(Cell(row, overflowStatCol));
+                if (!overflowStatName.empty())
+                {
+                    int overflowStatIndex = -1;
+                    for (std::size_t i = 0; i < kStatCount; ++i)
+                        if (overflowStatName == kStatDefs[i].id) overflowStatIndex = static_cast<int>(i);
+                    if (overflowStatIndex < 0)
+                    {
+                        loader.Error(file, row.line, "unknown overflow_stat '" + overflowStatName + "' - row skipped");
+                        continue;
+                    }
+                    def.overflowStat = static_cast<StatId>(overflowStatIndex);
+                    const std::string overflowValueCell = Cell(row, overflowValueCol);
+                    if (!core::ParseFloat(overflowValueCell, def.overflowValue))
+                    {
+                        loader.Error(file, row.line, "overflow_value must be a number when overflow_stat is set - row skipped");
+                        continue;
+                    }
+                }
+
+                if (rows.size() >= 255)
+                {
+                    loader.Error(file, row.line, "more than 255 rows - row skipped");
+                    continue;
+                }
+                def.id = id;
+                def.name = name;
+                def.baseTargets = static_cast<int>(baseTargetsF);
+                def.maxLevel = static_cast<int>(maxLevelF);
+                def.levelsPerExtraTarget = static_cast<int>(extraEveryF);
+                def.sprite = Lower(Cell(row, spriteCol));
+                def.fxHit = Lower(Cell(row, fxHitCol));
+                rows.push_back(std::move(def));
+            }
+            if (rows.empty())
+            {
+                loader.Warn(file, 0, "no valid rows - using the built-in table");
+                return false;
+            }
+            out = std::move(rows);
+            return true;
+        }
+
+        // mobs.csv (docs/circular-design.md §5.3). `attack` names a mob_attacks.csv
+        // id; it is resolved to an index by ResolveMobAttacks after both files load.
+        void LoadMobTable(Loader& loader, const std::string& dir, const std::vector<CardDef>& attacks,
+                          std::vector<MobDef>& out)
+        {
+            const std::string file = "mobs.csv";
+            core::CsvTable table;
+            if (!loader.Open(dir, file, table)) return;
+
+            const int idCol = table.Column("id");
+            const int nameCol = table.Column("name");
+            const int classCol = table.Column("class");
+            const int colorCol = table.Column("color");
+            const int attackCol = table.Column("attack");
+            if (idCol < 0 || nameCol < 0 || classCol < 0 || table.Column("health") < 0 ||
+                table.Column("speed") < 0 || table.Column("radius") < 0)
+            {
+                loader.Error(file, 1, "header must contain id,name,class,health,speed,radius (the rest are optional)");
+                return;
+            }
+
+            struct ClassName { const char* name; MobClass value; };
+            constexpr ClassName kClasses[] = {
+                { "melee", MobClass::Melee }, { "tank", MobClass::Tank }, { "ranged", MobClass::Ranged }, { "caster", MobClass::Caster },
+            };
+
+            std::vector<MobDef> rows;
+            for (const core::CsvRow& row : table.rows)
+            {
+                MobDef mob;
+                mob.id = Lower(Cell(row, idCol));
+                mob.name = Cell(row, nameCol);
+                if (!IsIdentifier(mob.id) || mob.name.empty())
+                {
+                    loader.Error(file, row.line, "id (a-z 0-9 _) and name are required - row skipped");
+                    continue;
+                }
+                if (std::any_of(rows.begin(), rows.end(), [&](const MobDef& other) { return other.id == mob.id; }))
+                {
+                    loader.Error(file, row.line, "duplicate id '" + mob.id + "' - row skipped");
+                    continue;
+                }
+                const std::string className = Lower(Cell(row, classCol));
+                bool classOk = false;
+                for (const ClassName& c : kClasses)
+                    if (className == c.name) { mob.mobClass = c.value; classOk = true; }
+                if (!classOk)
+                {
+                    loader.Error(file, row.line, "class must be melee, tank, ranged or caster - row skipped");
+                    continue;
+                }
+
+                // required: column must be there and hold a number; optional: blank keeps the MobDef default.
+                struct Num { const char* label; float* target; float minValue; bool minInclusive; bool required; };
+                const Num numbers[] = {
+                    { "health",         &mob.health,        0.0f, false, true  },
+                    { "speed",          &mob.speed,         0.0f, true,  true  },
+                    { "radius",         &mob.radius,        0.0f, false, true  },
+                    { "contact_damage", &mob.contactDamage, 0.0f, true,  false },
+                    { "xp",             &mob.xp,            0.0f, true,  false },
+                    { "weight",         &mob.weight,        0.0f, true,  false },
+                    { "keep_distance",  &mob.keepDistance,  0.0f, true,  false },
+                    { "attack_range",   &mob.attackRange,   0.0f, true,  false },
+                };
+                bool valid = true;
+                for (const Num& num : numbers)
+                {
+                    const std::string cell = Cell(row, table.Column(num.label));
+                    if (cell.empty() && !num.required) continue;
+                    const bool parsed = core::ParseFloat(cell, *num.target);
+                    const bool inRange = parsed && (num.minInclusive ? *num.target >= num.minValue : *num.target > num.minValue);
+                    if (!inRange)
+                    {
+                        loader.Error(file, row.line, std::string(num.label) + (parsed ? " out of range" : " must be a number") + " - row skipped");
+                        valid = false;
+                        break;
+                    }
+                }
+                if (!valid) continue;
+
+                const std::string colorCell = Cell(row, colorCol);
+                if (!colorCell.empty() && !ParseHexColor(colorCell, mob.color))
+                {
+                    loader.Error(file, row.line, "color must be RRGGBB hex - row skipped");
+                    continue;
+                }
+                mob.attackId = Lower(Cell(row, attackCol));
+                if (!mob.attackId.empty())
+                {
+                    const bool known = std::any_of(attacks.begin(), attacks.end(), [&](const CardDef& a) { return a.id == mob.attackId; });
+                    if (!known)
+                    {
+                        loader.Error(file, row.line, "attack '" + mob.attackId + "' is not a mob_attacks.csv id - row skipped");
+                        continue;
+                    }
+                    if (mob.attackRange <= 0.0f)
+                    {
+                        loader.Error(file, row.line, "an attack needs attack_range > 0 - row skipped");
+                        continue;
+                    }
+                }
+                if (rows.size() >= 255)
+                {
+                    loader.Error(file, row.line, "more than 255 rows (the mob type is one byte) - row skipped");
+                    continue;
+                }
+                rows.push_back(std::move(mob));
+            }
+            if (rows.empty())
+            {
+                loader.Warn(file, 0, "no valid rows - using the built-in mobs");
+                return;
+            }
+            if (std::none_of(rows.begin(), rows.end(), [](const MobDef& m) { return m.weight > 0.0f; }))
+            {
+                loader.Error(file, 0, "every weight is 0 (nothing could spawn) - using the built-in mobs");
+                return;
+            }
+            out = std::move(rows);
+        }
+
+        // attackId -> index into `attacks` for every mob (built-in or loaded), so
+        // either file can change alone without leaving a stale index behind.
+        void ResolveMobAttacks(Loader& loader, const std::vector<CardDef>& attacks, std::vector<MobDef>& mobs)
+        {
+            for (MobDef& mob : mobs)
+            {
+                mob.attack = -1;
+                if (mob.attackId.empty()) continue;
+                for (std::size_t i = 0; i < attacks.size(); ++i)
+                    if (attacks[i].id == mob.attackId) mob.attack = static_cast<int>(i);
+                if (mob.attack < 0) loader.Warn("mobs.csv", 0, "mob '" + mob.id + "' attack '" + mob.attackId + "' not found - it won't attack");
+            }
+        }
     }
 
     BalanceLoadReport LoadCircularBalance(CircularBalance& out, std::size_t hardMaxAlive, std::string_view directory)
@@ -214,10 +675,8 @@ namespace engine::game
         // ---- balance.csv: key,value ----
         {
             const KvEntry entries[] = {
-                { "mob_health",            &out.mobHealth,          0.0f, false },
-                { "mob_speed",             &out.mobSpeed,           0.0f, true  },
-                { "mob_radius",            &out.mobRadius,          0.0f, false },
-                { "mob_xp",                &out.mobXp,              0.0f, true  },
+                // mob_health/speed/radius/xp moved to mobs.csv (M3) - an old
+                // balance.csv still loads, those keys just warn as unknown.
                 { "spawn_radius",          &out.spawnRadius,        0.0f, false },
                 { "xp_growth_after_table", &out.xpGrowthAfterTable, 1.0f, true  },
             };
@@ -245,6 +704,7 @@ namespace engine::game
                 { "hitbox_width",         &p.hitboxWidth,        0.0f, false },
                 { "hitbox_height",        &p.hitboxHeight,       0.0f, false },
                 { "hitbox_lift",          &p.hitboxLift,         0.0f, true  },
+                { "hurt_invuln",          &p.hurtInvuln,         0.0f, true  },
             };
             LoadKeyValueFile(loader, dir, "player.csv", entries, std::size(entries));
         }
@@ -310,228 +770,13 @@ namespace engine::game
             }
         }
 
-        // ---- weapons.csv: one row = one weapon (docs/circular-combat.md §2.4 is the column list) ----
-        // id,name,effect,cooldown,damage,range,base_targets,max_level,damage_per_level,
-        // range_per_level,cooldown_scale,levels_per_extra_target are required; the
-        // rest are optional (blank = the CardDef default, unused by that effect).
-        {
-            const std::string file = "weapons.csv";
-            core::CsvTable table;
-            if (loader.Open(dir, file, table))
-            {
-                const int idCol = table.Column("id");
-                const int nameCol = table.Column("name");
-                const int effectCol = table.Column("effect");
-                const int cdCol = table.Column("cooldown");
-                const int dmgCol = table.Column("damage");
-                const int rangeCol = table.Column("range");
-                const int baseTargetsCol = table.Column("base_targets");
-                const int maxLevelCol = table.Column("max_level");
-                const int dmgPerLevelCol = table.Column("damage_per_level");
-                const int rangePerLevelCol = table.Column("range_per_level");
-                const int cdScaleCol = table.Column("cooldown_scale");
-                const int extraEveryCol = table.Column("levels_per_extra_target");
-                const int overflowStatCol = table.Column("overflow_stat");
-                const int overflowValueCol = table.Column("overflow_value");
-                const int colorCol = table.Column("color");
-                const int spriteCol = table.Column("sprite");
-                const int fxHitCol = table.Column("fx_hit");
-                const int pathCol = table.Column("path");
-                const int anchorCol = table.Column("anchor");
-                const int countCol = table.Column("count");
+        // ---- weapons.csv: one row = one weapon (column list: docs/circular-balance.md "weapons.csv") ----
+        LoadAttackTable(loader, dir, "weapons.csv", /*forMobs=*/false, out.weapons);
 
-                bool headerOk = idCol >= 0 && nameCol >= 0 && effectCol >= 0 && cdCol >= 0 && dmgCol >= 0 && rangeCol >= 0 &&
-                                baseTargetsCol >= 0 && maxLevelCol >= 0 && dmgPerLevelCol >= 0 &&
-                                rangePerLevelCol >= 0 && cdScaleCol >= 0 && extraEveryCol >= 0;
-                if (!headerOk)
-                {
-                    loader.Error(file, 1, "header must contain id,name,effect,cooldown,damage,range,base_targets,"
-                                          "max_level,damage_per_level,range_per_level,cooldown_scale,"
-                                          "levels_per_extra_target (the rest are optional)");
-                }
-                else
-                {
-                    std::vector<CardDef> weapons;
-                    for (const core::CsvRow& row : table.rows)
-                    {
-                        CardDef def{};
-                        def.kind = CardKind::Attack;
-                        const std::string id = Lower(Cell(row, idCol));
-                        const std::string name = Cell(row, nameCol);
-                        if (!IsIdentifier(id) || name.empty())
-                        {
-                            loader.Error(file, row.line, "id (a-z 0-9 _) and name are required - row skipped");
-                            continue;
-                        }
-                        const bool duplicate = std::any_of(weapons.begin(), weapons.end(),
-                            [&](const CardDef& other) { return other.id == id; });
-                        if (duplicate)
-                        {
-                            loader.Error(file, row.line, "duplicate id '" + id + "' - row skipped");
-                            continue;
-                        }
-
-                        const std::string effectName = Lower(Cell(row, effectCol));
-                        const EffectSpec* spec = nullptr;
-                        for (const EffectSpec& candidate : kEffectSpecs)
-                            if (effectName == candidate.name) spec = &candidate;
-                        if (spec == nullptr)
-                        {
-                            loader.Error(file, row.line, "unknown effect '" + effectName + "' - row skipped");
-                            continue;
-                        }
-
-                        bool valid = true;
-                        float maxLevelF = 0.0f, baseTargetsF = 0.0f, extraEveryF = 0.0f;
-                        struct Req { const char* label; int col; float* target; float minValue; bool minInclusive; };
-                        const Req required[] = {
-                            { "cooldown",                 cdCol,           &def.cooldown,              0.0f, false },
-                            { "damage",                   dmgCol,          &def.damage,                0.0f, true  },
-                            { "range",                    rangeCol,        &def.range,                 0.0f, false },
-                            { "base_targets",              baseTargetsCol,  &baseTargetsF,              0.0f, true  },
-                            { "max_level",                 maxLevelCol,     &maxLevelF,                 1.0f, true  },
-                            { "damage_per_level",          dmgPerLevelCol,  &def.damagePerLevel,       -1e9f, true  },
-                            { "range_per_level",           rangePerLevelCol,&def.rangePerLevel,        -1e9f, true  },
-                            { "cooldown_scale",            cdScaleCol,      &def.cooldownScalePerLevel, 0.0f, false },
-                            { "levels_per_extra_target",   extraEveryCol,   &extraEveryF,               0.0f, true  },
-                        };
-                        for (const Req& req : required)
-                        {
-                            if (!core::ParseFloat(Cell(row, req.col), *req.target))
-                            {
-                                loader.Error(file, row.line, std::string(req.label) + " must be a number - row skipped");
-                                valid = false;
-                                break;
-                            }
-                            const bool ok = req.minInclusive ? *req.target >= req.minValue : *req.target > req.minValue;
-                            if (!ok)
-                            {
-                                loader.Error(file, row.line, std::string(req.label) + " out of range - row skipped");
-                                valid = false;
-                                break;
-                            }
-                        }
-                        if (!valid) continue;
-
-                        // Optional numbers - blank cell keeps the CardDef default.
-                        struct Opt { const char* label; float* target; float minValue; };
-                        const Opt optional[] = {
-                            { "cone_half_angle_deg", &def.coneHalfAngleDeg, 0.0f },
-                            { "line_half_width",     &def.lineHalfWidth,    0.0f },
-                            { "projectile_speed",    &def.projectileSpeed,  0.0f },
-                            { "explode_radius",      &def.explodeRadius,    0.0f },
-                            { "damage_max",          &def.damageMax,        0.0f },
-                            { "hit_radius",          &def.hitRadius,        0.0f },
-                            { "visual_scale",        &def.visualScale,      0.0f },
-                            { "lifetime",            &def.lifetime,         0.0f },
-                            { "start_radius",        &def.startRadius,      0.0f },
-                            { "radial_speed",        &def.radialSpeed,   -1e9f },
-                            { "angular_speed_deg",   &def.angularSpeedDeg, -1e9f },
-                            { "tick_interval",       &def.tickInterval,     0.0f },
-                            { "rehit_interval",      &def.rehitInterval,    0.0f },
-                        };
-                        for (const Opt& opt : optional)
-                        {
-                            const int col = table.Column(opt.label);
-                            const std::string cell = Cell(row, col);
-                            if (col < 0 || cell.empty()) continue;
-                            if (!core::ParseFloat(cell, *opt.target) || *opt.target < opt.minValue)
-                            {
-                                loader.Error(file, row.line, std::string(opt.label) + " must be a number (>= 0 unless it is a speed) - row skipped");
-                                valid = false;
-                                break;
-                            }
-                        }
-                        if (!valid) continue;
-
-                        // Movement (docs/circular-combat.md §2.5). Blank = CardDef default.
-                        const std::string pathName = Lower(Cell(row, pathCol));
-                        if (pathName == "straight") def.path = AttackPath::Straight;
-                        else if (pathName == "polar") def.path = AttackPath::Polar;
-                        else if (!pathName.empty() && pathName != "none")
-                        {
-                            loader.Error(file, row.line, "path must be none, straight or polar - row skipped");
-                            continue;
-                        }
-                        const std::string anchorName = Lower(Cell(row, anchorCol));
-                        if (anchorName == "player") def.anchor = PathAnchor::Player;
-                        else if (!anchorName.empty() && anchorName != "cast")
-                        {
-                            loader.Error(file, row.line, "anchor must be cast or player - row skipped");
-                            continue;
-                        }
-                        const std::string countCell = Cell(row, countCol);
-                        float countF = 1.0f;
-                        if (!countCell.empty() && (!core::ParseFloat(countCell, countF) || countF < 1.0f))
-                        {
-                            loader.Error(file, row.line, "count must be a number >= 1 - row skipped");
-                            continue;
-                        }
-                        def.count = static_cast<int>(countF);
-
-                        // Combinations the combat code can't run - rejected here, not guessed at.
-                        def.effect = spec->effect;
-                        const AttackForm form = spec->form;
-                        const AttackPath path = EffectivePath(def);
-                        const char* problem = nullptr;
-                        if (form == AttackForm::Nearest && path != AttackPath::None) problem = "nearestbolt can't have a path";
-                        else if (path == AttackPath::Straight && def.projectileSpeed <= 0.0f && def.lifetime <= 0.0f)
-                            problem = "a straight path needs projectile_speed > 0 (or a lifetime)";
-                        else if (path == AttackPath::Polar && def.lifetime <= 0.0f) problem = "a polar path needs lifetime > 0";
-                        else if (form == AttackForm::Area && path != AttackPath::None && def.tickInterval <= 0.0f)
-                            problem = "a moving area needs tick_interval > 0";
-                        if (problem != nullptr)
-                        {
-                            loader.Error(file, row.line, std::string(problem) + " - row skipped");
-                            continue;
-                        }
-
-                        const std::string colorCell = Cell(row, colorCol);
-                        if (!colorCell.empty() && !ParseHexColor(colorCell, def.color))
-                        {
-                            loader.Error(file, row.line, "color must be RRGGBB hex - row skipped");
-                            continue;
-                        }
-
-                        // Overflow (§3.4) - blank overflow_stat keeps overflowValue at 0
-                        // (no bonus configured, so this weapon is never offered as an
-                        // overflow choice once maxed). overflow_value alone without a
-                        // recognised stat is an error - it would silently do nothing.
-                        const std::string overflowStatName = Lower(Cell(row, overflowStatCol));
-                        if (!overflowStatName.empty())
-                        {
-                            int overflowStatIndex = -1;
-                            for (std::size_t i = 0; i < kStatCount; ++i)
-                                if (overflowStatName == kStatDefs[i].id) overflowStatIndex = static_cast<int>(i);
-                            if (overflowStatIndex < 0)
-                            {
-                                loader.Error(file, row.line, "unknown overflow_stat '" + overflowStatName + "' - row skipped");
-                                continue;
-                            }
-                            def.overflowStat = static_cast<StatId>(overflowStatIndex);
-                            const std::string overflowValueCell = Cell(row, overflowValueCol);
-                            if (!core::ParseFloat(overflowValueCell, def.overflowValue))
-                            {
-                                loader.Error(file, row.line, "overflow_value must be a number when overflow_stat is set - row skipped");
-                                continue;
-                            }
-                        }
-
-                        def.id = id;
-                        def.name = name;
-                        def.effect = spec->effect;
-                        def.baseTargets = static_cast<int>(baseTargetsF);
-                        def.maxLevel = static_cast<int>(maxLevelF);
-                        def.levelsPerExtraTarget = static_cast<int>(extraEveryF);
-                        def.sprite = Lower(Cell(row, spriteCol));
-                        def.fxHit = Lower(Cell(row, fxHitCol));
-                        weapons.push_back(std::move(def));
-                    }
-                    if (weapons.empty()) loader.Warn(file, 0, "no valid rows - using the built-in weapons");
-                    else out.weapons = std::move(weapons);
-                }
-            }
-        }
+        // ---- mob_attacks.csv + mobs.csv (M3, docs/circular-design.md §5.3) - attacks first: a mob row names one ----
+        LoadAttackTable(loader, dir, "mob_attacks.csv", /*forMobs=*/true, out.mobAttacks);
+        LoadMobTable(loader, dir, out.mobAttacks, out.mobs);
+        ResolveMobAttacks(loader, out.mobAttacks, out.mobs);
 
         // ---- accessories.csv: name,stat,multiplicative,amount,max_level ----
         // No effect code (passive only, §3.3) - a stat + add/mul amount per level.

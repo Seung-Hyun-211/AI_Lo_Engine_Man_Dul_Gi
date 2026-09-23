@@ -24,9 +24,9 @@ namespace engine::game
             }
         }
 
-        // The shape an Area weapon covers at `center` facing `facing` with
+        // The shape an Area attack covers at `center` facing `facing` with
         // reach `size` (range for an instant swing, hit_radius for a moving
-        // area). The per-shape parameters live in the weapon row; this is the
+        // area). The per-shape parameters live in the attack's row; this is the
         // only place that maps them onto a HitShape.
         HitShape AreaShape(const CardDef& def, HitShapeKind kind, math::Vec2 center, math::Vec2 facing,
                            float size, float attackSize)
@@ -74,6 +74,7 @@ namespace engine::game
         }
 
         // Done by time when the row sets a lifetime, else by distance travelled.
+        // (A delayed area ends when it lands - Step handles that before this.)
         bool Expired(const CardDef& def, const AttackInstance& attack)
         {
             if (def.lifetime > 0.0f) return attack.t >= def.lifetime;
@@ -102,6 +103,13 @@ namespace engine::game
             attack.memoryNext = static_cast<std::uint8_t>((attack.memoryNext + 1) % AttackInstance::kHitMemory);
             if (attack.memoryCount < AttackInstance::kHitMemory) ++attack.memoryCount;
         }
+
+        // `to - from`, normalized, or `fallback` when the two coincide.
+        math::Vec2 AimFrom(math::Vec2 from, math::Vec2 to, math::Vec2 fallback)
+        {
+            const math::Vec2 d = to - from;
+            return math::Length(d) > 1e-4f ? math::Normalized(d) : fallback;
+        }
     }
 
     void CircularCombat::Reset()
@@ -118,12 +126,48 @@ namespace engine::game
         return { kills, damage * stats[StatId::LifeSteal] * static_cast<float>(kills) };
     }
 
-    CombatResult CircularCombat::HitArea(const HitShape& shape, float damage, std::uint8_t defIndex,
-                                         const StatBlock& stats, MobField& mobs)
+    CombatResult CircularCombat::LandArea(Team team, const HitShape& shape, float damage, std::uint8_t defIndex,
+                                          const CombatContext& context, MobField& mobs)
     {
-        const std::uint32_t kills = mobs.DamageInShape(shape, damage);
-        m_visuals.push_back({ shape, VisualStyle::Outline, defIndex, kOutlineLife, kOutlineLife });
-        return Hit(stats, damage, kills);
+        m_visuals.push_back({ shape, VisualStyle::Outline, defIndex, kOutlineLife, kOutlineLife, team });
+        switch (team)
+        {
+        case Team::Player:
+            return Hit(context.stats, damage, mobs.DamageInShape(shape, damage));
+        case Team::Enemy:
+        {
+            CombatResult result;
+            if (context.playerHittable && ShapeOverlapsRect(shape, context.playerBox)) result.playerDamage = damage;
+            return result;
+        }
+        }
+        return {};
+    }
+
+    CombatResult CircularCombat::CastArea(Team team, const CardDef& def, std::uint8_t defIndex, math::Vec2 center,
+                                          math::Vec2 facing, float size, float scale, float damage,
+                                          const CombatContext& context, MobField& mobs)
+    {
+        const HitShapeKind kind = SpecOf(def.effect).shape;
+        if (def.delay <= 0.0f) return LandArea(team, AreaShape(def, kind, center, facing, size, scale), damage, defIndex, context, mobs);
+
+        // Delayed (a caster's hex, a mortar): wait `delay` in place, showing
+        // exactly the area that will be hit, then land it (Step).
+        if (m_instances.size() >= kMaxInstances) return {};   // pool full: drop, not fatal
+        AttackInstance attack;
+        attack.team = team;
+        attack.defIndex = defIndex;
+        attack.damage = damage;
+        attack.scale = scale;
+        attack.range = size;
+        attack.origin = center;
+        attack.dir = facing;
+        attack.pos = center;
+        attack.prevPos = center;
+        m_instances.push_back(attack);
+        m_visuals.push_back({ AreaShape(def, kind, center, facing, size, scale), VisualStyle::Telegraph, defIndex,
+                              def.delay, def.delay, team });
+        return {};
     }
 
     CombatResult CircularCombat::Fire(const CardInstance& card, const CombatContext& context, MobField& mobs, std::mt19937& rng)
@@ -142,18 +186,37 @@ namespace engine::game
         const float dmgMul = stats[StatId::WeaponDamage] * (crit ? stats[StatId::CritDamage] : 1.0f);
         const float damage = CardDamage(def, card.level) * dmgMul;
         const float range = CardRange(def, card.level) * stats[StatId::AttackSize];
+        const float attackSize = stats[StatId::AttackSize];
 
         if (EffectivePath(def) != AttackPath::None)
         {
-            SpawnMoving(def, card, context, mobs, damage, CardDamageMax(def, card.level) * dmgMul, range);
+            // Aim at the nearest mob in range (D6 - the lurker line too), else
+            // along the last move direction.
+            math::Vec2 aimPos;
+            const math::Vec2 aim = mobs.ClosestWithin(playerCenter, range, aimPos) ? AimFrom(playerCenter, aimPos, context.facing)
+                                                                                    : context.facing;
+            const int count = std::max(1, def.count + static_cast<int>(stats[StatId::ExtraProjectiles]));
+            SpawnMoving(Team::Player, def, card.defIndex, CardTargets(def, card.level), playerCenter, aim, attackSize, count,
+                        damage, CardDamageMax(def, card.level) * dmgMul, range, playerCenter);
             return {};   // damage lands in Step
         }
 
         switch (spec.form)
         {
         case AttackForm::Area:
-            return HitArea(AreaShape(def, spec.shape, playerCenter, context.facing, range, stats[StatId::AttackSize]),
-                           damage, card.defIndex, stats, mobs);
+        {
+            math::Vec2 center = playerCenter;
+            math::Vec2 facing = context.facing;
+            if (def.origin == AttackOrigin::Target)
+            {
+                // Lands on the nearest mob in view; nothing to aim at = no cast.
+                math::Vec2 targetPos;
+                if (!mobs.ClosestWithin(playerCenter, kTargetSearch, targetPos)) return {};
+                facing = AimFrom(playerCenter, targetPos, facing);
+                center = targetPos;
+            }
+            return CastArea(Team::Player, def, card.defIndex, center, facing, range, attackSize, damage, context, mobs);
+        }
 
         case AttackForm::Nearest:
         {
@@ -180,35 +243,50 @@ namespace engine::game
         return {};
     }
 
-    void CircularCombat::SpawnMoving(const CardDef& def, const CardInstance& card, const CombatContext& context,
-                                     const MobField& mobs, float damage, float damageMax, float range)
+    CombatResult CircularCombat::FireEnemy(std::uint8_t attackIndex, math::Vec2 caster, const CombatContext& context, MobField& mobs)
     {
-        // Aim at the nearest mob in range (D6 - the lurker line too), else
-        // along the last move direction.
-        const math::Vec2 center = context.playerCenter;
-        math::Vec2 aimPos;
-        const math::Vec2 aim = mobs.ClosestWithin(center, range, aimPos) ? math::Normalized(aimPos - center) : context.facing;
+        const std::vector<CardDef>& table = context.balance.mobAttacks;
+        if (attackIndex >= table.size()) return {};   // F5 shrank mob_attacks.csv mid-run
+        const CardDef& def = table[attackIndex];
+        const math::Vec2 aim = AimFrom(caster, context.playerCenter, context.facing);
+        const float damage = CardDamage(def, 1);
+        const float range = CardRange(def, 1);
+
+        if (EffectivePath(def) != AttackPath::None)
+        {
+            SpawnMoving(Team::Enemy, def, attackIndex, CardTargets(def, 1), caster, aim, 1.0f, std::max(1, def.count),
+                        damage, CardDamageMax(def, 1), range, context.playerCenter);
+            return {};
+        }
+        // The loader refuses nearestbolt for enemies, so path None = an Area.
+        const math::Vec2 center = def.origin == AttackOrigin::Target ? context.playerCenter : caster;
+        return CastArea(Team::Enemy, def, attackIndex, center, aim, range, 1.0f, damage, context, mobs);
+    }
+
+    void CircularCombat::SpawnMoving(Team team, const CardDef& def, std::uint8_t defIndex, int pierces, math::Vec2 origin,
+                                     math::Vec2 aim, float scale, int count, float damage, float damageMax, float range,
+                                     math::Vec2 playerCenter)
+    {
         if (aim.x == 0.0f && aim.y == 0.0f) return;   // nothing to aim along
 
-        // A Polar cast spreads `count` attacks evenly around the circle;
-        // extra_projectiles adds to it. Other paths fire one.
-        const bool polar = EffectivePath(def) == AttackPath::Polar;
-        const int count = polar ? std::max(1, def.count + static_cast<int>(context.stats[StatId::ExtraProjectiles])) : 1;
+        // A Polar cast spreads `count` attacks evenly around the circle. Other paths fire one.
+        if (EffectivePath(def) != AttackPath::Polar) count = 1;
         const float baseAngle = std::atan2(aim.y, aim.x);
         for (int i = 0; i < count; ++i)
         {
             if (m_instances.size() >= kMaxInstances) return;   // pool full: drop, not fatal (MobField::Spawn's convention)
             AttackInstance attack;
-            attack.defIndex = card.defIndex;
-            attack.piercesLeft = static_cast<std::uint8_t>(CardTargets(def, card.level));
+            attack.team = team;
+            attack.defIndex = defIndex;
+            attack.piercesLeft = static_cast<std::uint8_t>(pierces);
             attack.damage = damage;
             attack.damageMax = damageMax;
-            attack.scale = context.stats[StatId::AttackSize];
+            attack.scale = scale;
             attack.range = range;
             attack.theta0 = baseAngle + kTwoPi * static_cast<float>(i) / static_cast<float>(count);
-            attack.origin = center;
+            attack.origin = origin;
             attack.dir = aim;
-            attack.pos = PathPosition(def, attack, center);
+            attack.pos = PathPosition(def, attack, playerCenter);
             attack.prevPos = attack.pos;
             m_instances.push_back(attack);
         }
@@ -247,7 +325,7 @@ namespace engine::game
         {
             // "닿으면 폭발" (§3.2 스태프) - on contact only, never on range-out.
             const HitShape blast = HitShape::Circle(m_touchScratch.front().pos, def.explodeRadius * attack.scale);
-            result += HitArea(blast, attack.damage, attack.defIndex, context.stats, mobs);
+            result += LandArea(Team::Player, blast, attack.damage, attack.defIndex, context, mobs);
             return true;
         }
         case OnHit::Random:
@@ -279,6 +357,40 @@ namespace engine::game
         return false;
     }
 
+    bool CircularCombat::ResolveEnemyContact(AttackInstance& attack, const CardDef& def, const CombatContext& context,
+                                             MobField& mobs, std::mt19937& rng, CombatResult& result)
+    {
+        // Dashing (i-frames [확정]): enemy shots pass straight through.
+        if (!context.playerHittable) return false;
+        const float hitRadius = def.hitRadius * attack.scale;
+        if (!ShapeOverlapsRect(HitShape::Capsule(attack.prevPos, attack.pos, hitRadius), context.playerBox)) return false;
+
+        // There is one target, so every onHit ends the attack on contact.
+        float amount = attack.damage;
+        switch (SpecOf(def.effect).onHit)
+        {
+        case OnHit::Explode:
+            result += LandArea(Team::Enemy, HitShape::Circle(attack.pos, def.explodeRadius * attack.scale), attack.damage,
+                               attack.defIndex, context, mobs);
+            return true;
+        case OnHit::Random:
+        {
+            std::uniform_real_distribution<float> roll(attack.damage, std::max(attack.damage, attack.damageMax));
+            amount = roll(rng);
+            break;
+        }
+        case OnHit::Pierce:
+        case OnHit::None:
+            break;
+        }
+        CombatResult hit;
+        hit.playerDamage = amount;
+        result += hit;
+        m_visuals.push_back({ HitShape::Circle(attack.pos, hitRadius * 2.0f), VisualStyle::Outline, attack.defIndex,
+                              kOutlineLife, kOutlineLife, Team::Enemy });
+        return true;
+    }
+
     CombatResult CircularCombat::Step(float fixedDelta, const CombatContext& context, MobField& mobs, std::mt19937& rng)
     {
         m_time += fixedDelta;
@@ -286,14 +398,16 @@ namespace engine::game
         for (std::size_t i = 0; i < m_instances.size(); )
         {
             AttackInstance& attack = m_instances[i];
-            if (attack.defIndex >= context.balance.weapons.size())   // F5 shrank the weapon table mid-run
+            const std::vector<CardDef>& table = AttackTable(context.balance, attack.team);
+            if (attack.defIndex >= table.size())   // F5 shrank the table mid-run
             {
                 m_instances[i] = m_instances.back();
                 m_instances.pop_back();
                 continue;
             }
-            const CardDef& def = context.balance.weapons[attack.defIndex];
+            const CardDef& def = table[attack.defIndex];
             const EffectSpec& spec = SpecOf(def.effect);
+            const AttackPath path = EffectivePath(def);
 
             attack.t += fixedDelta;
             attack.prevPos = attack.pos;
@@ -303,20 +417,29 @@ namespace engine::game
             switch (spec.form)
             {
             case AttackForm::Projectile:
-                spent = ResolveContact(attack, def, context, mobs, rng, result);
+                spent = attack.team == Team::Player ? ResolveContact(attack, def, context, mobs, rng, result)
+                                                    : ResolveEnemyContact(attack, def, context, mobs, rng, result);
                 break;
             case AttackForm::Area:
             {
+                if (path == AttackPath::None)
+                {
+                    // A delayed area (CastArea): lands once its delay is up.
+                    if (attack.t < def.delay) break;
+                    result += LandArea(attack.team, AreaShape(def, spec.shape, attack.origin, attack.dir, attack.range, attack.scale),
+                                       attack.damage, attack.defIndex, context, mobs);
+                    spent = true;
+                    break;
+                }
                 // A moving area hits everything under it once per tick_interval,
                 // shaped like its instant form and facing its direction of travel.
                 attack.tickLeft -= fixedDelta;
                 if (attack.tickLeft <= 0.0f)
                 {
                     attack.tickLeft += def.tickInterval;
-                    const math::Vec2 moved = attack.pos - attack.prevPos;
-                    const math::Vec2 heading = math::Length(moved) > 0.0f ? math::Normalized(moved) : attack.dir;
+                    const math::Vec2 heading = AimFrom(attack.prevPos, attack.pos, attack.dir);
                     const HitShape shape = AreaShape(def, spec.shape, attack.pos, heading, def.hitRadius * attack.scale, attack.scale);
-                    result += HitArea(shape, attack.damage, attack.defIndex, context.stats, mobs);
+                    result += LandArea(attack.team, shape, attack.damage, attack.defIndex, context, mobs);
                 }
                 break;
             }
@@ -325,7 +448,7 @@ namespace engine::game
                 break;
             }
 
-            if (spent || Expired(def, attack)) { m_instances[i] = m_instances.back(); m_instances.pop_back(); }
+            if (spent || (path != AttackPath::None && Expired(def, attack))) { m_instances[i] = m_instances.back(); m_instances.pop_back(); }
             else ++i;
         }
 

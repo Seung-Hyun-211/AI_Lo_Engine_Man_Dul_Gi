@@ -19,10 +19,10 @@ namespace engine::game
         float       spawnRadius;             // spawn ring distance from the player, pixels
     };
 
-    // v1: a single homogeneous mob type, matching docs/circular-design.md
-    // §10 step 1's scope ("이동 + 쿨다운형 카드 자동발동 + 경험치/레벨업 기본
-    // 루프") - no per-type table yet (YAGNI, same call as CrowdConfig.h's
-    // kCrowdZombies being the only preset before a second type was needed).
+    // MobField capacity + spawn defaults. Mob kinds themselves live in mobs.csv
+    // (docs/circular-design.md §5.3, M3); health/speed/radius/xpValue here are
+    // only the built-in GRUNT row's numbers (CircularBalance::Defaults), used
+    // when mobs.csv is missing or broken.
     inline constexpr MobConfig kActiveMob{
         /*capacity*/ 4096, /*radius*/ 10.0f, /*speed*/ 90.0f, /*health*/ 20.0f,
         /*xpValue*/ 1, /*spawnsPerSecond*/ 100.0f, /*spawnRadius*/ 1150.0f };

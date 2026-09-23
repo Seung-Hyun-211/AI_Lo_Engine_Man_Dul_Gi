@@ -51,6 +51,34 @@ namespace engine::game
         float hitboxWidth{ 48.0f };
         float hitboxHeight{ 72.0f };
         float hitboxLift{ 8.0f };
+        // After taking a hit the player can't be hurt again for this long (s) -
+        // a swarm of touching mobs costs one hit per window, not one per mob.
+        float hurtInvuln{ 0.5f };
+    };
+
+    // mobs.csv - one row = one mob kind (docs/circular-design.md §5.3). Behaviour
+    // is data, not a per-class code path: keep_distance 0 = chase (melee/tank),
+    // > 0 = stop that far out (ranged/caster); an `attack` row makes it cast.
+    // `mobClass` is the base design's category (§5.1) - stage mob pools (M6) and
+    // placeholder colours read it; the movement/attack code never does.
+    enum class MobClass : std::uint8_t { Melee, Tank, Ranged, Caster };
+
+    struct MobDef
+    {
+        std::string id;                   // lower-case identity (image names mob_<id>_NN, M7)
+        std::string name;                 // ASCII
+        MobClass    mobClass{ MobClass::Melee };
+        float       health{ 20.0f };
+        float       speed{ 90.0f };       // px/s
+        float       radius{ 10.0f };      // px: collision + drawn half-size
+        float       contactDamage{ 0.0f };   // per touch (player hurt i-frames gate the rate)
+        float       xp{ 1.0f };           // per kill, before xp_gain
+        float       weight{ 1.0f };       // share of the ring spawn mix (0 = never spawns there)
+        std::uint32_t color{ 0xD04050 };  // 0xRRGGBB placeholder until sprites (M7)
+        float       keepDistance{ 0.0f }; // px: 0 = chase the player, > 0 = hold at this range
+        std::string attackId;             // mob_attacks.csv id, "" = no attack
+        int         attack{ -1 };         // attackId resolved into CircularBalance::mobAttacks, -1 = none
+        float       attackRange{ 0.0f };  // px: casts only while the player is this close
     };
 
     // characters.csv - one row = one playable character (docs/circular-design.md §2.3).
@@ -86,11 +114,7 @@ namespace engine::game
 
     struct CircularBalance
     {
-        // balance.csv (key,value)
-        float mobHealth{ 20.0f };
-        float mobSpeed{ 90.0f };           // px/s
-        float mobRadius{ 10.0f };          // px
-        float mobXp{ 1.0f };               // XP granted per kill (before the player's xpGainMul)
+        // balance.csv (key,value) - run-wide values only; per-mob numbers live in mobs.csv
         float spawnRadius{ 640.0f };       // px from the player
         float xpGrowthAfterTable{ 1.35f }; // XP needed keeps multiplying by this past the last levels.csv row
 
@@ -105,6 +129,8 @@ namespace engine::game
         std::vector<CharacterDef> characters;         // characters.csv (never empty after Defaults/Load)
         std::vector<CardDef> weapons{ kCardDefs.begin(), kCardDefs.end() };   // weapons.csv (never empty)
         std::vector<AccessoryDef> accessories;        // accessories.csv (may be empty - accessories are optional content)
+        std::vector<CardDef> mobAttacks;              // mob_attacks.csv - enemy attacks, weapons.csv's columns (docs/circular-combat.md §5)
+        std::vector<MobDef> mobs;                     // mobs.csv (never empty; index = MobField type, <= 255 rows)
 
         struct SpawnRate
         {
@@ -118,6 +144,10 @@ namespace engine::game
         // XP needed to leave `level` (1-based). Past the table it grows by
         // xpGrowthAfterTable per level so the curve never ends.
         [[nodiscard]] float XpForLevel(int level) const;
+
+        // Which mob kind a ring spawn is, by `weight`: `u01` in [0,1) walks the
+        // cumulative weights. Returns 0 when every weight is 0.
+        [[nodiscard]] std::uint8_t PickSpawnMob(float u01) const;
 
         // The CircularConfig.h constants as a balance set.
         [[nodiscard]] static CircularBalance Defaults();
@@ -135,7 +165,8 @@ namespace engine::game
     };
 
     // Resets `out` to Defaults() and overlays balance.csv / levels.csv /
-    // spawn_curve.csv / player.csv / stats.csv / characters.csv from `directory` (resolved with core::ResolveAsset).
+    // spawn_curve.csv / player.csv / stats.csv / weapons.csv / accessories.csv /
+    // characters.csv / mob_attacks.csv / mobs.csv from `directory` (resolved with core::ResolveAsset).
     // `hardMaxAlive` = MobField capacity; a spawn_curve max_alive above it is
     // clamped with a warning.
     BalanceLoadReport LoadCircularBalance(CircularBalance& out, std::size_t hardMaxAlive,

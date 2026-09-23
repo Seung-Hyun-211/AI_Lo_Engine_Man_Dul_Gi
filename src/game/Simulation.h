@@ -251,8 +251,9 @@ namespace engine::game
         static constexpr std::size_t kParticleCount = 20'000;
         static constexpr int kObstacleCount = 3;
 
-        // Test scene (EnterCircularTestScene) - one dummy target, no swarm/charge
-        // pattern, for isolating weapon damage/behaviour from spawn noise.
+        // Test scene (EnterCircularTestScene) - one dummy target (mobs.csv row 0),
+        // no swarm/charge pattern, no damage to the player, for isolating weapon
+        // damage/behaviour from spawn noise.
         static constexpr float kTestDummyHealth = 99999.0f;
         static constexpr float kTestDummySpawnOffset = 220.0f;   // px in front of the player at spawn
 
@@ -536,13 +537,19 @@ namespace engine::game
         [[nodiscard]] const StatBlock& Stats() const { return m_stats; }
 
         // Player HP (docs/circular-design.md §2.6): regenerates via hp_regen and
-        // is healed on kill via life_steal (both applied in StepCircularPlayer /
-        // StepCombat). No damage source yet (mob contact damage is M3), so it
-        // sits at max until that lands - the numbers are wired and visible now
-        // so they don't need touching again when it does.
+        // is healed on kill via life_steal; mob contact and enemy attacks take
+        // it away (HurtPlayer, M3). One hit per player.csv hurt_invuln window;
+        // none while dashing. At 0 the run is over: the world freezes (Step
+        // early-outs) until Application offers retry / lobby (§12.3 G).
         [[nodiscard]] float PlayerHp() const { return m_playerHp; }
         [[nodiscard]] float PlayerMaxHp() const { return m_stats[StatId::MaxHp]; }
         [[nodiscard]] float PlayerHpFraction() const;
+        [[nodiscard]] bool PlayerHurt() const { return m_hurtTimeLeft > 0.0f; }   // just took a hit (hurt i-frames running)
+        [[nodiscard]] bool RunOver() const { return m_runOver; }
+        // Dev switch: the player takes no damage (the balance simulator's default,
+        // so a standing bot measures pacing instead of dying). The test scene is
+        // damage-free on its own. Survives scene changes.
+        void SetGodMode(bool on) { m_godMode = on; }
 
         // Movement / stamina (docs/circular-design.md §2.2). The dash is an edge
         // like the 3D jump: latch it here so a press on a frame that runs zero
@@ -630,13 +637,21 @@ namespace engine::game
         // ages out hit flashes. Called from Step() when m_demoScene ==
         // DemoScene::Circular.
         void StepCircularScene(float fixedDelta);
-        // Ticks every card's cooldown, fires the ones that expired and steps
-        // the live attacks (CircularCombat); applies the result (kills -> XP,
-        // life_steal -> HP).
+        // Ticks every card's cooldown, fires the ones that expired, fires the
+        // mob casts that came due, steps the live attacks (CircularCombat) and
+        // applies the result (life_steal -> HP, hits -> HurtPlayer, kills -> XP).
         void StepCombat(float fixedDelta, math::Vec2 playerCenter);
-        // Converts kills into XP and, when a threshold is crossed, arms the
-        // level-up (RollLevelUpChoices + m_levelUpPending).
-        void AwardKills(std::uint32_t kills);
+        // Damage aimed at the player (already the largest of this step): gated by
+        // god mode / test scene, dash i-frames and hurt i-frames, reduced by
+        // damage_reduction. HP reaching 0 ends the run.
+        void HurtPlayer(float amount);
+        // Converts the mob field's per-kind kill tally into XP (mobs.csv `xp`) and,
+        // when a threshold is crossed, arms the level-up (RollLevelUpChoices +
+        // m_levelUpPending).
+        void CollectKills();
+        // Per-kind tables MobField reads (speed/keep distance, cast timing,
+        // contact damage) - rebuilt from m_balance.mobs on every (re)load.
+        void RebuildMobTables();
         void CheckLevelUp();
         void RollLevelUpChoices();
 #if defined(ENGINE_WITH_3D)
@@ -753,6 +768,13 @@ namespace engine::game
         std::vector<AccessoryInstance> m_accessories;   // <= kProgression.maxDeckSlots, same cap as the weapon deck
         StatBlock m_stats;                         // evaluated numbers (RecomputeStats); consumers read by StatId
         float m_playerHp{ 0.0f };                  // current HP; clamped to stats[MaxHp] on RecomputeStats, filled to max on a fresh run
+        float m_hurtTimeLeft{ 0.0f };              // > 0 after a hit: no further damage until it runs out (player.csv hurt_invuln)
+        bool  m_runOver{ false };                  // HP hit 0: the world is frozen until a retry / lobby
+        bool  m_godMode{ false };                  // SetGodMode - dev only, not reset by scene changes
+        std::vector<MobMotion> m_mobMotion;        // per mob kind, from m_balance.mobs (RebuildMobTables)
+        std::vector<MobAttackTiming> m_mobAttackTiming;
+        std::vector<float> m_mobContact;           // contact_damage per kind
+        std::vector<MobCast> m_castScratch;        // reused by StepCombat, avoids a per-step allocation
         StatModifiers m_cardMods;                 // level-up stat cards picked this run (character start values are added on top)
         std::size_t m_characterIndex{ 0 };         // into m_balance.characters; survives F5/F6, changed by SelectCharacter
         PlayerMotion m_motion{ PlayerMotion::Idle };
