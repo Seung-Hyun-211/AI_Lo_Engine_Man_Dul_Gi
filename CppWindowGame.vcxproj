@@ -61,7 +61,7 @@
     <ClCompile Include="src\game\SettingsScreen.cpp" />
     <ClCompile Include="src\game\Simulation.cpp" />
     <ClCompile Include="src\game\SnapshotBuilder.cpp" />
-    <ClCompile Include="src\game\SceneSelectScreen.cpp" />
+    <ClCompile Include="src\game\LobbyScreen.cpp" />
     <ClCompile Include="src\game\vfx\ParticleSystem.cpp" />
     <ClCompile Include="src\import\CreaseLines.cpp" />
     <ClCompile Include="src\import\ImageData.cpp" />
@@ -115,7 +115,7 @@
     <ClInclude Include="src\game\SettingsScreen.h" />
     <ClInclude Include="src\game\Simulation.h" />
     <ClInclude Include="src\game\SnapshotBuilder.h" />
-    <ClInclude Include="src\game\SceneSelectScreen.h" />
+    <ClInclude Include="src\game\LobbyScreen.h" />
     <ClInclude Include="src\game\vfx\Particle.h" />
     <ClInclude Include="src\game\vfx\ParticleEffectDef.h" />
     <ClInclude Include="src\game\vfx\ParticleEffects.h" />

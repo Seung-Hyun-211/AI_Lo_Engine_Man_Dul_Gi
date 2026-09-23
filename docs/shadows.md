@@ -59,8 +59,9 @@ Dx11Renderer::Render():
 
 ## 씬 3: 그림자/조명 쇼케이스
 
-`DemoScene::ShadowShowcase`(설정 → "SCENE SELECT" 메뉴에서 런타임 선택, `docs/demo-scene.md` — 기본
-진입 씬은 `DefenseCombat`), `SnapshotBuilder::BuildShadowShowcaseScene` — 크라우드·와글거리는 데모 액터 없이, 그래픽 확인만을 위해 배치한 정적 씬:
+`DemoScene::ShadowShowcase`(런타임 선택 가능한 값이지만 2026-09 부터 로비 메뉴엔 버튼이 없다 —
+`Application::EnterInGame(DemoScene::ShadowShowcase)` 코드 호출로만 진입, `docs/demo-scene.md`),
+`SnapshotBuilder::BuildShadowShowcaseScene` — 크라우드·와글거리는 데모 액터 없이, 그래픽 확인만을 위해 배치한 정적 씬:
 
 - 밝은 중립색 바닥(그림자 대비가 잘 보이도록) + 낮은 각도 그림자를 받는 뒷벽(acne/peter-panning이 큰 평면에서 한눈에 보임).
 - 높이가 0.5m씩 올라가는 계단형 플린스 5개 — 경사면을 따라 그림자 길이/그라데이션이 어떻게 변하는지.
@@ -89,7 +90,7 @@ Dx11Renderer::Render():
 
 **그림자를 받기만**: `common3d.hlsli` 를 쓰는 패스면 자동. VS 에서 `output.worldPos = worldPos.xyz`(TEXCOORD1), PS 에서 `SampleShadow(input.worldPos)` 를 `ApplyLighting`/`ApplyCelLighting` 에 전달 — 캐스케이드 선택은 함수 내부에서 처리되므로 호출부는 캐스케이드를 몰라도 된다.
 
-**새 씬 추가**: `Simulation.h`의 `enum class DemoScene`에 값 추가(`docs/demo-scene.md` — 씬 선택 화면(`SceneSelectScreen`)에 버튼도 하나 추가해야 실제로 진입 가능) + `Simulation::SpawnActors`/`SnapshotBuilder::BuildCamera`/`BuildLighting`/`BuildScene3D`에 `if (simulation.ActiveScene() == DemoScene::N)` 분기(`ShadowShowcase`처럼) — 캐스케이드 0은 그대로 두고 캐스케이드 1만 그 씬에 맞게.
+**새 씬 추가**: `Simulation.h`의 `enum class DemoScene`에 값 추가(`docs/demo-scene.md`) + `Simulation::SpawnActors`/`SnapshotBuilder::BuildCamera`/`BuildLighting`/`BuildScene3D`에 `if (simulation.ActiveScene() == DemoScene::N)` 분기(`ShadowShowcase`처럼) — 캐스케이드 0은 그대로 두고 캐스케이드 1만 그 씬에 맞게. **로비 화면(`LobbyScreen`)은 2026-09 부터 GAME/TEST SCENE 두 버튼으로 고정**이라 새 씬을 거기 버튼으로 노출하진 않는다 — `Application::EnterInGame(DemoScene::N)`을 코드에서 직접 부르거나(디버그 키 등) 로비를 다시 확장해야 UI 로 진입 가능.
 
 **끄기**: `BuildLighting` 에서 `lighting.shadowsEnabled = false`.
 

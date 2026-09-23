@@ -128,16 +128,17 @@ namespace engine::game
         return static_cast<std::uint32_t>(m_deadScratch.size());
     }
 
-    void MobField::CollectNearest(math::Vec2 center, float range, std::uint32_t count,
-                                  std::uint32_t* idxOut, std::uint32_t& found) const
+    std::uint32_t MobField::DamageNearest(math::Vec2 center, float range, float amount, std::uint32_t count,
+                                          math::Vec2* hitOut, std::uint32_t& hitCount)
     {
         constexpr std::uint32_t kMaxTargets = 8;
         if (count > kMaxTargets) count = kMaxTargets;
-        found = 0;
-        if (count == 0) return;
+        hitCount = 0;
+        if (count == 0) return 0;
 
         struct Candidate { float distSq; std::uint32_t idx; };
         Candidate best[kMaxTargets];
+        std::uint32_t found = 0;
         const float rangeSq = range * range;
 
         for (const std::uint32_t idx : m_active)
@@ -162,32 +163,83 @@ namespace engine::game
             }
         }
 
-        for (std::uint32_t i = 0; i < found; ++i) idxOut[i] = best[i].idx;
-    }
-
-    void MobField::FindNearest(math::Vec2 center, float range, std::uint32_t count,
-                               math::Vec2* out, std::uint32_t& found) const
-    {
-        std::uint32_t idx[8];
-        CollectNearest(center, range, count, idx, found);
-        for (std::uint32_t i = 0; i < found; ++i) out[i] = { m_posX[idx[i]], m_posY[idx[i]] };
-    }
-
-    std::uint32_t MobField::DamageNearest(math::Vec2 center, float range, float amount, std::uint32_t count,
-                                          math::Vec2* hitOut, std::uint32_t& hitCount)
-    {
-        std::uint32_t idx[8];
-        CollectNearest(center, range, count, idx, hitCount);
-
         m_deadScratch.clear();
-        for (std::uint32_t i = 0; i < hitCount; ++i)
+        for (std::uint32_t i = 0; i < found; ++i)
         {
-            hitOut[i] = { m_posX[idx[i]], m_posY[idx[i]] };
-            m_health[idx[i]] -= amount;
-            if (m_health[idx[i]] <= 0.0f) m_deadScratch.push_back(idx[i]);
+            const std::uint32_t idx = best[i].idx;
+            hitOut[i] = { m_posX[idx], m_posY[idx] };
+            m_health[idx] -= amount;
+            if (m_health[idx] <= 0.0f) m_deadScratch.push_back(idx);
         }
-        for (const std::uint32_t dead : m_deadScratch) Kill(dead);   // after the scan, as in DamageInRadius
+        hitCount = found;
+        for (const std::uint32_t idx : m_deadScratch) Kill(idx);   // after the scan, as in DamageInRadius
         return static_cast<std::uint32_t>(m_deadScratch.size());
+    }
+
+    std::uint32_t MobField::DamageInArc(math::Vec2 center, math::Vec2 forward, float halfAngleRad,
+                                        float range, float amount)
+    {
+        const math::Vec2 dir = math::Normalized(forward);
+        if (dir.x == 0.0f && dir.y == 0.0f) return 0;   // no facing to swing along - nothing to hit
+        const float rangeSq = range * range;
+        const float cosHalfAngle = std::cos(halfAngleRad);
+        m_deadScratch.clear();
+        for (const std::uint32_t idx : m_active)
+        {
+            const float dx = m_posX[idx] - center.x;
+            const float dy = m_posY[idx] - center.y;
+            const float distSq = dx * dx + dy * dy;
+            if (distSq > rangeSq) continue;
+            if (distSq > 1e-6f)   // a mob exactly on `center` is always "in the cone"
+            {
+                const float cosAngle = (dx * dir.x + dy * dir.y) / std::sqrt(distSq);
+                if (cosAngle < cosHalfAngle) continue;
+            }
+
+            m_health[idx] -= amount;
+            if (m_health[idx] <= 0.0f) m_deadScratch.push_back(idx);
+        }
+        for (const std::uint32_t idx : m_deadScratch) Kill(idx);   // after the scan, as in DamageInRadius
+        return static_cast<std::uint32_t>(m_deadScratch.size());
+    }
+
+    std::uint32_t MobField::DamageInCapsule(math::Vec2 start, math::Vec2 end, float halfWidth, float amount)
+    {
+        const math::Vec2 seg = end - start;
+        const float segLenSq = math::Dot(seg, seg);
+        const float radiusSq = halfWidth * halfWidth;
+        m_deadScratch.clear();
+        for (const std::uint32_t idx : m_active)
+        {
+            const math::Vec2 toMob{ m_posX[idx] - start.x, m_posY[idx] - start.y };
+            float t = segLenSq > 1e-6f ? math::Dot(toMob, seg) / segLenSq : 0.0f;
+            t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+            const float dx = m_posX[idx] - (start.x + seg.x * t);
+            const float dy = m_posY[idx] - (start.y + seg.y * t);
+            if (dx * dx + dy * dy > radiusSq) continue;
+
+            m_health[idx] -= amount;
+            if (m_health[idx] <= 0.0f) m_deadScratch.push_back(idx);
+        }
+        for (const std::uint32_t idx : m_deadScratch) Kill(idx);
+        return static_cast<std::uint32_t>(m_deadScratch.size());
+    }
+
+    bool MobField::ClosestWithin(math::Vec2 center, float radius, math::Vec2& posOut) const
+    {
+        float bestDistSq = radius * radius;
+        bool found = false;
+        for (const std::uint32_t idx : m_active)
+        {
+            const float dx = m_posX[idx] - center.x;
+            const float dy = m_posY[idx] - center.y;
+            const float distSq = dx * dx + dy * dy;
+            if (distSq > bestDistSq) continue;
+            bestDistSq = distSq;
+            posOut = { m_posX[idx], m_posY[idx] };
+            found = true;
+        }
+        return found;
     }
 
     std::uint32_t MobField::BeginWindup(math::Vec2 center, const math::Rect& exclude,

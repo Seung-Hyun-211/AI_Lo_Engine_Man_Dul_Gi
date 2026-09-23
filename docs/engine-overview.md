@@ -104,7 +104,7 @@ render(Dx11) ─▶ core(NonCopyable), D3D11     상위 레이어를 도로 참�
 - **서드파티 추가** — `src/vendor/<lib>/`에 소스 vendor, 벤더 헤더는 그 라이브러리를 쓰는 `.cpp` 안에서만 include, 밖으로는 엔진 타입만. vcxproj 에 소스 추가(필요 시 `CompileAs`/`WarningLevel` per-file).
 - **새 차원 모듈** — `<layer>/core` + `<layer>/x2d` + `<layer>/x3d` 디렉터리, 서로 include 금지, `ENGINE_WITH_3D`로 3D 빌드 제외 가능하게. `render`·`physics`가 예시.
 - **새 위젯** — `ui::Widget`을 상속한다. 기존 위젯 수정 없이(OCP) `Build`(로컬 좌표 → `Quad`), `PointerXxx`(소비 시 `true`)만 구현한다. LSP: 기반 계약(로컬 좌표·`parentOrigin` 기준 배치·소비 반환)을 지킨다. `CheckBox`/`Slider`가 예시.
-- **새 화면/씬 상태** — `game/<Screen>.h/.cpp`에 위젯 트리를 만드는 자유 함수(`SceneSelectScreen`/`SettingsScreen`/`LevelUpScreen`이 예시), `Application`이 `UIContext::SetScreen`(전체 교체) 또는 `SetOverlay`(모달)로 꽂는다. `UIContext`는 게임 개념을 모른다(OCP). `GameState` enum에 값 추가 + `Application::Run`의 스텝 게이팅 조건 갱신. 세부 `docs/scene-flow-design.md`.
+- **새 화면/씬 상태** — `game/<Screen>.h/.cpp`에 위젯 트리를 만드는 자유 함수(`LobbyScreen`/`SettingsScreen`/`LevelUpScreen`이 예시), `Application`이 `UIContext::SetScreen`(전체 교체) 또는 `SetOverlay`(모달)로 꽂는다. `UIContext`는 게임 개념을 모른다(OCP). `GameState` enum에 값 추가 + `Application::Run`의 스텝 게이팅 조건 갱신. 세부 `docs/scene-flow-design.md`.
 - **새 엔티티 종류** — `core::EntityId`로 식별하고, 데이터는 단순 struct 배열(지금 `Particle`처럼, 조합이 없으면 `EntityId`도 불필요) 또는 컴포넌트 테이블(`EntityId`→행, 조합이 다양하면) 중 맞는 쪽을 고른다 — `core::EntityRegistry`는 생존만 관리하고 데이터는 안 갖는다(SRP). 세부·예시 코드 `docs/entity-lifecycle-design.md`.
 - **새 렌더 패스/스테이지** — `render::IRenderPass`(`Name`/`Initialize(device, ShaderLibrary&)`/`Execute`/`Release`)를 구현하고 `main.cpp`에서 `renderer.AddRenderPass(...)`로 등록한다(Start 전). 셰이더는 `assets/shaders/<name>.hlsl` + `shaders.Get(device, "<name>", layout, count)`. 렌더러 코어·기존 패스는 안 건드린다(OCP). 세부는 [shader-pipeline.md](shader-pipeline.md).
 - **셰이더 수정** — `assets/shaders/*.hlsl` 편집·저장 → 실행 중이면 다음 프레임에 핫리로드. 공통 코드는 `common3d.hlsli`.
@@ -114,7 +114,7 @@ render(Dx11) ─▶ core(NonCopyable), D3D11     상위 레이어를 도로 참�
 
 ## 현재 데모 페이로드
 
-뼈대가 살아있음을 보이기 위한 콘텐츠. 씬은 런타임 선택(`Simulation::DemoScene`; 앱은 곧장 Circular 로 부팅, 다른 씬은 설정 → SCENE SELECT — [demo-scene.md](demo-scene.md)).
+뼈대가 살아있음을 보이기 위한 콘텐츠. 씬은 런타임 선택(`Simulation::DemoScene`; 앱은 곧장 Circular 로 부팅, 2026-09 부터 로비 메뉴엔 GAME/TEST SCENE 2버튼뿐이라 다른 씬은 메뉴로 못 감(코드 호출만) — [demo-scene.md](demo-scene.md)).
 
 - **서큘러 (2D, `DemoScene::Circular`, 브랜치 `circular`):** WASD 로 움직이는 플레이어(화면 중앙 고정, 월드가 역스크롤) 주변으로 `MobField`(SoA, 최대 4096)의 몹이 링에서 초당 100마리(기본)로 스폰돼 몰려온다. 소지 무기(PULSE/BOLT, `game/Card.h` — 기초 설계의 "소지 무기")가 쿨다운마다 자동 발동해 `EffectPass2D` 글로우를 띄우고, 킬 → XP → 레벨업 시 `LevelUpScreen` 3택 모달이 뜬다(레벨업은 기초 설계 밖 [살]). 기준 문서 = `docs/# Circular 기초 설계.md`. 주기적으로 붉은 예고 구역 뒤 몹 일부가 돌진한다(시각 테스트, 플레이어 HP 없음). **몹 수·XP·레벨 수치는 CSV**(`assets/data/circular/`, F5/F6 리로드, `tools/run_balance_sim.bat`) — [circular-balance.md](circular-balance.md). `ENGINE_WITH_3D` 없이도 빌드/동작 — [circular-design.md](circular-design.md).
 

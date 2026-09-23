@@ -31,7 +31,7 @@ src/
     shader/ShaderLibrary.* assets/shaders/*.hlsl 컴파일·캐시·핫리로드  → docs/shader-pipeline.md
     Dx11Renderer.*         렌더 스레드. device/swapchain/depth + ShaderLibrary 소유. 패스 목록 실행
     r2d/Sprite2D.h, QuadPass2D.*   [2D] 스크린 공간 Quad, 깊이 off, straight-alpha
-    r2d/EffectPass2D.*     [2D] 절차적 글로우(가산, 화면공간) — (서큘러 씬에서는 사용 안 함 — 이펙트 전부 제거)  → docs/circular-design.md §7
+    r2d/EffectPass2D.*     [2D] 절차적 글로우(가산, 화면공간) — 인프라만 유지, 서큘러는 미사용(공격 연출은 평면 Quad) → docs/circular-design.md §7
     r3d/Lighting.h, FrameConstants.h  [3D] key + ambient 조명, Frame cbuffer  → docs/lighting.md
     r3d/Scene3D.h, MeshPass3D.*    [3D] 깊이 테스트, 원근 카메라, 내장 큐브·평면
     r3d/ModelMeshPass3D.*          [3D] FBX 셀 셰이딩 + 아웃라인 + 크리즈 라인 + TGA  → docs/toon-rendering.md
@@ -52,7 +52,7 @@ src/
     SnapshotBuilder.*      Simulation + UIContext → RenderSnapshot
     Application.*           조립·프레임 지휘. IWindowEventSink 구현
     MobField.*             [서큘러] 몹 스웜 SoA (스폰·추적·범위 데미지·돌진 상태)  → docs/circular-design.md
-    Card.h                 [서큘러] 무기 정의 테이블(CardDef) + 소지 무기(CardInstance) + 스탯 카드(kStatCards, 장신구 임시)
+    Card.h                 [서큘러] 무기 정의(CardDef, 폴백) + 소지 무기(CardInstance) + 스탯 카드(kStatCards) — 장신구 정의는 CircularBalance.h(AccessoryDef)
     Stats.h                [서큘러] 능력치 체계 — StatId(기초 4 + 파생), StatBlock, ComputeStats
     CircularConfig.h       [서큘러] 컴파일 타임 기본값 (몹·진행·돌진 패턴)
     CircularBalance.*      [서큘러] CSV 밸런스 로더/평가기  → docs/circular-balance.md
@@ -95,7 +95,7 @@ Render Thread (Dx11Renderer::RenderLoop): latest-frame mailbox → DX11 draw →
 
 ## 현재 데모
 
-앱은 곧장 **서큘러(2D 뱀서 라이크)** 씬으로 부팅한다 — 플레이어(파란 사각)가 WASD 로 움직이고 몹이 몰려오며 무기가 자동으로 발동한다([docs/circular-design.md](docs/circular-design.md), 아트는 색 사각형 자리표시자). 다른 씬(3D 디펜스 `DefenseCombat`, `CharacterDemo`, `ShadowShowcase`, `EffectsTest`)은 ESC → 설정 → SCENE SELECT 로 들어간다([docs/demo-scene.md](docs/demo-scene.md)). 충돌은 탐지만 하고 위치 보정은 없다.
+앱은 곧장 **서큘러(2D 뱀서 라이크)** 씬으로 부팅한다 — 플레이어(파란 사각)가 WASD 로 움직이고 몹이 몰려오며 무기가 자동으로 발동한다([docs/circular-design.md](docs/circular-design.md), 아트는 색 사각형 자리표시자). 다른 씬(3D 디펜스 `DefenseCombat`, `CharacterDemo`, `ShadowShowcase`, `EffectsTest`)은 2026-09 부터 어떤 메뉴에서도 못 들어간다(로비는 GAME/TEST SCENE 2버튼뿐 - 코드로 `EnterInGame(DemoScene::N)` 을 불러야 진입한다)([docs/demo-scene.md](docs/demo-scene.md)). 충돌은 탐지만 하고 위치 보정은 없다.
 
 ## UI 설계
 

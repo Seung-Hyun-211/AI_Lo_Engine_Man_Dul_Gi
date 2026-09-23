@@ -6,6 +6,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <functional>
+#include <string>
 
 #if defined(ENGINE_WITH_3D)
 #include "game/vfx/ParticleSystem.h"
@@ -17,14 +19,93 @@ namespace engine::game
     namespace
     {
         // Generic float[0..1] -> 8:8:8:8 packer. Unconditional (unlike most of
-        // this anonymous namespace) - the Circular scene's hit-flash effects
-        // need it too, and it has no 3D dependency of its own.
+        // this anonymous namespace) - it has no 3D dependency of its own.
         std::uint32_t PackRgba(float r, float g, float b, float a)
         {
             const auto u8 = [](float v) {
                 return static_cast<std::uint32_t>(math::Clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f);
             };
             return u8(r) | (u8(g) << 8) | (u8(b) << 16) | (u8(a) << 24);
+        }
+
+        // Approximates a ring with small square dots around the circumference -
+        // QuadPass2D only draws axis-aligned solid rects (no circle primitive),
+        // and Circular's attack visuals are plain flat shapes on purpose (no
+        // EffectPass2D glow, docs/circular-design.md §7). Segment count scales
+        // with radius so the dashes stay evenly spaced at any PULSE range.
+        void DrawDottedRing(std::vector<render::Quad>& quads, math::Vec2 center, float radius,
+                            float dotSize, math::Color color)
+        {
+            constexpr float kTwoPi = 6.28318530718f;
+            const int segments = std::clamp(static_cast<int>(kTwoPi * radius / 18.0f), 16, 64);
+            for (int i = 0; i < segments; ++i)
+            {
+                const float angle = kTwoPi * static_cast<float>(i) / static_cast<float>(segments);
+                const math::Vec2 dot = center + math::Vec2{ std::cos(angle), std::sin(angle) } * radius;
+                quads.push_back({ dot.x - dotSize * 0.5f, dot.y - dotSize * 0.5f, dotSize, dotSize,
+                                  color.r, color.g, color.b, color.a });
+            }
+        }
+
+        // --- HUD skeleton (docs/circular-design.md §7.2) ---------------------
+        // Anchors a design-space rect (HUD.png, 1920x1080 reference) into actual
+        // pixel space, preserving each edge's margin so the HUD hugs screen
+        // corners at any resolution preset (the design's own requirement,
+        // §7.3 "해상도 프리셋이 바뀌어도 HUD 가 화면 모서리에 붙어야 한다").
+        enum class HudAnchor { TopLeft, TopRight, BottomCenter };
+        math::Rect ResolveHudRect(math::Rect design, HudAnchor anchor, float viewportW, float viewportH)
+        {
+            constexpr float kDesignW = 1920.0f, kDesignH = 1080.0f;
+            const float sx = viewportW / kDesignW;
+            const float sy = viewportH / kDesignH;
+            switch (anchor)
+            {
+            case HudAnchor::TopRight:
+                return { viewportW - (kDesignW - design.x) * sx, design.y * sy, design.width * sx, design.height * sy };
+            case HudAnchor::BottomCenter:
+                return { design.x * sx, viewportH - (kDesignH - design.y) * sy, design.width * sx, design.height * sy };
+            case HudAnchor::TopLeft:
+            default:
+                return { design.x * sx, design.y * sy, design.width * sx, design.height * sy };
+            }
+        }
+
+        // A bordered placeholder panel for a not-yet-art HUD.png region - flat
+        // fill + thin border, no image yet (§7.3 "아트 전에는 단색 Quad 로
+        // 자리표시"). Skeleton only: no hover/click wiring (that needs real
+        // ui::Widget classes + the input-mode switch, §7.1 - still [살] 미구현).
+        void DrawHudPanel(std::vector<render::Quad>& quads, math::Rect rect, math::Color fill)
+        {
+            ui::DrawRect(quads, rect, fill);
+            constexpr float border = 2.0f;
+            const math::Color edge{ fill.r * 0.5f + 0.15f, fill.g * 0.5f + 0.15f, fill.b * 0.5f + 0.15f, 0.9f };
+            ui::DrawRect(quads, { rect.x, rect.y, rect.width, border }, edge);
+            ui::DrawRect(quads, { rect.x, rect.y + rect.height - border, rect.width, border }, edge);
+            ui::DrawRect(quads, { rect.x, rect.y, border, rect.height }, edge);
+            ui::DrawRect(quads, { rect.x + rect.width - border, rect.y, border, rect.height }, edge);
+        }
+
+        // Divides `strip` (the weapon/accessory strip, §7.2) into `slotCount`
+        // equal cells; `labelFor(slot)` returns "" for an empty slot (dimmer
+        // cell, no text).
+        void DrawSlotStrip(std::vector<render::Quad>& quads, math::Rect strip, int slotCount,
+                           const std::function<std::string(int)>& labelFor)
+        {
+            if (slotCount <= 0) return;
+            constexpr float gap = 4.0f;
+            const float cellW = (strip.width - gap * static_cast<float>(slotCount + 1)) / static_cast<float>(slotCount);
+            for (int i = 0; i < slotCount; ++i)
+            {
+                const float x = strip.x + gap + static_cast<float>(i) * (cellW + gap);
+                const math::Rect cell{ x, strip.y + gap, cellW, strip.height - gap * 2.0f };
+                const std::string label = labelFor(i);
+                const math::Color cellColor = label.empty() ? math::Color{ 0.0f, 0.0f, 0.0f, 0.25f }
+                                                             : math::Color{ 0.20f, 0.28f, 0.40f, 0.85f };
+                ui::DrawRect(quads, cell, cellColor);
+                if (!label.empty())
+                    ui::DrawText(quads, label, { cell.x + 4.0f, cell.y + cell.height * 0.5f - 5.0f },
+                                1.1f, { 0.9f, 0.95f, 1.0f, 1.0f });
+            }
         }
 
 #if defined(ENGINE_WITH_3D)
@@ -735,30 +816,41 @@ namespace engine::game
                                             Simulation::kPlayerSize, Simulation::kPlayerSize,
                                             playerColor.r, playerColor.g, playerColor.b, playerColor.a });
 
-            // PULSE range: a flat yellow disc, on for a moment after each cast so
-            // it blinks with the weapon's cooldown. No effect pass - quads only
-            // (the disc is stacked horizontal strips; the world has no circle primitive).
-            constexpr float kStripHeight = 4.0f;
-            for (const HitFlash& flash : simulation.HitFlashes())
+            // PULSE range -> a blinking yellow dotted ring (no glow VFX, plain
+            // flat shapes - docs/circular-design.md §7 "이펙트 없음").
+            for (const PulseRing& ring : simulation.PulseRings())
             {
-                const math::Vec2 c = toScreen(flash.pos);
-                for (float dy = -flash.radius; dy < flash.radius; dy += kStripHeight)
-                {
-                    const float midY = dy + kStripHeight * 0.5f;
-                    const float halfWidth = std::sqrt(std::max(0.0f, flash.radius * flash.radius - midY * midY));
-                    if (halfWidth <= 0.0f) continue;
-                    snapshot.worldQuads.push_back({ c.x - halfWidth, c.y + dy, halfWidth * 2.0f, kStripHeight,
-                                                    1.0f, 0.90f, 0.10f, 0.35f });
-                }
+                const float t = ring.life > 0.0f ? math::Clamp(ring.ageLeft / ring.life, 0.0f, 1.0f) : 0.0f;
+                const float blink = std::sin(ring.ageLeft * 55.0f) > 0.0f ? 1.0f : 0.35f;
+                const math::Color color{ 1.0f, 0.85f, 0.10f, t * blink };
+                DrawDottedRing(snapshot.worldQuads, toScreen(ring.pos), ring.range, 8.0f, color);
             }
 
-            // BOLT: red squares in flight.
-            for (const Projectile& bolt : simulation.Projectiles())
+            // BOLT -> a red square travelling from the caster to each hit. Purely
+            // cosmetic (the damage already landed) - just how the shot reads.
+            constexpr float kBoltShotSize = 14.0f;
+            for (const BoltShot& shot : simulation.BoltShots())
             {
-                const math::Vec2 p = toScreen(bolt.pos);
-                snapshot.worldQuads.push_back({ p.x - Simulation::kBoltSize * 0.5f, p.y - Simulation::kBoltSize * 0.5f,
-                                                Simulation::kBoltSize, Simulation::kBoltSize,
-                                                1.0f, 0.05f, 0.05f, 1.0f });
+                const float t = shot.life > 0.0f ? math::Clamp(1.0f - shot.ageLeft / shot.life, 0.0f, 1.0f) : 1.0f;
+                const math::Vec2 pos = toScreen(shot.start + (shot.end - shot.start) * t);
+                snapshot.worldQuads.push_back({ pos.x - kBoltShotSize * 0.5f, pos.y - kBoltShotSize * 0.5f,
+                                                kBoltShotSize, kBoltShotSize, 0.95f, 0.12f, 0.10f, 1.0f });
+            }
+
+            // 스태프/단검/트럼프 카드 (§3.2) - a real, physically-travelling
+            // projectile, drawn every frame at its live position (unlike
+            // BoltShot's cast-to-hit lerp, this one has actual gameplay motion
+            // to show). Colour by kind so the three read apart at a glance;
+            // still a plain flat square, no glow.
+            constexpr float kProjectileSize = 12.0f;
+            for (const Projectile& shot : simulation.Projectiles())
+            {
+                math::Color color{ 0.8f, 0.8f, 0.85f, 1.0f };   // Piercing: silver
+                if (shot.kind == ProjectileKind::Exploding) color = { 1.0f, 0.55f, 0.15f, 1.0f };
+                else if (shot.kind == ProjectileKind::Random) color = { 0.75f, 0.35f, 0.95f, 1.0f };
+                const math::Vec2 pos = toScreen(shot.pos);
+                snapshot.worldQuads.push_back({ pos.x - kProjectileSize * 0.5f, pos.y - kProjectileSize * 0.5f,
+                                                kProjectileSize, kProjectileSize, color.r, color.g, color.b, color.a });
             }
         }
 
@@ -1090,67 +1182,150 @@ namespace engine::game
         // wave HUD above, minus the ENGINE_WITH_3D dependency.
         if (simulation.ActiveScene() == DemoScene::Circular)
         {
-            char text[64];
-            std::snprintf(text, sizeof(text), "MOBS %zu   KILLS %d",
-                          simulation.Mobs().LiveCount(), simulation.MobKillCount());
-            constexpr float scale = 2.0f;
-            const float glyph = 6.0f * scale;
-            const float width = static_cast<float>(std::strlen(text)) * glyph;
-            const float x = (static_cast<float>(viewportWidth) - width) * 0.5f;
-            const float y = 12.0f;
-            ui::DrawRect(snapshot.uiQuads, { x - 8.0f, y - 4.0f, width + 16.0f, 7.0f * scale + 8.0f },
-                         { 0.0f, 0.0f, 0.0f, 0.45f });
-            ui::DrawText(snapshot.uiQuads, text, { x, y }, scale, { 1.0f, 0.95f, 0.35f, 1.0f });
-
-            // Level + XP bar (full-width strip at the very top) and the deck
-            // line under the mob counter: "PULSE 3  BOLT 1".
+            // XP bar - full-width strip at the very top. Not one of §7.2's
+            // anchored regions (HUD.png treats it as frame art, not a widget),
+            // so it stays a plain strip rather than an anchored panel.
             const float needed = simulation.XpNeeded();
             const float xpFraction = needed > 0.0f ? math::Clamp(simulation.XpCurrent() / needed, 0.0f, 1.0f) : 0.0f;
             const float viewW = static_cast<float>(viewportWidth);
             ui::DrawRect(snapshot.uiQuads, { 0.0f, 0.0f, viewW, 8.0f }, { 0.0f, 0.0f, 0.0f, 0.55f });
             ui::DrawRect(snapshot.uiQuads, { 0.0f, 0.0f, viewW * xpFraction, 8.0f }, { 0.35f, 0.85f, 1.0f, 0.95f });
 
-            char deck[128];
-            int used = std::snprintf(deck, sizeof(deck), "LV %d", simulation.PlayerLevel());
-            for (const CardInstance& card : simulation.Deck())
+            // Test scene banner (Lobby "TEST SCENE") - unmistakable at a
+            // glance so it never reads as the real run.
+            if (simulation.IsCircularTestMode())
             {
-                if (used < 0 || used >= static_cast<int>(sizeof(deck))) break;
-                used += std::snprintf(deck + used, sizeof(deck) - static_cast<std::size_t>(used), "   %s %d",
-                                      kCardDefs[card.defIndex].name, card.level);
+                const char* text = "TEST SCENE - 99999 HP DUMMY, NO SPAWN/CHARGE";
+                constexpr float scale = 1.75f;
+                const float glyph = 6.0f * scale;
+                const float width = static_cast<float>(std::strlen(text)) * glyph;
+                const float x = (viewW - width) * 0.5f;
+                constexpr float y = 14.0f;
+                ui::DrawRect(snapshot.uiQuads, { x - 8.0f, y - 4.0f, width + 16.0f, 7.0f * scale + 8.0f },
+                             { 0.0f, 0.0f, 0.0f, 0.55f });
+                ui::DrawText(snapshot.uiQuads, text, { x, y }, scale, { 1.0f, 0.55f, 0.20f, 1.0f });
             }
-            const float deckWidth = static_cast<float>(std::strlen(deck)) * glyph;
-            const float deckX = (viewW - deckWidth) * 0.5f;
-            const float deckY = y + 7.0f * scale + 14.0f;
-            ui::DrawRect(snapshot.uiQuads, { deckX - 8.0f, deckY - 4.0f, deckWidth + 16.0f, 7.0f * scale + 8.0f },
-                         { 0.0f, 0.0f, 0.0f, 0.45f });
-            ui::DrawText(snapshot.uiQuads, deck, { deckX, deckY }, scale, { 0.55f, 0.90f, 1.0f, 1.0f });
 
-            // Balancing readout, bottom-left (docs/circular-balance.md): the run
-            // clock, the spawn-curve values in effect right now, and the CSV
-            // load state - so an edit + F5 can be checked without leaving the game.
+            // --- HUD skeleton (docs/circular-design.md §7.2, HUD.png regions) ---
+            // Anchored placeholder panels only - flat fill/border + existing
+            // text, no images and no hover/click wiring yet (§7.1's input-mode
+            // switch and real ui::Widget classes are the still-missing "flesh").
+            const float vw = static_cast<float>(viewportWidth);
+            const float vh = static_cast<float>(viewportHeight);
+            constexpr math::Color kPanelFill{ 0.10f, 0.10f, 0.14f, 0.55f };
+            constexpr float kLabelScale = 1.25f;
+            const StatBlock& stats = simulation.Stats();
+
+            // 좌상단 (1) 초상화
+            const math::Rect portrait = ResolveHudRect({ 0.0f, 0.0f, 175.0f, 170.0f }, HudAnchor::TopLeft, vw, vh);
+            DrawHudPanel(snapshot.uiQuads, portrait, kPanelFill);
+            ui::DrawText(snapshot.uiQuads, simulation.Character().name, { portrait.x + 6.0f, portrait.y + 6.0f },
+                        kLabelScale, { 0.95f, 0.95f, 1.0f, 1.0f });
+
+            // 좌상단 (2-1)(2-2) 재화 2종 - 획득/사용처가 [미정]이라 0 자리표시
+            const math::Rect runCurrency = ResolveHudRect({ 178.0f, 0.0f, 140.0f, 58.0f }, HudAnchor::TopLeft, vw, vh);
+            DrawHudPanel(snapshot.uiQuads, runCurrency, kPanelFill);
+            ui::DrawText(snapshot.uiQuads, "RUN 0", { runCurrency.x + 6.0f, runCurrency.y + 6.0f },
+                        kLabelScale, { 1.0f, 0.90f, 0.50f, 1.0f });
+            const math::Rect metaCurrency = ResolveHudRect({ 325.0f, 0.0f, 167.0f, 58.0f }, HudAnchor::TopLeft, vw, vh);
+            DrawHudPanel(snapshot.uiQuads, metaCurrency, kPanelFill);
+            ui::DrawText(snapshot.uiQuads, "META 0", { metaCurrency.x + 6.0f, metaCurrency.y + 6.0f },
+                        kLabelScale, { 0.80f, 0.90f, 1.0f, 1.0f });
+
+            // 좌상단 (3) 스태미너 게이지
+            const math::Rect staminaGauge = ResolveHudRect({ 178.0f, 66.0f, 314.0f, 47.0f }, HudAnchor::TopLeft, vw, vh);
+            DrawHudPanel(snapshot.uiQuads, staminaGauge, kPanelFill);
+            {
+                const float fraction = simulation.StaminaFraction();
+                ui::Color fill{ 0.35f, 0.90f, 0.40f, 0.95f };
+                if (simulation.PlayerInvulnerable()) fill = { 0.85f, 0.95f, 1.0f, 0.95f };
+                else if (simulation.RunLocked() || fraction < 0.2f) fill = { 1.0f, 0.60f, 0.20f, 0.95f };
+                ui::DrawRect(snapshot.uiQuads, { staminaGauge.x + 3.0f, staminaGauge.y + 3.0f,
+                                                (staminaGauge.width - 6.0f) * fraction, staminaGauge.height - 6.0f }, fill);
+                char text[24];
+                std::snprintf(text, sizeof(text), "STA %d", static_cast<int>(simulation.Stamina() + 0.5f));
+                ui::DrawText(snapshot.uiQuads, text, { staminaGauge.x + 6.0f, staminaGauge.y + staminaGauge.height - 16.0f },
+                            kLabelScale, { 0.90f, 1.0f, 0.90f, 1.0f });
+            }
+
+            // 좌상단 (4) 궁극기 게이지 - 충전 시스템 자체가 아직 없어(§2.4) 빈 셸만
+            const math::Rect ultimateGauge = ResolveHudRect({ 178.0f, 120.0f, 312.0f, 43.0f }, HudAnchor::TopLeft, vw, vh);
+            DrawHudPanel(snapshot.uiQuads, ultimateGauge, kPanelFill);
+            ui::DrawText(snapshot.uiQuads, "ULTIMATE", { ultimateGauge.x + 6.0f, ultimateGauge.y + 6.0f },
+                        kLabelScale, { 0.7f, 0.7f, 0.8f, 0.9f });
+
+            // 우상단 (1) 설정 버튼 / (2-1) 상태 버튼 - ESC 가 여전히 설정을 연다;
+            // 이 두 박스는 자리만 잡아둔 것으로 아직 클릭되지 않는다.
+            const math::Rect settingsButton = ResolveHudRect({ 1843.0f, 3.0f, 72.0f, 72.0f }, HudAnchor::TopRight, vw, vh);
+            DrawHudPanel(snapshot.uiQuads, settingsButton, kPanelFill);
+            ui::DrawText(snapshot.uiQuads, "SET", { settingsButton.x + 10.0f, settingsButton.y + 28.0f },
+                        kLabelScale, { 0.9f, 0.9f, 0.95f, 1.0f });
+            const math::Rect statusButton = ResolveHudRect({ 1843.0f, 83.0f, 72.0f, 72.0f }, HudAnchor::TopRight, vw, vh);
+            DrawHudPanel(snapshot.uiQuads, statusButton, kPanelFill);
+            ui::DrawText(snapshot.uiQuads, "STAT", { statusButton.x + 6.0f, statusButton.y + 28.0f },
+                        kLabelScale, { 0.9f, 0.9f, 0.95f, 1.0f });
+
+            // 우상단 (2-2) 상태 팝업 - 원래는 (2-1) 호버 중에만 보이지만(§7.1),
+            // 호버 시스템이 아직 없어 지금은 항상 표시(임시).
+            const math::Rect statusPopup = ResolveHudRect({ 1563.0f, 83.0f, 259.0f, 505.0f }, HudAnchor::TopRight, vw, vh);
+            DrawHudPanel(snapshot.uiQuads, statusPopup, kPanelFill);
+            {
+                char lines[10][40];
+                int n = 0;
+                std::snprintf(lines[n++], 40, "%s", simulation.Character().name.c_str());
+                std::snprintf(lines[n++], 40, "VIT %d   INT %d",
+                              static_cast<int>(stats[StatId::Vit] + 0.5f), static_cast<int>(stats[StatId::Int] + 0.5f));
+                std::snprintf(lines[n++], 40, "COR %d   AGI %d",
+                              static_cast<int>(stats[StatId::Cor] + 0.5f), static_cast<int>(stats[StatId::Agi] + 0.5f));
+                std::snprintf(lines[n++], 40, "HP %d / %d", static_cast<int>(simulation.PlayerHp() + 0.5f),
+                              static_cast<int>(simulation.PlayerMaxHp() + 0.5f));
+                std::snprintf(lines[n++], 40, "REGEN %.1f/S", stats[StatId::HpRegen]);
+                std::snprintf(lines[n++], 40, "SPD %d%%   SIZE %d%%",
+                              static_cast<int>(stats[StatId::MoveSpeed] * 100.0f + 0.5f),
+                              static_cast<int>(stats[StatId::AttackSize] * 100.0f + 0.5f));
+                std::snprintf(lines[n++], 40, "ATKSPD %d%%  DMG %d%%",
+                              static_cast<int>(stats[StatId::AttackSpeed] * 100.0f + 0.5f),
+                              static_cast<int>(stats[StatId::WeaponDamage] * 100.0f + 0.5f));
+                std::snprintf(lines[n++], 40, "CRIT %d%% x%d%%",
+                              static_cast<int>(stats[StatId::CritChance] * 100.0f + 0.5f),
+                              static_cast<int>(stats[StatId::CritDamage] * 100.0f + 0.5f));
+                std::snprintf(lines[n++], 40, "LIFESTEAL %d%%", static_cast<int>(stats[StatId::LifeSteal] * 100.0f + 0.5f));
+                std::snprintf(lines[n++], 40, "LUCK %d", static_cast<int>(stats[StatId::Luck] + 0.5f));
+                for (int i = 0; i < n; ++i)
+                    ui::DrawText(snapshot.uiQuads, lines[i], { statusPopup.x + 10.0f, statusPopup.y + 10.0f + static_cast<float>(i) * 20.0f },
+                                kLabelScale, { 0.85f, 0.90f, 1.0f, 1.0f });
+            }
+
+            // 중앙 하단 (1) 소지 무기 / (2) 소지 장신구
+            const math::Rect weaponStrip = ResolveHudRect({ 300.0f, 982.0f, 658.0f, 94.0f }, HudAnchor::BottomCenter, vw, vh);
+            DrawHudPanel(snapshot.uiQuads, weaponStrip, kPanelFill);
+            DrawSlotStrip(snapshot.uiQuads, weaponStrip, kProgression.maxDeckSlots,
+                         [&simulation](int slot) -> std::string {
+                             if (slot >= static_cast<int>(simulation.Deck().size())) return {};
+                             const CardInstance& card = simulation.Deck()[static_cast<std::size_t>(slot)];
+                             char text[24];
+                             std::snprintf(text, sizeof(text), "%s %d", simulation.Balance().weapons[card.defIndex].name.c_str(), card.level);
+                             return text;
+                         });
+            const math::Rect accessoryStrip = ResolveHudRect({ 962.0f, 982.0f, 623.0f, 94.0f }, HudAnchor::BottomCenter, vw, vh);
+            DrawHudPanel(snapshot.uiQuads, accessoryStrip, kPanelFill);
+            DrawSlotStrip(snapshot.uiQuads, accessoryStrip, kProgression.maxDeckSlots,
+                         [&simulation](int slot) -> std::string {
+                             if (slot >= static_cast<int>(simulation.Accessories().size())) return {};
+                             const AccessoryInstance& acc = simulation.Accessories()[static_cast<std::size_t>(slot)];
+                             char text[24];
+                             std::snprintf(text, sizeof(text), "%s %d", simulation.Balance().accessories[acc.defIndex].name.c_str(), acc.level);
+                             return text;
+                         });
+
+            // 좌하단 개발용 밸런싱 줄(§7.4 "밸런싱 줄은 개발용으로 유지") - HUD.png
+            // 영역이 아니라서 앵커 없이 그대로 둔다. 몹/킬 수도 여기로 합쳤다.
             const CircularBalance::SpawnRate rate = simulation.Balance().SpawnAt(simulation.RunTime());
-            char tuning[96];
-            std::snprintf(tuning, sizeof(tuning), "T %d   RATE %d   CAP %d   XP %d OF %d",
+            char tuning[128];
+            std::snprintf(tuning, sizeof(tuning), "MOBS %zu  KILLS %d   T %d   RATE %d   CAP %d   XP %d OF %d",
+                          simulation.Mobs().LiveCount(), simulation.MobKillCount(),
                           static_cast<int>(simulation.RunTime()), static_cast<int>(rate.perSecond + 0.5f), rate.maxAlive,
                           static_cast<int>(simulation.XpCurrent()), static_cast<int>(needed + 0.5f));
-
-            // Stat readout (stand-in for the HUD.png status popup): the base four
-            // and the derived numbers weapons / movement / dash read.
-            const StatBlock& stats = simulation.Stats();
-            char baseStats[96];
-            std::snprintf(baseStats, sizeof(baseStats), "%s   VIT %d   INT %d   COR %d   AGI %d",
-                          simulation.Character().name.c_str(),
-                          static_cast<int>(stats[StatId::Vit] + 0.5f), static_cast<int>(stats[StatId::Int] + 0.5f),
-                          static_cast<int>(stats[StatId::Cor] + 0.5f), static_cast<int>(stats[StatId::Agi] + 0.5f));
-            char derived[128];
-            std::snprintf(derived, sizeof(derived), "SPD %d%%   ATK SPD %d%%   SIZE %d%%   DMG %d%%   PROJ %d   DASH COST %d",
-                          static_cast<int>(stats[StatId::MoveSpeed] * 100.0f + 0.5f),
-                          static_cast<int>(stats[StatId::AttackSpeed] * 100.0f + 0.5f),
-                          static_cast<int>(stats[StatId::AttackSize] * 100.0f + 0.5f),
-                          static_cast<int>(stats[StatId::WeaponDamage] * 100.0f + 0.5f),
-                          static_cast<int>(stats[StatId::ExtraProjectiles]),
-                          static_cast<int>(simulation.Balance().player.dashCost * stats[StatId::DashCostMul] + 0.5f));
-
             char status[96];
             const BalanceLoadReport& report = simulation.BalanceReport();
             if (report.Clean())
@@ -1161,28 +1336,12 @@ namespace engine::game
             constexpr float smallScale = 1.5f;
             const float smallGlyph = 6.0f * smallScale;
             const float lineH = 7.0f * smallScale + 6.0f;
-            constexpr int kLineCount = 4;
-            const float baseY = static_cast<float>(viewportHeight) - static_cast<float>(kLineCount) * lineH - 8.0f;
-            const char* lines[kLineCount] = { tuning, baseStats, derived, status };
+            constexpr int kLineCount = 2;
+            const float baseY = vh - static_cast<float>(kLineCount) * lineH - 8.0f;
+            const char* lines[kLineCount] = { tuning, status };
             const ui::Color lineColor[kLineCount] = { { 0.85f, 0.95f, 0.85f, 1.0f },
-                                                      { 1.0f, 0.90f, 0.55f, 1.0f },
-                                                      { 0.85f, 0.85f, 1.0f, 1.0f },
                                                       report.Clean() ? ui::Color{ 0.60f, 0.85f, 0.60f, 1.0f }
                                                                      : ui::Color{ 1.0f, 0.55f, 0.45f, 1.0f } };
-
-            // Stamina bar (HUD.png top-left has one; the full layout is a later
-            // milestone, so this is a plain bar under the XP strip). Orange while
-            // running dry / locked, pale while the dash i-frames are active.
-            constexpr float barX = 16.0f, barY = 20.0f, barW = 240.0f, barH = 14.0f;
-            const float staminaFraction = simulation.StaminaFraction();
-            ui::Color barColor{ 0.35f, 0.90f, 0.40f, 0.95f };
-            if (simulation.PlayerInvulnerable()) barColor = { 0.85f, 0.95f, 1.0f, 0.95f };
-            else if (simulation.RunLocked() || staminaFraction < 0.2f) barColor = { 1.0f, 0.60f, 0.20f, 0.95f };
-            ui::DrawRect(snapshot.uiQuads, { barX - 2.0f, barY - 2.0f, barW + 4.0f, barH + 4.0f }, { 0.0f, 0.0f, 0.0f, 0.55f });
-            ui::DrawRect(snapshot.uiQuads, { barX, barY, barW * staminaFraction, barH }, barColor);
-            char staminaText[32];
-            std::snprintf(staminaText, sizeof(staminaText), "STAMINA %d", static_cast<int>(simulation.Stamina() + 0.5f));
-            ui::DrawText(snapshot.uiQuads, staminaText, { barX + 4.0f, barY + barH + 6.0f }, 1.5f, { 0.85f, 1.0f, 0.85f, 1.0f });
             for (int i = 0; i < kLineCount; ++i)
             {
                 const float w = static_cast<float>(std::strlen(lines[i])) * smallGlyph;

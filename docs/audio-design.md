@@ -70,7 +70,7 @@ class AudioEngine {
   생성된 880 Hz 짧은 사인(44100 Hz, 16-bit mono). 실제 게임 이벤트 배선이 생기면 교체.
 - `EnterInGame()` 이 `m_audio.PlayMusic("assets/audio/blip.wav")`(플레이스홀더 — 같은 파일이 짧아서
   스트리밍의 루프-되감기 경로를 몇 초 안에 여러 번 실행해 보는 스트레스 테스트도 겸한다),
-  `EnterSceneSelect()` 가 `StopMusic()`. 실제 트랙이 생기면 경로만 교체.
+  `EnterLobby()` 가 `StopMusic()`. 실제 트랙이 생기면 경로만 교체.
 
 ## 5. 사용 방법 (How to use)
 
@@ -80,7 +80,7 @@ class AudioEngine {
 
 ### 배경음악
 
-`Application` 의 씬 전환 함수(`EnterInGame` 등)에서 `m_audio.PlayMusic("assets/audio/<track>.wav")`, 씬 선택 메뉴 복귀 시 `StopMusic()` 또는 다른 곡.
+`Application` 의 씬 전환 함수(`EnterInGame` 등)에서 `m_audio.PlayMusic("assets/audio/<track>.wav")`, 로비 메뉴 복귀 시 `StopMusic()` 또는 다른 곡.
 
 ### 새 볼륨 버스
 

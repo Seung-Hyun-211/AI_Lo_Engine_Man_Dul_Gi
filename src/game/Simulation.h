@@ -82,26 +82,51 @@ namespace engine::game
         float      warnTotal{ 1.0f };
     };
 
-    // PULSE's range marker: a plain yellow disc at `pos` that is on for `life`
-    // seconds after each cast, so it blinks at the weapon's cooldown. Render-only
-    // (no effect pass - the Circular scene has no effects for now); ages out the
-    // same way TracerLine does further down.
-    struct HitFlash
+    // A blinking yellow ring showing PULSE's radius at the moment it fired -
+    // render-only (no EffectPass2D glow - plain flat shapes only, docs/
+    // circular-design.md §7), ages out the same way TracerLine does further
+    // down. SnapshotBuilder draws it as a dashed ring of worldQuads.
+    struct PulseRing
     {
         math::Vec2 pos{};
+        float range{ 0.0f };
         float ageLeft{ 0.0f };
-        float life{ 1.0f };
-        float radius{ 24.0f };   // px - the pulse's actual range
+        float life{ 1.0f };   // ageLeft/life -> 1 (just spawned) .. 0 (about to vanish)
     };
 
-    // A thrown BOLT: a red square that flies straight to where its target was,
-    // damages the first mob it touches and is consumed. Gone after `rangeLeft` px.
+    // A red square that visually travels from the caster to a BOLT hit -
+    // render-only and purely cosmetic: the hit already landed (DamageNearest)
+    // when this is queued, so it never affects gameplay timing, only how the
+    // shot reads on screen. Ages out the same way TracerLine does.
+    struct BoltShot
+    {
+        math::Vec2 start{};
+        math::Vec2 end{};
+        float ageLeft{ 0.0f };
+        float life{ 1.0f };   // ageLeft/life -> 1 (just fired) .. 0 (arrived)
+    };
+
+    // Which weapon-specific thing a live Projectile does on its first hit each
+    // step (docs/circular-design.md §3.2 무기 5종). Simulation::StepProjectiles
+    // switches on this - same "effect tag, not an if-chain" shape as CardEffect.
+    enum class ProjectileKind : std::uint8_t { Piercing, Exploding, Random };
+
+    // A real, physically-travelling shot (스태프/단검/트럼프 카드) - unlike
+    // BoltShot above, this one carries gameplay state: its own position/
+    // velocity/remaining flight distance, and it deals damage when it
+    // actually touches a mob (not on cast). Simulation owns a bounded pool
+    // (kMaxProjectiles) in a plain std::vector, swap-removed like HitFlash/
+    // BoltShot when spent.
     struct Projectile
     {
         math::Vec2 pos{};
-        math::Vec2 vel{};
-        float damage{ 0.0f };
-        float rangeLeft{ 0.0f };
+        math::Vec2 vel{};              // px/s
+        float rangeLeft{ 0.0f };       // px budget - despawns (no hit) when this runs out
+        float damage{ 0.0f };          // Piercing/Exploding: the hit damage. Random: the roll's lower bound.
+        float damageMax{ 0.0f };       // Random only: the roll's upper bound (unused otherwise)
+        float explodeRadius{ 0.0f };   // Exploding only: AoE radius on contact
+        std::uint8_t piercesLeft{ 0 }; // Piercing only: hits left before it's spent
+        ProjectileKind kind{ ProjectileKind::Piercing };
     };
 
 #if defined(ENGINE_WITH_3D)
@@ -272,11 +297,26 @@ namespace engine::game
         static constexpr std::size_t kParticleCount = 20'000;
         static constexpr int kObstacleCount = 3;
 
-        static constexpr float kHitFlashLife = 0.18f;             // seconds an attack glow stays visible
-        static constexpr float kBoltSpeed = 720.0f;               // px/s of a thrown BOLT
-        static constexpr float kBoltSize = 12.0f;                // px, side of the red square
-        static constexpr float kBoltHitReach = 6.0f;             // px added to a mob's radius for the touch test (one step is speed/60 = 12 px, so keep radius + reach above that)
+        static constexpr float kPulseRingLife = 0.20f;             // seconds the PULSE range ring blinks
+        static constexpr float kBoltShotSpeed = 1200.0f;           // px/s the BOLT projectile visual travels at
+        static constexpr float kBoltShotMinLife = 0.05f;           // seconds - floor so a point-blank hit still reads
+
+        // Real projectiles (스태프/단검/트럼프 카드, §3.2) - unlike BoltShot,
+        // these carry gameplay state (see Projectile's own comment).
         static constexpr std::size_t kMaxProjectiles = 512;
+        static constexpr float kProjectileHitReach = 6.0f;   // px added to a mob's radius for the touch test
+        // A Piercing shot that lands a hit is nudged this far past the mob it
+        // just hit (along its own velocity) so the NEXT step's touch test
+        // doesn't immediately re-hit the same still-alive mob (no per-mob
+        // "already hit" tracking exists - MobField doesn't expose slot
+        // identity through DamageNearest, only positions). [살] mitigation,
+        // not exact geometry.
+        static constexpr float kPierceClearDistance = 24.0f;
+
+        // Test scene (EnterCircularTestScene) - one dummy target, no swarm/charge
+        // pattern, for isolating weapon damage/behaviour from spawn noise.
+        static constexpr float kTestDummyHealth = 99999.0f;
+        static constexpr float kTestDummySpawnOffset = 220.0f;   // px in front of the player at spawn
 
 #if defined(ENGINE_WITH_3D)
         // Demo character controller (docs/demo-scene.md). Metres / seconds.
@@ -418,6 +458,15 @@ namespace engine::game
         // see the two `#if`-split definitions in Simulation.cpp.
         void EnterScene(DemoScene scene);
 
+        // Test scene (Lobby "TEST SCENE"): still DemoScene::Circular - all the
+        // normal Circular machinery (movement, weapons, stats, HUD) applies -
+        // but ResetCircularScene spawns one kTestDummyHealth-HP dummy instead
+        // of the swarm, and StepCircularScene skips the spawn budget and the
+        // charge pattern so nothing but the dummy interrupts a weapon test.
+        // EnterScene(Circular) always clears this back off.
+        void EnterCircularTestScene();
+        [[nodiscard]] bool IsCircularTestMode() const { return m_circularTestMode; }
+
 #if defined(ENGINE_WITH_3D)
         // Mouse-look for the orbit camera. Called once per frame (not per fixed
         // step) so a frame with 0 or >1 sim steps still turns the camera exactly
@@ -523,7 +572,8 @@ namespace engine::game
         // ENGINE_WITH_3D dependency ---
         [[nodiscard]] const MobField& Mobs() const { return m_mobs; }
         [[nodiscard]] int MobKillCount() const { return m_mobKillCount; }
-        [[nodiscard]] const std::vector<HitFlash>& HitFlashes() const { return m_hitFlashes; }
+        [[nodiscard]] const std::vector<PulseRing>& PulseRings() const { return m_pulseRings; }
+        [[nodiscard]] const std::vector<BoltShot>& BoltShots() const { return m_boltShots; }
         [[nodiscard]] const std::vector<Projectile>& Projectiles() const { return m_projectiles; }
         [[nodiscard]] const ChargeZone& ChargeZoneState() const { return m_chargeZone; }
 
@@ -541,7 +591,17 @@ namespace engine::game
         [[nodiscard]] const BalanceLoadReport& BalanceReport() const { return m_balanceReport; }
         [[nodiscard]] float RunTime() const { return m_circularTime; }   // seconds since this run started
         [[nodiscard]] const std::vector<CardInstance>& Deck() const { return m_deck; }
+        [[nodiscard]] const std::vector<AccessoryInstance>& Accessories() const { return m_accessories; }
         [[nodiscard]] const StatBlock& Stats() const { return m_stats; }
+
+        // Player HP (docs/circular-design.md §2.6): regenerates via hp_regen and
+        // is healed on kill via life_steal (both applied in StepCircularPlayer /
+        // ExecuteCard). No damage source yet (mob contact damage is M3), so it
+        // sits at max until that lands - the numbers are wired and visible now
+        // so they don't need touching again when it does.
+        [[nodiscard]] float PlayerHp() const { return m_playerHp; }
+        [[nodiscard]] float PlayerMaxHp() const { return m_stats[StatId::MaxHp]; }
+        [[nodiscard]] float PlayerHpFraction() const;
 
         // Movement / stamina (docs/circular-design.md §2.2). The dash is an edge
         // like the 3D jump: latch it here so a press on a frame that runs zero
@@ -632,10 +692,15 @@ namespace engine::game
         // Ticks every card's cooldown and runs the ones that expired; returns
         // how many mobs the whole deck killed this step (for kills/XP).
         std::uint32_t StepCards(float fixedDelta, math::Vec2 playerCenter);
-        // Flies every thrown BOLT one step and applies damage on touch; returns kills.
+        // Flies every live Projectile one step and applies its weapon-specific
+        // effect on the first mob it touches (§3.2 스태프/단검/트럼프 카드).
+        // Returns kills. Swap-removes spent projectiles the same way StepCards'
+        // caller ages out PulseRing/BoltShot.
         std::uint32_t StepProjectiles(float fixedDelta);
         // The effect switch (docs §2 "효과 태그 테이블"). Returns kills.
         std::uint32_t ExecuteCard(const CardInstance& card, math::Vec2 playerCenter);
+        // life_steal consumer, shared by both ExecuteCard cases - see the .cpp.
+        void ApplyLifeSteal(float damage, std::uint32_t kills);
         // Converts kills into XP and, when a threshold is crossed, arms the
         // level-up (RollLevelUpChoices + m_levelUpPending).
         void AwardKills(std::uint32_t kills);
@@ -739,6 +804,7 @@ namespace engine::game
 
         // --- Circular scene (docs/circular-design.md) - 2D baseline, no
         // ENGINE_WITH_3D dependency ---
+        bool m_circularTestMode{ false };   // EnterCircularTestScene() sets this; EnterScene(Circular) clears it
         MobField m_mobs{ kActiveMob.capacity };
         CircularBalance m_balance{ CircularBalance::Defaults() };   // CSV overlay lands here (ReloadBalance)
         BalanceLoadReport m_balanceReport;
@@ -749,11 +815,14 @@ namespace engine::game
         float m_chargePatternTimer{ 0.0f };        // counts down to the next marking while no zone is active
         std::uint32_t m_chargePatternCount{ 0 };   // salt for MobField::BeginWindup's subset hash
         int m_mobKillCount{ 0 };
-        std::vector<HitFlash> m_hitFlashes;
-        std::vector<Projectile> m_projectiles;
+        std::vector<PulseRing> m_pulseRings;
+        std::vector<BoltShot> m_boltShots;
+        std::vector<Projectile> m_projectiles;   // <= kMaxProjectiles
         std::vector<CardInstance> m_deck;          // <= kProgression.maxDeckSlots; slot index is the identity
+        std::vector<AccessoryInstance> m_accessories;   // <= kProgression.maxDeckSlots, same cap as the weapon deck
         StatBlock m_stats;                         // evaluated numbers (RecomputeStats); consumers read by StatId
-        StatModifiers m_cardMods;                  // level-up stat cards picked this run (character start values are added on top)
+        float m_playerHp{ 0.0f };                  // current HP; clamped to stats[MaxHp] on RecomputeStats, filled to max on a fresh run
+        StatModifiers m_cardMods;                 // level-up stat cards picked this run (character start values are added on top)
         std::size_t m_characterIndex{ 0 };         // into m_balance.characters; survives F5/F6, changed by SelectCharacter
         PlayerMotion m_motion{ PlayerMotion::Idle };
         float m_stamina{ 0.0f };

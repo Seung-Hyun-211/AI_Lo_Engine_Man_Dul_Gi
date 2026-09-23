@@ -185,20 +185,22 @@ if (auto hit = world.RaycastClosest(down)) { actor.pos.y = hit->point.y; actor.g
 데이터 표는 [circular-balance.md](circular-balance.md), 이미지·애니메이션은 [circular-art-guide.md](circular-art-guide.md).
 삭제된 옛 트랙: "덱빌딩 × 오토배틀"(덱 합성, 미니언 그리드) — 기초 설계에 없다.
 
-현재 ✅: 씬·이동(걷기)·카메라·`MobField`(SoA 4096, 초당 100마리 스폰)·무기 자동 발동 1차(`Card*` = 소지 무기, PULSE/BOLT)·
-XP/레벨업 3택 모달([살])·**CSV 밸런싱 환경**·🟡 임시(붉은 구역 예고→돌진, 텍스트 HUD).
+현재 ✅: 씬·이동(걷기/달리기/대쉬/스태미너)·카메라·능력치 체계(`Stats.h`, 캐릭터 4종)·**플레이어 HP**(회복·크리·흡혈 소비처, 접촉 피해는 아직 없음)·
+`MobField`(SoA 4096, 초당 100마리 스폰)·**무기 5종 전부**(검/채찍/스태프/단검/트럼프 카드, `Card*` = 소지 무기, 실제 투사체 시스템 포함 — PULSE/BOLT 는 레벨업 풀에만 남은 구형, `weapons.csv`)·**장신구**(`accessories.csv` 6종)·**오버플로우**·
+XP/레벨업 3택 모달([살])·공격 연출(전부 평면 도형, `EffectPass2D` 미사용)·**CSV 밸런싱 환경**·
+**HUD 뼈대**(§7.2 6개 영역 앵커 배치, 단색 placeholder)·🟡 임시(붉은 구역 예고→돌진).
 
 | 단계 | 내용 (기초 설계 항목) | 상태 |
 |---|---|---|
 | ~~M0~~ | 뱀서 골격: 몹 스웜·자동 공격·XP·CSV 밸런싱 환경 (B-장르, B-규칙 일부) | ✅ |
-| **M1** | 달리기(Shift)·대쉬(Space, **무적**, 달리기 ≪ 대쉬·연타 페널티·스킬로 조절)·**스태미너**, **능력치 체계**(기초 4스텟 체력·지력·오염·민첩 + 행운·공격 크기·추가 투사체·공격속도 등 — `stats.csv`), 캐릭터 4종(주력 스텟) — B-규칙, B-캐릭터, [확정] | ✅ (헤드리스 검증, `player/stats/characters.csv`, 선택 모달 F7) |
-| M2 | **HUD.png 배치**(앵커 + 위젯 6종 + `HudState`), 마우스 고정/표시 자동 전환, 호버 아웃라인 — B-UI | ❌ |
+| **M1** | 달리기(Shift)·대쉬(Space, **무적**, 달리기 ≪ 대쉬·연타 페널티·스킬로 조절)·**스태미너**, **능력치 체계**(기초 4스텟 체력·지력·오염·민첩 + 행운·공격 크기·추가 투사체·공격속도 등 — `stats.csv`), 캐릭터 4종(주력 스텟) — B-규칙, B-캐릭터, [확정] | ✅ (헤드리스 검증, `player/stats/characters.csv`, 선택 모달 F7, +HP/크리/흡혈 선반영) |
+| M2 | **HUD.png 배치**(앵커 + 위젯 6종 + `HudState`), 마우스 고정/표시 자동 전환, 호버 아웃라인, **CardSelect.png 레벨업 카드 레이아웃**(좌·중·우 3장 + 티어 색) — B-UI | 🟡 **뼈대만**(앵커 배치 ✅, 이미지·`HudState`·입력모드전환·호버·CardSelect 는 ❌ — 세부는 [circular-design.md](circular-design.md) §10.1) |
 | M3 | 적 종류: 근접·탱커·원거리·마법 (`mobs.csv`, `MobBehavior`) — B-적 | ❌ |
 | M4 | 스폰 패턴 3종(일방통행·사각 포위·좌우 줄) + 시간표 CSV, 텔레그래프 일반화, 임시 돌진 삭제 — B-스폰 | ❌ (**패턴 상세는 사용자가 추가 예정**) |
-| M5 | 장신구 + 무기/장신구 슬롯 분리(6/6, 최대 Lv5) + **오버플로우**(최대 레벨 시 능력치 소량), `weapons.csv`, 캐릭터별 시작 무기(궁극기 내용 [미정], Q 게이지만) — B-무기장신구, [확정] | ❌ |
+| **M5** | **무기 5종**(검=부채꼴, 채찍=직선, 스태프=폭발형 전기볼트, 단검=관통2 투사체, 트럼프 카드=랜덤 데미지 투사체) + 캐릭터별 시작 무기 배정 + `weapons.csv` + 장신구(`accessories.csv`) + 무기/장신구 슬롯 분리(6/6, 최대 Lv5) + **오버플로우**(궁극기 내용 [미정], Q 게이지만) — B-무기장신구, [기초]+[확정] | ✅ 전체 완료(헤드리스 검증) — 남은 건 단검 밸런스뿐, 세부는 [circular-design.md](circular-design.md) §10.1 |
 | M6 | 스테이지 20개·바이옴 4·**무한 필드 90초 버티기 → 보스(바이옴당 2~3체)**·`StageFlow`(마계숲 라운드 선택: **휴식·상점·이벤트** / 초원 직선 / 왕국 성 방·보스방), 왕의 기사 — B-스테이지, [확정] | ❌ (인간마을·보스 이름·노드 세부는 [미정]) |
 | M7 | 월드 스프라이트 경로 + 스프라이트 애니메이션 + 아틀라스 그룹 — [circular-art-guide.md](circular-art-guide.md) | ❌ (M1~M6 과 병행 가능) |
-| M8 | 메타 재화·세이브·다회차 강화 — B-UI 재화 2종 | ❌ (세이브 인프라 신규) |
+| M8 | 메타 재화·세이브·다회차 **강화**, **씬 구조(로딩·타이틀[시작/강화/설정/종료]) + 난이도 6단계**(노말~인세인, `difficulty.csv`) — B-UI 재화 2종, **B-씬** | ❌ (세이브 인프라 신규. 지금은 곧장 인게임 부팅 + 개발용 로비 — [circular-design.md](circular-design.md) §7.5·§7.6) |
 
 사용자 확정 사항(레벨업 유지, 슬롯 6/6·Lv5·오버플로우, 대쉬 무적·스태미너 규칙, 무한 필드 90초, 노드 3종, 능력치 체계 등)은 [circular-design.md](circular-design.md) §12.1, 남은 질문은 §12.3.
 
@@ -214,7 +216,7 @@ XP/레벨업 3택 모달([살])·**CSV 밸런싱 환경**·🟡 임시(붉은 �
 
 착수 순서 제안: **1·2·3 완료 → (4 결정) → 5**.
 
-**현재 위치 (2026-09 기준)**: D1 ✅ · D2 ✅ · D3 ✅(3D `Step()` 그리드) · D4 ✅(인스턴싱 + 컬 + LOD 2단계 + FBX 정적 크라우드 메시, 설정은 `game/CrowdConfig.h`). **핵심 인프라 4개 완료.** 씬 선택은 이제 런타임(`Simulation::DemoScene`, 앱은 곧장 CIRCULAR 로 부팅(타이틀 화면 삭제), 다른 씬은 설정 → "SCENE SELECT" 메뉴, 리빌드 불필요 — `docs/demo-scene.md`) — 3D 씬 중 `DefenseCombat`(3D 빌드에서 `Simulation::m_demoScene` 초기값이지만 **앱은 곧장 Circular 로 부팅**하고 이 씬은 설정 → SCENE SELECT 로 진입)이 D5 의 실제 플레이 씬: 언덕 위 1인칭 플레이어 + `kActiveCrowd`(현재 500 좀비 — 실기기 체감 끊김으로 16384에서 낮춤, `docs/demo-scene.md` "풀 churn 버그") 조망. 나머지 3개(`CharacterDemo`/`ShadowShowcase`/`EffectsTest`)는 그래픽·VFX 확인용. 남은 갈래:
+**현재 위치 (2026-09 기준)**: D1 ✅ · D2 ✅ · D3 ✅(3D `Step()` 그리드) · D4 ✅(인스턴싱 + 컬 + LOD 2단계 + FBX 정적 크라우드 메시, 설정은 `game/CrowdConfig.h`). **핵심 인프라 4개 완료.** 씬 선택은 런타임(`Simulation::DemoScene`, 앱은 곧장 CIRCULAR 로 부팅(타이틀 화면 삭제) — `docs/demo-scene.md`)이지만, **로비 메뉴(설정 → LOBBY)는 2026-09 부터 GAME/TEST SCENE(둘 다 Circular) 2버튼뿐** — 3D 씬(`DefenseCombat` 포함)은 어떤 메뉴로도 못 가고 `Application::EnterInGame(DemoScene::N)` 코드 호출로만 진입 가능. `DefenseCombat`(3D 빌드에서 `Simulation::m_demoScene` 초기값이지만 **앱은 곧장 Circular 로 부팅**)이 D5 의 실제 플레이 씬: 언덕 위 1인칭 플레이어 + `kActiveCrowd`(현재 500 좀비 — 실기기 체감 끊김으로 16384에서 낮춤, `docs/demo-scene.md` "풀 churn 버그") 조망. 나머지 3개(`CharacterDemo`/`ShadowShowcase`/`EffectsTest`)는 그래픽·VFX 확인용. 남은 갈래:
 - **D5 — 웨이브/스폰 + HP/데미지 + 목표 지점·패배 판정 + 무기 5종**: 게임 루프 본체. 여기부터
   "게임 사이클". 설계 완료(`defense-combat-design.md`) → 구현 순서는 그 문서 §10.
 - **D4 잔여 — VAT 확장(법선·셰도우 실루엣·다중 클립·fp16) / 빌보드·중간 LOD(§5.3)**. (디퓨즈 §9.6-A·1클립 VAT §9.6-B 는 ✅)

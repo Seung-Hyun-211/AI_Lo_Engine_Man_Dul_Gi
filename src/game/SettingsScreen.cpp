@@ -182,12 +182,12 @@ namespace engine::game
         panel->AddChild(std::move(close));
         y += 54.0f;
 
-        // Move between scenes (docs/demo-scene.md "씬 선택") without quitting
-        // the app - leaves the current scene for the scene-select menu.
-        auto sceneSelect = std::make_unique<ui::Button>("SCENE SELECT");
-        sceneSelect->SetBounds({ 16, y, 528, 44 });
-        sceneSelect->onClick = std::move(actions.onSceneSelect);
-        panel->AddChild(std::move(sceneSelect));
+        // Leave the current scene for the lobby (GAME / TEST SCENE) without
+        // quitting the app.
+        auto lobby = std::make_unique<ui::Button>("LOBBY");
+        lobby->SetBounds({ 16, y, 528, 44 });
+        lobby->onClick = std::move(actions.onLobby);
+        panel->AddChild(std::move(lobby));
 
         return panel;
     }

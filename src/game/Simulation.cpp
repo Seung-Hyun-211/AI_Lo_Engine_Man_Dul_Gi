@@ -103,6 +103,7 @@ namespace engine::game
         LayOutObstacles();
         RecomputeStats();   // built-in defaults until the Circular scene loads its CSVs
         m_stamina = m_stats[StatId::StaminaMax];
+        m_playerHp = m_stats[StatId::MaxHp];
 #if defined(ENGINE_WITH_3D)
         SpawnActors();
 #endif
@@ -176,6 +177,7 @@ namespace engine::game
         m_demoScene = scene;
         if (scene == DemoScene::Circular)
         {
+            m_circularTestMode = false;   // this is the normal entry point - EnterCircularTestScene() is the other one
             ResetCircularScene();
             return;   // none of the 3D actor/crowd reset below applies
         }
@@ -279,9 +281,17 @@ namespace engine::game
         // it is the only enumerator that exists (see the enum's own #if
         // split in Simulation.h).
         m_demoScene = scene;
+        m_circularTestMode = false;   // this is the normal entry point - EnterCircularTestScene() is the other one
         ResetCircularScene();
     }
 #endif
+
+    void Simulation::EnterCircularTestScene()
+    {
+        m_demoScene = DemoScene::Circular;
+        m_circularTestMode = true;
+        ResetCircularScene();
+    }
 
     void Simulation::ResetCircularScene()
     {
@@ -292,7 +302,8 @@ namespace engine::game
         m_chargePatternTimer = kChargePattern.firstDelaySeconds;
         m_chargePatternCount = 0;
         m_mobKillCount = 0;
-        m_hitFlashes.clear();
+        m_pulseRings.clear();
+        m_boltShots.clear();
         m_projectiles.clear();
         // Fresh run: the chosen character's start weapon, no stat cards, level 1.
         // The RNG is reseeded so a run replays identically given identical
@@ -300,6 +311,7 @@ namespace engine::game
         ReloadBalance();   // every entry picks up CSV edits - no rebuild, no app restart
         m_deck.clear();
         m_deck.push_back({ Character().startWeapon, 1, 0.0f });
+        m_accessories.clear();
         m_cardMods = {};
         RecomputeStats();
         m_level = 1;
@@ -310,6 +322,7 @@ namespace engine::game
         m_circularTime = 0.0f;
         m_motion = PlayerMotion::Idle;
         m_stamina = m_stats[StatId::StaminaMax];
+        m_playerHp = m_stats[StatId::MaxHp];   // fresh run/character: full heal
         m_staminaRegenDelay = 0.0f;
         m_runLocked = false;
         m_dashQueued = false;
@@ -322,13 +335,33 @@ namespace engine::game
         // resume wherever that run left off.
         m_player = { static_cast<float>(m_worldWidth) * 0.5f - kPlayerSize * 0.5f,
                      static_cast<float>(m_worldHeight) * 0.5f - kPlayerSize * 0.5f };
+
+        if (m_circularTestMode)
+        {
+            // One very tough dummy instead of the swarm (StepCircularScene
+            // skips the spawn budget in test mode) - a fixed spot in front of
+            // the player so a fresh run always starts facing it.
+            const math::Vec2 playerCenter = m_player + math::Vec2{ kPlayerSize * 0.5f, kPlayerSize * 0.5f };
+            m_mobs.Spawn(playerCenter + math::Vec2{ kTestDummySpawnOffset, 0.0f }, kTestDummyHealth, m_balance.mobRadius);
+        }
     }
 
     void Simulation::ReloadBalance()
     {
         m_balanceReport = LoadCircularBalance(m_balance, m_mobs.Capacity());
         if (m_characterIndex >= m_balance.characters.size()) m_characterIndex = 0;
-        RecomputeStats();   // stats.csv / characters.csv edits apply mid-run (F5)
+        // weapons.csv/accessories.csv can shrink mid-run (F5) - clamp any
+        // already-owned defIndex so it stays a valid array index (Card.h's
+        // CardInstance comment: it may now point at a *different* weapon than
+        // before, but it will never be an out-of-bounds one).
+        if (!m_balance.weapons.empty())
+            for (CardInstance& card : m_deck)
+                if (card.defIndex >= m_balance.weapons.size())
+                    card.defIndex = static_cast<std::uint8_t>(m_balance.weapons.size() - 1);
+        for (AccessoryInstance& owned : m_accessories)
+            if (owned.defIndex >= m_balance.accessories.size())
+                owned.defIndex = m_balance.accessories.empty() ? 0 : static_cast<std::uint8_t>(m_balance.accessories.size() - 1);
+        RecomputeStats();   // stats.csv / characters.csv / accessories.csv edits apply mid-run (F5)
     }
 
     const CharacterDef& Simulation::Character() const
@@ -347,14 +380,31 @@ namespace engine::game
         StatModifiers mods = m_cardMods;
         const CharacterDef& character = Character();
         for (std::size_t i = 0; i < kBaseStatCount; ++i) mods.add[i] += character.start[i];
+        // Accessories (§3.3) - level N gives N x amount. Bounds-checked: an F5
+        // reload that shrinks accessories.csv can leave a stale defIndex (same
+        // caveat as weapon defIndex drift, Card.h's CardInstance comment).
+        for (const AccessoryInstance& owned : m_accessories)
+        {
+            if (owned.defIndex >= m_balance.accessories.size()) continue;
+            const AccessoryDef& def = m_balance.accessories[owned.defIndex];
+            const std::size_t statIndex = static_cast<std::size_t>(def.stat);
+            (def.multiplicative ? mods.mul : mods.add)[statIndex] += def.amount * static_cast<float>(owned.level);
+        }
         m_stats = ComputeStats(m_balance.stats, mods);
         if (m_stamina > m_stats[StatId::StaminaMax]) m_stamina = m_stats[StatId::StaminaMax];
+        if (m_playerHp > m_stats[StatId::MaxHp]) m_playerHp = m_stats[StatId::MaxHp];
     }
 
     float Simulation::StaminaFraction() const
     {
         const float max = m_stats[StatId::StaminaMax];
         return max > 0.0f ? math::Clamp(m_stamina / max, 0.0f, 1.0f) : 0.0f;
+    }
+
+    float Simulation::PlayerHpFraction() const
+    {
+        const float max = m_stats[StatId::MaxHp];
+        return max > 0.0f ? math::Clamp(m_playerHp / max, 0.0f, 1.0f) : 0.0f;
     }
 
     float Simulation::DashCostNow() const
@@ -437,6 +487,10 @@ namespace engine::game
             m_stamina += t.staminaRegenPerSec * m_stats[StatId::StaminaRegen] * dt;
         m_stamina = std::min(m_stamina, m_stats[StatId::StaminaMax]);
 
+        // HP regen (§2.6) - same per-step pass as stamina since both are player
+        // vitals. hp_regen is HP/second; life_steal heals on hit instead (ExecuteCard).
+        m_playerHp = std::min(m_stats[StatId::MaxHp], m_playerHp + m_stats[StatId::HpRegen] * dt);
+
         m_player = m_player + velocityDir * (speed * dt);
         m_player.x = math::Clamp(m_player.x, 0.0f, std::max(0.0f, static_cast<float>(m_worldWidth) - kPlayerSize));
         m_player.y = math::Clamp(m_player.y, 0.0f, std::max(0.0f, static_cast<float>(m_worldHeight) - kPlayerSize));
@@ -452,45 +506,62 @@ namespace engine::game
         m_circularTime += fixedDelta;
         const math::Vec2 playerCenter = m_player + math::Vec2{ kPlayerSize * 0.5f, kPlayerSize * 0.5f };
 
-        // Spawn: a steady trickle onto a ring around the player so mobs
-        // always approach from off-screen, capped by MobField's fixed
-        // capacity (docs/circular-design.md §1/§9 "2D 몹 스폰/충돌/HP").
-        // The rate can exceed one mob per fixed step (100/s vs 60 steps/s), so
-        // fractional spawns accumulate in a budget instead of a per-spawn timer.
-        // Rate and soft live-mob cap come from spawn_curve.csv at the run clock.
-        const CircularBalance::SpawnRate spawnRate = m_balance.SpawnAt(m_circularTime);
-        m_mobSpawnBudget += spawnRate.perSecond * fixedDelta;
-        while (m_mobSpawnBudget >= 1.0f)
+        if (m_circularTestMode)
         {
-            if (m_mobs.Full() || static_cast<int>(m_mobs.LiveCount()) >= spawnRate.maxAlive)
-            {
-                m_mobSpawnBudget = 0.0f;   // don't bank a burst to dump the moment a slot frees
-                break;
-            }
-            m_mobSpawnBudget -= 1.0f;
-            // Deterministic angle - same no-<random> convention as SeedAgent's
-            // spread. Golden-angle stepping per spawn (not the elapsed clock)
-            // so several mobs spawned in the same step land apart. double for
-            // the multiply: the counter grows without bound and float would
-            // lose the fractional turn.
-            const float angle = static_cast<float>(
-                std::fmod(static_cast<double>(m_mobSpawnCounter++) * 2.399963229728653, 6.283185307179586));
-            const math::Vec2 spawnPos = playerCenter
-                + math::Vec2{ std::cos(angle), std::sin(angle) } * m_balance.spawnRadius;
-            m_mobs.Spawn(spawnPos, m_balance.mobHealth, m_balance.mobRadius);
+            // Test scene: no swarm spawn, no charge pattern - just the one
+            // dummy ResetCircularScene planted. Re-spawn it if it somehow
+            // died (an absurd overflow-stacked build, or a future weapon),
+            // so a test session never runs dry.
+            if (m_mobs.LiveCount() == 0)
+                m_mobs.Spawn(playerCenter + math::Vec2{ kTestDummySpawnOffset, 0.0f }, kTestDummyHealth, m_balance.mobRadius);
         }
+        else
+        {
+            // Spawn: a steady trickle onto a ring around the player so mobs
+            // always approach from off-screen, capped by MobField's fixed
+            // capacity (docs/circular-design.md §1/§9 "2D 몹 스폰/충돌/HP").
+            // The rate can exceed one mob per fixed step (100/s vs 60 steps/s), so
+            // fractional spawns accumulate in a budget instead of a per-spawn timer.
+            // Rate and soft live-mob cap come from spawn_curve.csv at the run clock.
+            const CircularBalance::SpawnRate spawnRate = m_balance.SpawnAt(m_circularTime);
+            m_mobSpawnBudget += spawnRate.perSecond * fixedDelta;
+            while (m_mobSpawnBudget >= 1.0f)
+            {
+                if (m_mobs.Full() || static_cast<int>(m_mobs.LiveCount()) >= spawnRate.maxAlive)
+                {
+                    m_mobSpawnBudget = 0.0f;   // don't bank a burst to dump the moment a slot frees
+                    break;
+                }
+                m_mobSpawnBudget -= 1.0f;
+                // Deterministic angle - same no-<random> convention as SeedAgent's
+                // spread. Golden-angle stepping per spawn (not the elapsed clock)
+                // so several mobs spawned in the same step land apart. double for
+                // the multiply: the counter grows without bound and float would
+                // lose the fractional turn.
+                const float angle = static_cast<float>(
+                    std::fmod(static_cast<double>(m_mobSpawnCounter++) * 2.399963229728653, 6.283185307179586));
+                const math::Vec2 spawnPos = playerCenter
+                    + math::Vec2{ std::cos(angle), std::sin(angle) } * m_balance.spawnRadius;
+                m_mobs.Spawn(spawnPos, m_balance.mobHealth, m_balance.mobRadius);
+            }
 
-        StepChargePattern(fixedDelta, playerCenter);
+            StepChargePattern(fixedDelta, playerCenter);
+        }
         m_mobs.Step(m_jobs, playerCenter, m_balance.mobSpeed, fixedDelta);
 
-        const std::uint32_t cardKills = StepCards(fixedDelta, playerCenter);
-        AwardKills(cardKills + StepProjectiles(fixedDelta));
+        AwardKills(StepCards(fixedDelta, playerCenter) + StepProjectiles(fixedDelta));
 
-        // Swap-remove expired hit flashes (same idiom as elsewhere in this file, e.g. tracers).
-        for (std::size_t i = 0; i < m_hitFlashes.size(); )
+        // Swap-remove expired attack visuals (same idiom as elsewhere in this file, e.g. tracers).
+        for (std::size_t i = 0; i < m_pulseRings.size(); )
         {
-            m_hitFlashes[i].ageLeft -= fixedDelta;
-            if (m_hitFlashes[i].ageLeft <= 0.0f) { m_hitFlashes[i] = m_hitFlashes.back(); m_hitFlashes.pop_back(); }
+            m_pulseRings[i].ageLeft -= fixedDelta;
+            if (m_pulseRings[i].ageLeft <= 0.0f) { m_pulseRings[i] = m_pulseRings.back(); m_pulseRings.pop_back(); }
+            else ++i;
+        }
+        for (std::size_t i = 0; i < m_boltShots.size(); )
+        {
+            m_boltShots[i].ageLeft -= fixedDelta;
+            if (m_boltShots[i].ageLeft <= 0.0f) { m_boltShots[i] = m_boltShots.back(); m_boltShots.pop_back(); }
             else ++i;
         }
     }
@@ -503,7 +574,7 @@ namespace engine::game
             card.cooldownLeft -= fixedDelta;
             if (card.cooldownLeft > 0.0f) continue;
             // attack_speed is a rate: 1.25 = a 20% shorter cooldown.
-            card.cooldownLeft = CardCooldown(kCardDefs[card.defIndex], card.level) / std::max(m_stats[StatId::AttackSpeed], 0.05f);
+            card.cooldownLeft = CardCooldown(m_balance.weapons[card.defIndex], card.level) / std::max(m_stats[StatId::AttackSpeed], 0.05f);
             kills += ExecuteCard(card, playerCenter);
         }
         return kills;
@@ -512,18 +583,72 @@ namespace engine::game
     std::uint32_t Simulation::StepProjectiles(float fixedDelta)
     {
         std::uint32_t kills = 0;
-        const float reach = m_balance.mobRadius + kBoltHitReach;
+        const float reach = m_balance.mobRadius + kProjectileHitReach;
         for (std::size_t i = 0; i < m_projectiles.size(); )
         {
-            Projectile& bolt = m_projectiles[i];
-            bolt.pos = bolt.pos + bolt.vel * fixedDelta;
-            bolt.rangeLeft -= kBoltSpeed * fixedDelta;
+            Projectile& shot = m_projectiles[i];
+            const float speed = math::Length(shot.vel);
+            shot.pos = shot.pos + shot.vel * fixedDelta;
+            shot.rangeLeft -= speed * fixedDelta;
 
-            math::Vec2 hit;
-            std::uint32_t hitCount = 0;
-            kills += m_mobs.DamageNearest(bolt.pos, reach, bolt.damage, 1, &hit, hitCount);
-            const bool spent = hitCount > 0 || bolt.rangeLeft <= 0.0f;
-            if (spent) { m_projectiles[i] = m_projectiles.back(); m_projectiles.pop_back(); }
+            bool spent = false;
+            switch (shot.kind)
+            {
+            case ProjectileKind::Exploding:
+            {
+                // "닿으면 폭발" (§3.2 스태프) - contact only, not on range-out:
+                // read-only proximity check first, then the AoE is the hit.
+                math::Vec2 hitPos;
+                if (m_mobs.ClosestWithin(shot.pos, reach, hitPos))
+                {
+                    const std::uint32_t hitKills = m_mobs.DamageInRadius(hitPos, shot.explodeRadius, shot.damage);
+                    kills += hitKills;
+                    ApplyLifeSteal(shot.damage, hitKills);
+                    m_pulseRings.push_back({ hitPos, shot.explodeRadius, kPulseRingLife, kPulseRingLife });   // stand-in blast ring
+                    spent = true;
+                }
+                break;
+            }
+            case ProjectileKind::Piercing:
+            {
+                math::Vec2 hit;
+                std::uint32_t hitCount = 0;
+                const std::uint32_t hitKills = m_mobs.DamageNearest(shot.pos, reach, shot.damage, 1, &hit, hitCount);
+                if (hitCount > 0)
+                {
+                    kills += hitKills;
+                    ApplyLifeSteal(shot.damage, hitKills);
+                    m_boltShots.push_back({ shot.pos, hit, kBoltShotMinLife, kBoltShotMinLife });
+                    if (shot.piercesLeft > 0) --shot.piercesLeft;
+                    if (shot.piercesLeft == 0) spent = true;
+                    // Nudge past the mob just hit so next step doesn't immediately
+                    // re-hit it (see kPierceClearDistance's comment).
+                    else if (speed > 0.0f) shot.pos = shot.pos + shot.vel * (kPierceClearDistance / speed);
+                }
+                break;
+            }
+            case ProjectileKind::Random:
+            {
+                math::Vec2 nearest;
+                if (m_mobs.ClosestWithin(shot.pos, reach, nearest))
+                {
+                    // Roll only when a hit is about to happen - keeps the RNG
+                    // stream from churning on every empty in-flight step.
+                    std::uniform_real_distribution<float> roll(shot.damage, std::max(shot.damage, shot.damageMax));
+                    const float rolled = roll(m_rng);
+                    math::Vec2 hit;
+                    std::uint32_t hitCount = 0;
+                    const std::uint32_t hitKills = m_mobs.DamageNearest(shot.pos, reach, rolled, 1, &hit, hitCount);
+                    kills += hitKills;
+                    ApplyLifeSteal(rolled, hitKills);
+                    m_boltShots.push_back({ shot.pos, hit, kBoltShotMinLife, kBoltShotMinLife });
+                    spent = true;
+                }
+                break;
+            }
+            }
+
+            if (spent || shot.rangeLeft <= 0.0f) { m_projectiles[i] = m_projectiles.back(); m_projectiles.pop_back(); }
             else ++i;
         }
         return kills;
@@ -531,10 +656,16 @@ namespace engine::game
 
     std::uint32_t Simulation::ExecuteCard(const CardInstance& card, math::Vec2 playerCenter)
     {
-        const CardDef& def = kCardDefs[card.defIndex];
+        const CardDef& def = m_balance.weapons[card.defIndex];
         // Weapons read the stat block by id (docs §2.6): damage x weapon_damage,
         // range x attack_size, bolt targets + extra_projectiles.
-        const float damage = CardDamage(def, card.level) * m_stats[StatId::WeaponDamage];
+        // One crit roll per cast (the whole pulse/volley/shot crits together,
+        // not per target) - std::uniform_real_distribution over the shared
+        // level-up RNG (still deterministic given the same fixed-seed input/timing).
+        std::uniform_real_distribution<float> critRoll(0.0f, 1.0f);
+        const bool crit = critRoll(m_rng) < m_stats[StatId::CritChance];
+        const float dmgMul = m_stats[StatId::WeaponDamage] * (crit ? m_stats[StatId::CritDamage] : 1.0f);
+        const float damage = CardDamage(def, card.level) * dmgMul;
         const float range = CardRange(def, card.level) * m_stats[StatId::AttackSize];
 
         switch (def.effect)
@@ -542,29 +673,91 @@ namespace engine::game
         case CardEffect::RadialPulse:
         {
             const std::uint32_t kills = m_mobs.DamageInRadius(playerCenter, range, damage);
-            m_hitFlashes.push_back({ playerCenter, kHitFlashLife, kHitFlashLife, range });
+            m_pulseRings.push_back({ playerCenter, range, kPulseRingLife, kPulseRingLife });
+            ApplyLifeSteal(damage, kills);
             return kills;
         }
         case CardEffect::NearestBolt:
         {
-            // Throws one projectile at each of the nearest targets; the damage
-            // lands when a projectile touches a mob (StepProjectiles), not now.
-            math::Vec2 aim[kMaxBoltTargets];
-            std::uint32_t found = 0;
+            math::Vec2 hits[kMaxBoltTargets];
+            std::uint32_t hitCount = 0;
             const int targets = std::min(CardTargets(def, card.level) + static_cast<int>(m_stats[StatId::ExtraProjectiles]),
                                          kMaxBoltTargets);
-            m_mobs.FindNearest(playerCenter, range, static_cast<std::uint32_t>(targets), aim, found);
-            for (std::uint32_t i = 0; i < found && m_projectiles.size() < kMaxProjectiles; ++i)
+            const std::uint32_t kills = m_mobs.DamageNearest(
+                playerCenter, range, damage, static_cast<std::uint32_t>(targets), hits, hitCount);
+            // Cosmetic only - the hit already landed above. Duration scales
+            // with distance so the square visibly "flies" instead of teleporting.
+            for (std::uint32_t i = 0; i < hitCount; ++i)
             {
-                const math::Vec2 toTarget = aim[i] - playerCenter;
-                const math::Vec2 dir = math::Normalized(toTarget);
-                if (dir.x == 0.0f && dir.y == 0.0f) continue;   // target exactly on the player: nothing to aim along
-                m_projectiles.push_back({ playerCenter, dir * kBoltSpeed, damage, range });
+                const float life = std::max(kBoltShotMinLife, math::Length(hits[i] - playerCenter) / kBoltShotSpeed);
+                m_boltShots.push_back({ playerCenter, hits[i], life, life });
             }
+            ApplyLifeSteal(damage, kills);
+            return kills;
+        }
+        case CardEffect::ArcSwing:
+        {
+            const float halfAngleRad = def.coneHalfAngleDeg * (3.14159265f / 180.0f);
+            const std::uint32_t kills = m_mobs.DamageInArc(playerCenter, m_lastMoveDir, halfAngleRad, range, damage);
+            m_pulseRings.push_back({ playerCenter, range, kPulseRingLife, kPulseRingLife });   // stand-in visual until a real swing shape exists
+            ApplyLifeSteal(damage, kills);
+            return kills;
+        }
+        case CardEffect::LineSwing:
+        {
+            const float halfWidth = def.lineHalfWidth * m_stats[StatId::AttackSize];
+            const math::Vec2 lineEnd = playerCenter + m_lastMoveDir * range;
+            const std::uint32_t kills = m_mobs.DamageInCapsule(playerCenter, lineEnd, halfWidth, damage);
+            m_boltShots.push_back({ playerCenter, lineEnd, kPulseRingLife, kPulseRingLife });   // stand-in visual (line sweep)
+            ApplyLifeSteal(damage, kills);
+            return kills;
+        }
+        case CardEffect::ExplodingBolt:
+        case CardEffect::PiercingShot:
+        case CardEffect::RandomDamageShot:
+        {
+            // Damage lands later, in StepProjectiles - these three actually fly.
+            if (m_projectiles.size() >= kMaxProjectiles) return 0;   // pool full: drop, not fatal (MobField::Spawn's convention)
+            math::Vec2 aimPos;
+            const math::Vec2 aimDir = m_mobs.ClosestWithin(playerCenter, range, aimPos)
+                ? math::Normalized(aimPos - playerCenter) : m_lastMoveDir;
+            if (aimDir.x == 0.0f && aimDir.y == 0.0f) return 0;   // nothing to aim along
+
+            Projectile shot;
+            shot.pos = playerCenter;
+            shot.vel = aimDir * def.projectileSpeed;
+            shot.rangeLeft = range;
+            shot.damage = damage;
+            switch (def.effect)
+            {
+            case CardEffect::RandomDamageShot:
+                shot.damageMax = CardDamageMax(def, card.level) * dmgMul;
+                shot.kind = ProjectileKind::Random;
+                break;
+            case CardEffect::PiercingShot:
+                shot.piercesLeft = static_cast<std::uint8_t>(CardTargets(def, card.level));
+                shot.kind = ProjectileKind::Piercing;
+                break;
+            default:   // ExplodingBolt
+                shot.explodeRadius = def.explodeRadius * m_stats[StatId::AttackSize];
+                shot.kind = ProjectileKind::Exploding;
+                break;
+            }
+            m_projectiles.push_back(shot);
             return 0;
         }
         }
         return 0;
+    }
+
+    // life_steal (§2.6): heals a fraction of the killing blow's damage per kill.
+    // Kill-gated (not per point of damage dealt) since DamageInRadius/DamageNearest
+    // only report kill counts, not total damage applied to survivors.
+    void Simulation::ApplyLifeSteal(float damage, std::uint32_t kills)
+    {
+        if (kills == 0) return;
+        m_playerHp = std::min(m_stats[StatId::MaxHp],
+                              m_playerHp + damage * m_stats[StatId::LifeSteal] * static_cast<float>(kills));
     }
 
     float Simulation::XpNeeded() const
@@ -593,33 +786,52 @@ namespace engine::game
 
     void Simulation::RollLevelUpChoices()
     {
-        std::vector<LevelChoice> cardOptions;
-        for (std::size_t i = 0; i < kCardDefs.size(); ++i)
+        std::vector<LevelChoice> itemOptions;   // weapons + accessories - either satisfies §3.4's "guaranteed" slot
+        for (std::size_t i = 0; i < m_balance.weapons.size(); ++i)
         {
             const auto owned = std::find_if(m_deck.begin(), m_deck.end(),
                 [i](const CardInstance& c) { return c.defIndex == i; });
             if (owned != m_deck.end())
             {
-                if (owned->level < kCardDefs[i].maxLevel)
-                    cardOptions.push_back({ LevelChoice::Type::UpgradeCard, static_cast<std::uint8_t>(i) });
+                if (owned->level < m_balance.weapons[i].maxLevel)
+                    itemOptions.push_back({ LevelChoice::Type::UpgradeCard, static_cast<std::uint8_t>(i) });
+                else if (m_balance.weapons[i].overflowValue != 0.0f)   // maxed - overflow instead, if this weapon has one configured
+                    itemOptions.push_back({ LevelChoice::Type::OverflowWeapon, static_cast<std::uint8_t>(i) });
             }
             else if (static_cast<int>(m_deck.size()) < kProgression.maxDeckSlots)
             {
-                cardOptions.push_back({ LevelChoice::Type::NewCard, static_cast<std::uint8_t>(i) });
+                itemOptions.push_back({ LevelChoice::Type::NewCard, static_cast<std::uint8_t>(i) });
             }
         }
-        std::shuffle(cardOptions.begin(), cardOptions.end(), m_rng);
+        for (std::size_t i = 0; i < m_balance.accessories.size(); ++i)
+        {
+            const auto owned = std::find_if(m_accessories.begin(), m_accessories.end(),
+                [i](const AccessoryInstance& a) { return a.defIndex == i; });
+            if (owned != m_accessories.end())
+            {
+                if (owned->level < m_balance.accessories[i].maxLevel)
+                    itemOptions.push_back({ LevelChoice::Type::UpgradeAccessory, static_cast<std::uint8_t>(i) });
+                else
+                    itemOptions.push_back({ LevelChoice::Type::OverflowAccessory, static_cast<std::uint8_t>(i) });
+            }
+            else if (static_cast<int>(m_accessories.size()) < kProgression.maxDeckSlots)
+            {
+                itemOptions.push_back({ LevelChoice::Type::NewAccessory, static_cast<std::uint8_t>(i) });
+            }
+        }
+        std::shuffle(itemOptions.begin(), itemOptions.end(), m_rng);
 
         m_levelChoices.clear();
-        // docs §3: at least one card option whenever one exists, so a level-up
-        // never offers only stat cards while the deck could still grow.
-        if (!cardOptions.empty())
+        // docs §3.4: at least one weapon-or-accessory option whenever one
+        // exists, so a level-up never offers only stat cards while either
+        // could still grow.
+        if (!itemOptions.empty())
         {
-            m_levelChoices.push_back(cardOptions.front());
-            cardOptions.erase(cardOptions.begin());
+            m_levelChoices.push_back(itemOptions.front());
+            itemOptions.erase(itemOptions.begin());
         }
 
-        std::vector<LevelChoice> pool = std::move(cardOptions);
+        std::vector<LevelChoice> pool = std::move(itemOptions);
         for (std::size_t i = 0; i < kStatCards.size(); ++i)
             pool.push_back({ LevelChoice::Type::Stat, static_cast<std::uint8_t>(i) });
         std::shuffle(pool.begin(), pool.end(), m_rng);
@@ -638,13 +850,37 @@ namespace engine::game
         switch (choice.type)
         {
         case LevelChoice::Type::NewCard:
-            std::snprintf(text, sizeof(text), "NEW CARD: %s", kCardDefs[choice.id].name);
+            std::snprintf(text, sizeof(text), "NEW WEAPON: %s", m_balance.weapons[choice.id].name.c_str());
             break;
         case LevelChoice::Type::UpgradeCard:
         {
             int level = 1;
             for (const CardInstance& card : m_deck) if (card.defIndex == choice.id) level = card.level;
-            std::snprintf(text, sizeof(text), "%s: LV %d TO %d", kCardDefs[choice.id].name, level, level + 1);
+            std::snprintf(text, sizeof(text), "%s: LV %d TO %d", m_balance.weapons[choice.id].name.c_str(), level, level + 1);
+            break;
+        }
+        case LevelChoice::Type::NewAccessory:
+            std::snprintf(text, sizeof(text), "NEW ITEM: %s", m_balance.accessories[choice.id].name.c_str());
+            break;
+        case LevelChoice::Type::UpgradeAccessory:
+        {
+            int level = 1;
+            for (const AccessoryInstance& a : m_accessories) if (a.defIndex == choice.id) level = a.level;
+            std::snprintf(text, sizeof(text), "%s: LV %d TO %d", m_balance.accessories[choice.id].name.c_str(), level, level + 1);
+            break;
+        }
+        case LevelChoice::Type::OverflowWeapon:
+        {
+            const CardDef& def = m_balance.weapons[choice.id];
+            std::snprintf(text, sizeof(text), "OVERFLOW %s: +%.2f %s", def.name.c_str(), def.overflowValue,
+                          kStatDefs[static_cast<std::size_t>(def.overflowStat)].label);
+            break;
+        }
+        case LevelChoice::Type::OverflowAccessory:
+        {
+            const AccessoryDef& def = m_balance.accessories[choice.id];
+            std::snprintf(text, sizeof(text), "OVERFLOW %s: +%.2f %s", def.name.c_str(), def.amount,
+                          kStatDefs[static_cast<std::size_t>(def.stat)].label);
             break;
         }
         case LevelChoice::Type::Stat:
@@ -672,6 +908,29 @@ namespace engine::game
         case LevelChoice::Type::UpgradeCard:
             for (CardInstance& card : m_deck) if (card.defIndex == choice.id) ++card.level;
             break;
+        case LevelChoice::Type::NewAccessory:
+            m_accessories.push_back({ choice.id, 1 });
+            RecomputeStats();
+            break;
+        case LevelChoice::Type::UpgradeAccessory:
+            for (AccessoryInstance& a : m_accessories) if (a.defIndex == choice.id) ++a.level;
+            RecomputeStats();
+            break;
+        case LevelChoice::Type::OverflowWeapon:
+        {
+            const CardDef& def = m_balance.weapons[choice.id];
+            m_cardMods.add[static_cast<std::size_t>(def.overflowStat)] += def.overflowValue;
+            RecomputeStats();
+            break;
+        }
+        case LevelChoice::Type::OverflowAccessory:
+        {
+            const AccessoryDef& def = m_balance.accessories[choice.id];
+            const std::size_t statIndex = static_cast<std::size_t>(def.stat);
+            (def.multiplicative ? m_cardMods.mul : m_cardMods.add)[statIndex] += def.amount;
+            RecomputeStats();
+            break;
+        }
         case LevelChoice::Type::Stat:
         {
             const StatCardDef& stat = kStatCards[choice.id];

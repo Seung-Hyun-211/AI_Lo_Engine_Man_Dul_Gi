@@ -26,8 +26,10 @@ namespace engine::game
         b.spawnCurve.push_back({ 0.0f, kActiveMob.spawnsPerSecond, static_cast<float>(kActiveMob.capacity) });
 
         // The four base-doc characters (docs/circular-design.md §2.3). The main
-        // stat starts high; the start weapon is a placeholder from the two
-        // weapons that exist (kCardDefs: 0 = PULSE, 1 = BOLT).
+        // stat starts high; the start weapon is a [살] pairing with the base
+        // design's 5 weapons (§3.2, kCardDefs: 2=SWORD 3=WHIP 4=STAFF 5=DAGGER
+        // 6=TRUMP) - by concept fit, not confirmed. TRUMP has no starting
+        // owner (level-up pool only).
         const auto character = [](const char* id, const char* name, StatId main, std::uint8_t weapon) {
             CharacterDef c;
             c.id = id;
@@ -39,10 +41,24 @@ namespace engine::game
             return c;
         };
         b.characters = {
-            character("magic_knight",    "MAGIC KNIGHT",    StatId::Vit, 0),
-            character("skull_magician",  "SKULL MAGICIAN",  StatId::Int, 1),
-            character("succubus",        "SUCCUBUS",        StatId::Cor, 0),
-            character("assassin_lizard", "ASSASSIN LIZARD", StatId::Agi, 1),
+            character("magic_knight",    "MAGIC KNIGHT",    StatId::Vit, 2),   // SWORD
+            character("skull_magician",  "SKULL MAGICIAN",  StatId::Int, 4),   // STAFF
+            character("succubus",        "SUCCUBUS",        StatId::Cor, 3),   // WHIP
+            character("assassin_lizard", "ASSASSIN LIZARD", StatId::Agi, 5),   // DAGGER
+        };
+
+        // Built-in accessories (docs/circular-design.md §3.3) - [살] proposals,
+        // same "level N = N x amount" curve as weapons' per-level scaling.
+        const auto accessory = [](const char* name, StatId stat, bool mul, float amount) {
+            return AccessoryDef{ name, stat, mul, amount, 5 };
+        };
+        b.accessories = {
+            accessory("AMULET",    StatId::MoveSpeed,   true,  0.08f),
+            accessory("CHARM",     StatId::Luck,         false, 3.0f),
+            accessory("RING",      StatId::MaxHp,        false, 10.0f),
+            accessory("BLOODSTONE",StatId::LifeSteal,    false, 0.04f),
+            accessory("GAUNTLET",  StatId::WeaponDamage, true,  0.08f),
+            accessory("BELT",      StatId::StaminaMax,   false, 15.0f),
         };
         return b;
     }
@@ -125,6 +141,19 @@ namespace engine::game
             for (char& c : text) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             return text;
         }
+
+        // weapons.csv's effect column - lower-case name -> CardEffect. New
+        // effects (a new CardEffect enumerator + ExecuteCard case) get one row here.
+        struct EffectEntry { const char* name; CardEffect effect; };
+        constexpr EffectEntry kEffectNames[] = {
+            { "radialpulse",      CardEffect::RadialPulse },
+            { "nearestbolt",      CardEffect::NearestBolt },
+            { "arcswing",         CardEffect::ArcSwing },
+            { "lineswing",        CardEffect::LineSwing },
+            { "explodingbolt",    CardEffect::ExplodingBolt },
+            { "piercingshot",     CardEffect::PiercingShot },
+            { "randomdamageshot", CardEffect::RandomDamageShot },
+        };
 
         // key -> (target, minimum allowed, inclusive)
         struct KvEntry { const char* name; float* target; float minValue; bool minInclusive; };
@@ -268,6 +297,237 @@ namespace engine::game
             }
         }
 
+        // ---- weapons.csv: one row = one weapon (docs/circular-design.md §3.2) ----
+        // name,effect,cooldown,damage,range,base_targets,max_level,damage_per_level,
+        // range_per_level,cooldown_scale,levels_per_extra_target are required;
+        // cone_half_angle_deg/line_half_width/projectile_speed/explode_radius/
+        // damage_max are per-weapon-kind and optional (blank = 0, unused).
+        {
+            const std::string file = "weapons.csv";
+            core::CsvTable table;
+            if (loader.Open(dir, file, table))
+            {
+                const int nameCol = table.Column("name");
+                const int effectCol = table.Column("effect");
+                const int cdCol = table.Column("cooldown");
+                const int dmgCol = table.Column("damage");
+                const int rangeCol = table.Column("range");
+                const int baseTargetsCol = table.Column("base_targets");
+                const int maxLevelCol = table.Column("max_level");
+                const int dmgPerLevelCol = table.Column("damage_per_level");
+                const int rangePerLevelCol = table.Column("range_per_level");
+                const int cdScaleCol = table.Column("cooldown_scale");
+                const int extraEveryCol = table.Column("levels_per_extra_target");
+                const int coneCol = table.Column("cone_half_angle_deg");
+                const int lineWidthCol = table.Column("line_half_width");
+                const int projSpeedCol = table.Column("projectile_speed");
+                const int explodeRadiusCol = table.Column("explode_radius");
+                const int dmgMaxCol = table.Column("damage_max");
+                const int overflowStatCol = table.Column("overflow_stat");
+                const int overflowValueCol = table.Column("overflow_value");
+
+                bool headerOk = nameCol >= 0 && effectCol >= 0 && cdCol >= 0 && dmgCol >= 0 && rangeCol >= 0 &&
+                                baseTargetsCol >= 0 && maxLevelCol >= 0 && dmgPerLevelCol >= 0 &&
+                                rangePerLevelCol >= 0 && cdScaleCol >= 0 && extraEveryCol >= 0;
+                if (!headerOk)
+                {
+                    loader.Error(file, 1, "header must contain name,effect,cooldown,damage,range,base_targets,"
+                                          "max_level,damage_per_level,range_per_level,cooldown_scale,"
+                                          "levels_per_extra_target (the rest are optional)");
+                }
+                else
+                {
+                    std::vector<CardDef> weapons;
+                    for (const core::CsvRow& row : table.rows)
+                    {
+                        CardDef def{};
+                        def.kind = CardKind::Attack;
+                        const std::string name = Cell(row, nameCol);
+                        if (name.empty())
+                        {
+                            loader.Error(file, row.line, "name is required - row skipped");
+                            continue;
+                        }
+                        const bool duplicate = std::any_of(weapons.begin(), weapons.end(),
+                            [&](const CardDef& other) { return Lower(other.name) == Lower(name); });
+                        if (duplicate)
+                        {
+                            loader.Error(file, row.line, "duplicate name '" + name + "' - row skipped");
+                            continue;
+                        }
+
+                        const std::string effectName = Lower(Cell(row, effectCol));
+                        int effectIndex = -1;
+                        for (std::size_t i = 0; i < std::size(kEffectNames); ++i)
+                            if (effectName == kEffectNames[i].name) effectIndex = static_cast<int>(i);
+                        if (effectIndex < 0)
+                        {
+                            loader.Error(file, row.line, "unknown effect '" + effectName + "' - row skipped");
+                            continue;
+                        }
+
+                        bool valid = true;
+                        float maxLevelF = 0.0f, baseTargetsF = 0.0f, extraEveryF = 0.0f;
+                        struct Req { const char* label; int col; float* target; float minValue; bool minInclusive; };
+                        const Req required[] = {
+                            { "cooldown",                 cdCol,           &def.cooldown,              0.0f, false },
+                            { "damage",                   dmgCol,          &def.damage,                0.0f, true  },
+                            { "range",                    rangeCol,        &def.range,                 0.0f, false },
+                            { "base_targets",              baseTargetsCol,  &baseTargetsF,              0.0f, true  },
+                            { "max_level",                 maxLevelCol,     &maxLevelF,                 1.0f, true  },
+                            { "damage_per_level",          dmgPerLevelCol,  &def.damagePerLevel,       -1e9f, true  },
+                            { "range_per_level",           rangePerLevelCol,&def.rangePerLevel,        -1e9f, true  },
+                            { "cooldown_scale",            cdScaleCol,      &def.cooldownScalePerLevel, 0.0f, false },
+                            { "levels_per_extra_target",   extraEveryCol,   &extraEveryF,               0.0f, true  },
+                        };
+                        for (const Req& req : required)
+                        {
+                            if (!core::ParseFloat(Cell(row, req.col), *req.target))
+                            {
+                                loader.Error(file, row.line, std::string(req.label) + " must be a number - row skipped");
+                                valid = false;
+                                break;
+                            }
+                            const bool ok = req.minInclusive ? *req.target >= req.minValue : *req.target > req.minValue;
+                            if (!ok)
+                            {
+                                loader.Error(file, row.line, std::string(req.label) + " out of range - row skipped");
+                                valid = false;
+                                break;
+                            }
+                        }
+                        if (!valid) continue;
+
+                        // Weapon-kind-specific - blank cell keeps 0.0f (unused for that effect).
+                        struct Opt { int col; float* target; };
+                        const Opt optional[] = {
+                            { coneCol, &def.coneHalfAngleDeg }, { lineWidthCol, &def.lineHalfWidth },
+                            { projSpeedCol, &def.projectileSpeed }, { explodeRadiusCol, &def.explodeRadius },
+                            { dmgMaxCol, &def.damageMax },
+                        };
+                        for (const Opt& opt : optional)
+                        {
+                            const std::string cell = Cell(row, opt.col);
+                            if (opt.col < 0 || cell.empty()) continue;
+                            if (!core::ParseFloat(cell, *opt.target))
+                            {
+                                loader.Error(file, row.line, "an optional numeric field is not a number - row skipped");
+                                valid = false;
+                                break;
+                            }
+                        }
+                        if (!valid) continue;
+
+                        // Overflow (§3.4) - blank overflow_stat keeps overflowValue at 0
+                        // (no bonus configured, so this weapon is never offered as an
+                        // overflow choice once maxed). overflow_value alone without a
+                        // recognised stat is an error - it would silently do nothing.
+                        const std::string overflowStatName = Lower(Cell(row, overflowStatCol));
+                        if (!overflowStatName.empty())
+                        {
+                            int overflowStatIndex = -1;
+                            for (std::size_t i = 0; i < kStatCount; ++i)
+                                if (overflowStatName == kStatDefs[i].id) overflowStatIndex = static_cast<int>(i);
+                            if (overflowStatIndex < 0)
+                            {
+                                loader.Error(file, row.line, "unknown overflow_stat '" + overflowStatName + "' - row skipped");
+                                continue;
+                            }
+                            def.overflowStat = static_cast<StatId>(overflowStatIndex);
+                            const std::string overflowValueCell = Cell(row, overflowValueCol);
+                            if (!core::ParseFloat(overflowValueCell, def.overflowValue))
+                            {
+                                loader.Error(file, row.line, "overflow_value must be a number when overflow_stat is set - row skipped");
+                                continue;
+                            }
+                        }
+
+                        def.name = name;
+                        def.effect = kEffectNames[effectIndex].effect;
+                        def.baseTargets = static_cast<int>(baseTargetsF);
+                        def.maxLevel = static_cast<int>(maxLevelF);
+                        def.levelsPerExtraTarget = static_cast<int>(extraEveryF);
+                        weapons.push_back(std::move(def));
+                    }
+                    if (weapons.empty()) loader.Warn(file, 0, "no valid rows - using the built-in weapons");
+                    else out.weapons = std::move(weapons);
+                }
+            }
+        }
+
+        // ---- accessories.csv: name,stat,multiplicative,amount,max_level ----
+        // No effect code (passive only, §3.3) - a stat + add/mul amount per level.
+        {
+            const std::string file = "accessories.csv";
+            core::CsvTable table;
+            if (loader.Open(dir, file, table))
+            {
+                const int nameCol = table.Column("name");
+                const int statCol = table.Column("stat");
+                const int mulCol = table.Column("multiplicative");
+                const int amountCol = table.Column("amount");
+                const int maxLevelCol = table.Column("max_level");
+                if (nameCol < 0 || statCol < 0 || mulCol < 0 || amountCol < 0 || maxLevelCol < 0)
+                {
+                    loader.Error(file, 1, "header must contain name,stat,multiplicative,amount,max_level");
+                }
+                else
+                {
+                    std::vector<AccessoryDef> accessories;
+                    for (const core::CsvRow& row : table.rows)
+                    {
+                        const std::string name = Cell(row, nameCol);
+                        if (name.empty())
+                        {
+                            loader.Error(file, row.line, "name is required - row skipped");
+                            continue;
+                        }
+                        const bool duplicate = std::any_of(accessories.begin(), accessories.end(),
+                            [&](const AccessoryDef& other) { return Lower(other.name) == Lower(name); });
+                        if (duplicate)
+                        {
+                            loader.Error(file, row.line, "duplicate name '" + name + "' - row skipped");
+                            continue;
+                        }
+
+                        const std::string statName = Lower(Cell(row, statCol));
+                        int statIndex = -1;
+                        for (std::size_t i = 0; i < kStatCount; ++i)
+                            if (statName == kStatDefs[i].id) statIndex = static_cast<int>(i);
+                        if (statIndex < 0)
+                        {
+                            loader.Error(file, row.line, "unknown stat '" + statName + "' - row skipped");
+                            continue;
+                        }
+
+                        const std::string mulCell = Lower(Cell(row, mulCol));
+                        if (mulCell != "0" && mulCell != "1" && mulCell != "true" && mulCell != "false")
+                        {
+                            loader.Error(file, row.line, "multiplicative must be 0/1/true/false - row skipped");
+                            continue;
+                        }
+                        const bool multiplicative = mulCell == "1" || mulCell == "true";
+
+                        AccessoryDef def;
+                        float maxLevelF = 0.0f;
+                        if (!core::ParseFloat(Cell(row, amountCol), def.amount) ||
+                            !core::ParseFloat(Cell(row, maxLevelCol), maxLevelF) || maxLevelF < 1.0f)
+                        {
+                            loader.Error(file, row.line, "amount must be a number and max_level >= 1 - row skipped");
+                            continue;
+                        }
+                        def.name = name;
+                        def.stat = static_cast<StatId>(statIndex);
+                        def.multiplicative = multiplicative;
+                        def.maxLevel = static_cast<int>(maxLevelF);
+                        accessories.push_back(std::move(def));
+                    }
+                    if (accessories.empty()) loader.Warn(file, 0, "no valid rows - using the built-in accessories");
+                    else out.accessories = std::move(accessories);
+                }
+            }
+        }
+
         // ---- characters.csv: id,name,main_stat,start_vit,start_int,start_cor,start_agi,start_weapon ----
         {
             const std::string file = "characters.csv";
@@ -332,8 +592,8 @@ namespace engine::game
 
                         const std::string weaponName = Lower(Cell(row, weaponCol));
                         int weaponIndex = -1;
-                        for (std::size_t i = 0; i < kCardDefs.size(); ++i)
-                            if (weaponName == Lower(kCardDefs[i].name)) weaponIndex = static_cast<int>(i);
+                        for (std::size_t i = 0; i < out.weapons.size(); ++i)
+                            if (weaponName == Lower(out.weapons[i].name)) weaponIndex = static_cast<int>(i);
                         if (weaponIndex < 0)
                         {
                             loader.Error(file, row.line, "start_weapon '" + weaponName + "' is not a known weapon - row skipped");

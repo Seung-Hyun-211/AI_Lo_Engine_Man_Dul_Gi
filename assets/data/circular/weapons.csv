@@ -1,0 +1,22 @@
+# Circular scene - weapons (docs/circular-design.md 3.2, docs/circular-balance.md). One row = one weapon.
+# name is the identity (characters.csv start_weapon and the level-up modal both refer to it, case-insensitive)
+# and the display text (font: A-Z 0-9 : - . %).
+# effect: radialpulse | nearestbolt | arcswing | lineswing | explodingbolt | piercingshot | randomdamageshot
+#   (a new effect needs a CardEffect enumerator + Simulation::ExecuteCard case first - this column can't invent one).
+# base_targets: nearestbolt = target count at level 1. piercingshot = pierce count at level 1. ignored otherwise.
+# levels_per_extra_target: nearestbolt/piercingshot = +1 target/pierce every N levels (0 = never). ignored otherwise.
+# cone_half_angle_deg (arcswing) / line_half_width (lineswing) / projectile_speed (explodingbolt, piercingshot,
+# randomdamageshot) / explode_radius (explodingbolt) / damage_max (randomdamageshot, the roll's upper bound) are
+# per-weapon-kind and may be left blank (0, unused) for a weapon that doesn't need them.
+# overflow_stat/overflow_value (docs 3.4 "오버플로우"): once this weapon hits max_level, the level-up pool offers
+# a flat +overflow_value to overflow_stat instead of a level it no longer has. Blank overflow_stat = no overflow
+# offered for this weapon. overflow_stat is any StatId from game/Stats.h (same names as stats.csv's stat_id).
+# PULSE/BOLT are the pre-base-design placeholders (docs 10.1) - still valid, no character starts with them anymore.
+name,effect,cooldown,damage,range,base_targets,max_level,damage_per_level,range_per_level,cooldown_scale,levels_per_extra_target,cone_half_angle_deg,line_half_width,projectile_speed,explode_radius,damage_max,overflow_stat,overflow_value
+PULSE,radialpulse,0.6,12,120,0,5,6,14,0.95,0,,,,,,attack_size,0.05
+BOLT,nearestbolt,0.9,22,320,1,5,8,20,0.93,2,,,,,,extra_projectiles,1
+SWORD,arcswing,0.55,14,130,0,5,7,12,0.95,0,70,,,,,attack_size,0.05
+WHIP,lineswing,0.70,10,170,0,5,5,16,0.94,0,,28,,,,attack_size,0.05
+STAFF,explodingbolt,0.85,16,360,0,5,6,18,0.94,0,,,620,70,,weapon_damage,0.05
+DAGGER,piercingshot,0.65,24,300,2,5,6,14,0.95,3,,,900,,,crit_chance,0.02
+TRUMP,randomdamageshot,0.75,6,280,0,5,3,12,0.94,0,,,760,,34,luck,2

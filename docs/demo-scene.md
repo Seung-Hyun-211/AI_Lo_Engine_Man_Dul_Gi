@@ -15,7 +15,7 @@ Win32Window (platform/)
                                        포커스 잃으면 자동 해제, 되찾으면 재적용
 Application (game/)
   · EnterInGame / CloseSettings   → m_window.SetPointerLocked(true)
-    EnterSceneSelect / OpenSettings → m_window.SetPointerLocked(false)
+    EnterLobby / OpenSettings → m_window.SetPointerLocked(false)
   · OnMouseDelta                  → m_input.OnMouseDelta   (InputState 가 프레임 단위 누적, BeginFrame 에서 리셋)
   · BuildPlayerIntent()           → WASD(+화살표) / Shift / Space(에지) / MouseDelta 를 PlayerIntent 값으로
   · Run 루프 (InGame && !overlay) → m_simulation.UpdateCameraLook(intent.look)   ← 프레임당 1회 (고정스텝 밖)
@@ -74,8 +74,8 @@ SnapshotBuilder (game/)
 
 ## 데모 씬 2 — 언덕 위 조망 + 시뮬레이션 군중
 
-`Simulation::DemoScene`(런타임 열거형, **아래 "사용 방법" — 설정의 SCENE SELECT 메뉴로
-고른다, 리빌드 불필요**) 로 고른다. `CharacterDemo`(1) = 위에서 설명한 로컬 배속 액터 3인 +
+`Simulation::DemoScene`(런타임 열거형, **아래 "사용 방법" 참고 — 로비 메뉴에는 더 이상 버튼이 없고,
+`Application::EnterInGame(DemoScene)` 을 코드로 불러야 진입한다, 리빌드는 불필요**) 로 고른다. `CharacterDemo`(1) = 위에서 설명한 로컬 배속 액터 3인 +
 작은 슬랩. `DefenseCombat`(2) = **같은 플레이어**가 완만한 언덕(10m 높이, 20도 경사로 아래
 평지까지 이어짐 — 원래는 수직 절벽/메사였으나 사격 시야 확보를 위해 경사로로 교체) 위에 서서
 앞쪽 넓은 평지를 내려다보고, 그 아래에서 다수의 경량 개체(`SimAgent`)가 언덕을 올라오며
@@ -141,13 +141,14 @@ SnapshotBuilder (game/)
 
 ### 사용 방법 (How to use)
 
-- **씬 전환은 런타임** (리빌드 불필요) — 앱은 곧장 CIRCULAR 로 부팅(타이틀 화면 없음) — 다른 씬은 ESC → 설정 → "SCENE SELECT" 메뉴
-  (`SceneSelectScreen.h/.cpp` `BuildSceneSelectScreen`, 씬 버튼 5개: **CIRCULAR**(2D, 항상 표시)/
-  DEFENSE COMBAT/CHARACTER DEMO/SHADOW SHOWCASE/EFFECTS TEST(3D 4개는 `ENGINE_WITH_3D`일 때만) + SETTINGS/QUIT →
-  고른 씬으로 `Application::EnterInGame(DemoScene)`. **`Circular`(5)는 2D 뱀서라이크 씬 —
-  이 문서의 3D 씬들과 별개, [circular-design.md](circular-design.md)가 계약.** 게임
-  중엔 ESC → 설정 화면 맨 아래 **"SCENE SELECT"** 로 언제든 씬 선택 메뉴로 돌아가 다른
-  씬을 고를 수 있다. `Simulation::kDemoScene`(예전 `static constexpr int`)는 이제 `enum class
+- **씬 전환은 런타임** (리빌드 불필요) — 앱은 곧장 CIRCULAR 로 부팅(타이틀 화면 없음) — ESC → 설정 → **"LOBBY"** 로 로비 메뉴로
+  돌아갈 수 있다(`LobbyScreen.h/.cpp` `BuildLobbyScreen`). **로비는 2026-09 사용자 결정으로 버튼이 GAME(=`Circular`
+  정상 실행) · TEST SCENE(=`Simulation::EnterCircularTestScene()`, 체력 99999 더미 몹 1마리만 있는 무기 테스트용 씬,
+  [circular-design.md](circular-design.md) §부록) 딱 두 개다** — 이 문서의 3D 씬들(DEFENSE COMBAT/CHARACTER DEMO/
+  SHADOW SHOWCASE/EFFECTS TEST)은 어떤 메뉴에서도 더 이상 고를 수 없다(코드는 그대로 있음 — `Simulation::EnterScene`도
+  여전히 받고, `Application::EnterInGame(DemoScene)`으로 프로그램적으로는 진입 가능 — 그냥 UI 버튼이 없을 뿐).
+  **`Circular`(5)는 2D 뱀서라이크 씬 — 이 문서의 3D 씬들과 별개, [circular-design.md](circular-design.md)가 계약.**
+  `Simulation::kDemoScene`(예전 `static constexpr int`)는 이제 `enum class
   DemoScene {CharacterDemo=1, DefenseCombat=2, ShadowShowcase=3, EffectsTest=4, Circular=5}` 런타임
   멤버(`m_demoScene`,
   `ActiveScene()`로 읽음) — `Simulation::EnterScene(DemoScene)`이 액터 목록을 지우고 새로
@@ -157,8 +158,8 @@ SnapshotBuilder (game/)
   `if (simulation.ActiveScene() == DemoScene::N)` 런타임 분기로 바뀜 — 씬마다 다른 코드를
   컴파일해 없애는 이점은 사라졌지만(전부 항상 컴파일됨), 게임 도중 씬을 자유롭게 오갈 수
   있다. `m_demoScene`의 멤버 초기값(`DefenseCombat`)은 오직 `Simulation` 생성 직후(즉 앱을
-  막 띄운 순간)에만 의미가 있고, "SELECT SCENE"에서 뭘 누르든 `EnterScene`이 그 값을 덮어써서
-  실제로 뭐가 뜨는지는 항상 사용자가 고른 씬이다.
+  막 띄운 순간)에만 의미가 있고, "LOBBY"에서 뭘 누르든 `EnterScene`(또는 `EnterCircularTestScene`)이 그
+  값을 덮어써서 실제로 뭐가 뜨는지는 항상 사용자가 고른 씬이다.
 - **군중 설정 = `game/CrowdConfig.h` 의 `kActiveCrowd`** (한 줄). 프리셋: `kCrowdBoxes`(600 큐브,
   원래 데모) / `kCrowdZombies`(500/500, `Zombie1.FBX` + VAT + **`CrowdShading::Toon` 기본**,
   실제 플레이 시 체감 끊김 신고를 받고 16384→500 으로 낮춤 — 아래 "풀 churn 버그" 참고).
@@ -225,8 +226,8 @@ SnapshotBuilder (game/)
 ## 데모 씬 EffectsTest — VFX 검증 사격장
 
 좀비/무기/웨이브 루프 없이 파티클 이펙트 3종(머즐 플래시, 폭발, 기브 피 스프레이 —
-[particle-system-research.md](particle-system-research.md))만 즉시 미리보기하는 빈 씬. 설정
-→ "SCENE SELECT" → "EFFECTS TEST".
+[particle-system-research.md](particle-system-research.md))만 즉시 미리보기하는 빈 씬. **로비 메뉴에 버튼이
+없다**(2026-09 부터 — 위 "사용 방법") — `Application::EnterInGame(DemoScene::EffectsTest)` 를 코드로 불러야 진입한다.
 
 ```text
 Simulation::SpawnActors (EffectsTest 분기)
@@ -249,7 +250,7 @@ Simulation::PreviewVfxEffect
 
 - **씬을 나가도 안전**: `IsMatchLost()`가 `ActiveScene()==DefenseCombat`도 같이 확인하도록
   고쳐뒀다 — 안 그러면 DefenseCombat 에서 패배(목표 HP 0)한 직후 EffectsTest 로 넘어와도
-  `m_objectiveHealth` 가 여전히 0이라 매 프레임 씬 선택 메뉴로 튕기는 버그가 났다.
+  `m_objectiveHealth` 가 여전히 0이라 매 프레임 로비 메뉴로 튕기는 버그가 났다.
 - **사용 방법**: 마우스로 조준하고 1/2/3 눌러서 원하는 이펙트를 원하는 거리 마커 근처에서
   관찰. 크기·색·수명 튜닝은 `game/vfx/ParticleEffects.h`.
 

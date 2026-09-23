@@ -23,7 +23,7 @@ namespace engine::game
         Vit, Int, Cor, Agi,
         // derived
         Luck, AttackSize, ExtraProjectiles, AttackSpeed, WeaponDamage, MoveSpeed,
-        MaxHp, HpRegen, DamageReduction, CritChance, CritDamage, XpGain,
+        MaxHp, HpRegen, DamageReduction, CritChance, CritDamage, LifeSteal, XpGain,
         StaminaMax, StaminaRegen, DashCostMul, DashChainPenaltyMul, DashCooldownMul,
         UltimateChargeMul, CorruptionPower,
         Count
@@ -60,6 +60,7 @@ namespace engine::game
         { "damage_reduction",       "DMG RED",      0.0f, 0.0f, 0.8f,   { 0.004f, 0.0f,   0.0f,   0.0f   } },
         { "crit_chance",            "CRIT",         0.05f, 0.0f, 1.0f,  { 0.0f,   0.0f,   0.0f,   0.0f   } },
         { "crit_damage",            "CRIT DMG",     1.5f, 1.0f, 5.0f,   { 0.0f,   0.0f,   0.0f,   0.0f   } },
+        { "life_steal",             "LIFESTEAL",    0.0f, 0.0f, 1.0f,   { 0.0f,   0.0f,   0.0f,   0.0f   } },
         { "xp_gain",                "XP GAIN",      1.0f, 0.1f, 10.0f,  { 0.0f,   0.0f,   0.0f,   0.0f   } },
         { "stamina_max",            "STAMINA",    100.0f, 10.0f, 500.0f, { 0.0f,   0.0f,   0.0f,   2.0f   } },
         { "stamina_regen",          "STA REGEN",    1.0f, 0.1f, 5.0f,   { 0.0f,   0.0f,   0.0f,   0.01f  } },

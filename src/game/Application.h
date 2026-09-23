@@ -75,12 +75,15 @@ namespace engine::game
         [[nodiscard]] PlayerIntent BuildPlayerIntent() const;
 
         // Scene transitions: swap the UIContext's screen and update m_state.
-        // The scene-select menu (not gameplay) listing the runtime-selectable
-        // Simulation::DemoScene values. Reached from Settings' "SCENE SELECT"
-        // button and after a DefenseCombat loss; the app itself boots past it,
-        // straight into Circular.
-        void EnterSceneSelect();
-        void EnterInGame(DemoScene scene);
+        // The lobby menu (not gameplay): GAME (Circular) and TEST SCENE (the
+        // single dummy-mob weapon test) - the only two paths (LobbyScreen.h).
+        // Reached from Settings' "LOBBY" button and after a DefenseCombat
+        // loss; the app itself boots past it, straight into Circular.
+        void EnterLobby();
+        // `circularTest` selects Simulation::EnterCircularTestScene() instead
+        // of the normal EnterScene(scene) - only meaningful with scene ==
+        // DemoScene::Circular (LobbyScreen's "TEST SCENE" button).
+        void EnterInGame(DemoScene scene, bool circularTest = false);
         // Settings overlay: layered on top of whichever screen is active.
         void OpenSettings();
         void CloseSettings();

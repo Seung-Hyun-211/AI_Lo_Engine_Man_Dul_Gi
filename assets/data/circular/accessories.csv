@@ -1,0 +1,12 @@
+# Circular scene - accessories (docs/circular-design.md 3.3, docs/circular-balance.md). One row = one accessory.
+# Passive only - no effect code, just a StatModifiers contribution (game/Stats.h StatId). Owned like a weapon
+# (level-up NEW ITEM / upgrade), level N gives N x amount.
+# stat: any StatId from game/Stats.h (stats.csv stat_id column, e.g. move_speed, luck, max_hp, life_steal, ...).
+# multiplicative: 1/true = amount is a fraction of the final value (0.08 = +8%); 0/false = a flat add in the stat's unit.
+name,stat,multiplicative,amount,max_level
+AMULET,move_speed,1,0.08,5
+CHARM,luck,0,3,5
+RING,max_hp,0,10,5
+BLOODSTONE,life_steal,0,0.04,5
+GAUNTLET,weapon_damage,1,0.08,5
+BELT,stamina_max,0,15,5

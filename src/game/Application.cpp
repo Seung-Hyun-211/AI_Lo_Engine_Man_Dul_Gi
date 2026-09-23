@@ -1,7 +1,7 @@
 #include "game/Application.h"
 
 #include "game/LevelUpScreen.h"
-#include "game/SceneSelectScreen.h"
+#include "game/LobbyScreen.h"
 #include "game/SettingsScreen.h"
 
 #include <thread>
@@ -226,7 +226,7 @@ namespace engine::game
                     // the scene-select menu the instant the objective dies.
                     if (m_simulation.IsMatchLost())
                     {
-                        EnterSceneSelect();
+                        EnterLobby();
                     }
                     else
                     {
@@ -287,43 +287,34 @@ namespace engine::game
         return 0;
     }
 
-    void Application::EnterSceneSelect()
+    void Application::EnterLobby()
     {
         m_state = GameState::Menu;   // a menu context: no simulation step
         m_window.SetPointerLocked(false);
         m_audio.StopMusic();
         m_ui.ClearOverlay();
-        // Circular (docs/circular-design.md) is 2D-baseline and always
-        // offered; the other four callbacks are left empty without
-        // ENGINE_WITH_3D so BuildSceneSelectScreen skips those rows (its own
-        // doc comment) instead of this file needing an #if around the whole
-        // menu the way it used to.
-        m_ui.SetScreen(BuildSceneSelectScreen(
+        // Only two paths (docs request: "두 경로만" - the other demo scenes
+        // (DefenseCombat/CharacterDemo/ShadowShowcase/EffectsTest) are no
+        // longer reachable from any menu, though their code is untouched).
+        m_ui.SetScreen(BuildLobbyScreen(
             [this] { EnterInGame(DemoScene::Circular); },
-#if defined(ENGINE_WITH_3D)
-            [this] { EnterInGame(DemoScene::DefenseCombat); },
-            [this] { EnterInGame(DemoScene::CharacterDemo); },
-            [this] { EnterInGame(DemoScene::ShadowShowcase); },
-            [this] { EnterInGame(DemoScene::EffectsTest); },
-#else
-            nullptr, nullptr, nullptr, nullptr,
-#endif
-            [this] { OpenSettings(); },
-            [this] { m_window.RequestClose(); }));
+            [this] { EnterInGame(DemoScene::Circular, /*circularTest=*/true); }));
     }
 
-    void Application::EnterInGame(DemoScene scene)
+    void Application::EnterInGame(DemoScene scene, bool circularTest)
     {
         m_state = GameState::InGame;
         m_inGameElapsed = 0.0f;
         m_autoExplodeFired = false;
         // The only entry point into InGame - whether it's a fresh pick from
-        // the scene-select menu or (DefenseCombat only) a restart after a
-        // loss. Simulation::EnterScene rebuilds/resets state for `scene` -
-        // for DefenseCombat that includes ResetMatch() (always wave 1,
-        // docs/defense-combat-design.md §0); for Circular it resets the mob
-        // field/player (docs/circular-design.md).
-        m_simulation.EnterScene(scene);
+        // the lobby or (DefenseCombat only) a restart after a loss.
+        // Simulation::EnterScene rebuilds/resets state for `scene` - for
+        // DefenseCombat that includes ResetMatch() (always wave 1, docs/
+        // defense-combat-design.md §0); for Circular it resets the mob
+        // field/player (docs/circular-design.md). `circularTest` swaps that
+        // for EnterCircularTestScene() (LobbyScreen's "TEST SCENE").
+        if (circularTest) m_simulation.EnterCircularTestScene();
+        else m_simulation.EnterScene(scene);
         if (scene == DemoScene::Circular) LogBalanceReport();
         m_ui.ClearOverlay();
         m_ui.SetScreen(nullptr);   // no in-game widgets: the HUD is drawn by SnapshotBuilder, Settings opens on ESC
@@ -346,7 +337,7 @@ namespace engine::game
             .onResolutionChanged = [this] { ApplyResolution(); },
             .onFrameRateChanged = [this] { ApplyFrameSettings(); },
             .onClose = [this] { CloseSettings(); },
-            .onSceneSelect = [this] { m_settings.Save(core::kSettingsFilePath); EnterSceneSelect(); },
+            .onLobby = [this] { m_settings.Save(core::kSettingsFilePath); EnterLobby(); },
         }));
     }
 

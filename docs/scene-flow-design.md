@@ -3,9 +3,18 @@
 플레이어가 앱을 여는 순간부터 게임 화면까지 거치는 상태(페르소나) 구조. 설계 + 구현 완료.
 
 > **타이틀 화면은 없다** (브랜치 `circular`에서 삭제). 앱은 곧장 서큘러 씬으로 부팅하고(`Application::Run`이 창을 보인 뒤
-> `EnterInGame(DemoScene::Circular)`), 씬 선택 메뉴(`GameState::Menu`)는 **설정 → "SCENE SELECT"** 나 DefenseCombat 패배
-> 뒤에만 나온다. 아래 본문의 예전 표현 "Title"은 이 `Menu`(씬 선택 화면)로 읽으면 된다 — 옛 `START`/`ITEMS`/`SETTINGS`/`QUIT`(ITEMS 데모는 이후 삭제)
-> 4버튼 패널은 없어졌고, 씬 선택 화면이 씬 버튼들 + SETTINGS/QUIT를 가진다(`game/SceneSelectScreen.*`).
+> `EnterInGame(DemoScene::Circular)`), 로비 메뉴(`GameState::Menu`)는 **설정 → "LOBBY"** 나 DefenseCombat 패배
+> 뒤에만 나온다. 아래 본문의 예전 표현 "Title"은 이 `Menu`(로비 화면)로 읽으면 된다 — 옛 `START`/`ITEMS`/`SETTINGS`/`QUIT`(ITEMS 데모는 이후 삭제)
+> 4버튼 패널도, 그 다음의 씬 5개+SETTINGS+QUIT 패널도 없어졌다. **지금(2026-09~)은 `LobbyScreen.h/.cpp`
+> `BuildLobbyScreen` 이 GAME(=Circular 정상 실행) · TEST SCENE(=`Simulation::EnterCircularTestScene()`, 무기 테스트용
+> 더미 씬, [circular-design.md](circular-design.md) §7.5) 딱 두 버튼만 가진다** — SETTINGS/QUIT 버튼은 이 화면에서 빠졌고
+> (Settings 는 인게임 ESC 로, 종료는 창 닫기로), 3D 데모 씬들(DEFENSE COMBAT/CHARACTER DEMO/SHADOW SHOWCASE/
+> EFFECTS TEST)은 어떤 메뉴에서도 더 이상 고를 수 없다(코드는 그대로 — `docs/demo-scene.md` "사용 방법").
+>
+> **다만 "타이틀 없음"은 최종 설계가 아니라 지금 상태다.** 서큘러의 헌법(`# Circular 기초 설계.md` "씬 종류")은
+> **로딩 / 타이틀(시작 → 난이도 설정 · 강화 · 설정 · 종료) / 인게임** 을 요구한다 — 구현 단계는 M8,
+> 사양은 [circular-design.md](circular-design.md) §7.6. 위의 로비는 그때까지 쓰는 **개발용 대체물**이므로,
+> 여기에 기초 설계에 없는 버튼을 늘리지 말고 §7.6 대로 갈아탄다.
 
 관련 문서: `docs/ui-architecture.md`(위젯/`UIScreen`), `docs/game-settings.md`(설정값 카탈로그), `docs/time-design.md`(고정 스텝).
 
@@ -14,7 +23,7 @@
 ## 1. 상태
 
 ```cpp
-enum class GameState { Menu, InGame, WaveResults };   // Menu = 씬 선택 화면 (예전 Title)
+enum class GameState { Menu, InGame, WaveResults };   // Menu = 로비 화면 (예전 Title)
 ```
 
 `WaveResults`(설계만 — [defense-combat-design.md](defense-combat-design.md) "정산 화면")는 바로
@@ -26,7 +35,7 @@ enum class GameState { Menu, InGame, WaveResults };   // Menu = 씬 선택 화�
 (`Simulation::MatchPhase{Combat,Prep}`)는 `Simulation` 이 소유한다(`GameState` 는 "화면·스텝
 게이팅"만 알고 게임 로직의 세부 모드는 모른다 — SRP, `defense-combat-design.md` 가 그 계층).
 
-`game::Application`이 `m_state`로 소유한다. **Settings는 별도 상태가 아니다** — `ui::UIContext`의 모달 오버레이(`SetOverlay`/`ClearOverlay`)로 씬 선택 화면 위에도 InGame 위에도 얹을 수 있다("메뉴에서, 인게임 화면에서 설정창을 열어" 요구사항이 그대로 이 구조다). 오버레이가 있으면:
+`game::Application`이 `m_state`로 소유한다. **Settings는 별도 상태가 아니다** — `ui::UIContext`의 모달 오버레이(`SetOverlay`/`ClearOverlay`)로 로비 화면 위에도 InGame 위에도 얹을 수 있다("메뉴에서, 인게임 화면에서 설정창을 열어" 요구사항이 그대로 이 구조다). 오버레이가 있으면:
 
 - 포인터 입력은 오버레이로만 간다(아래 화면은 보이지만 반응 안 함).
 - `Simulation::Step`을 건너뛴다 — Menu든 InGame+Settings든 "일시정지"로 취급.
@@ -37,16 +46,15 @@ enum class GameState { Menu, InGame, WaveResults };   // Menu = 씬 선택 화�
         시작 (Application::Run, 창 표시 직후)
          │
          ▼
-     ┌────────────────────┐   씬 버튼(CIRCULAR/DEFENSE COMBAT/…)   ┌────────┐
-     │ Menu (씬 선택 화면)  │ ─────────────────────────────────────► │ InGame │ ◄── 부팅 시 곧장 Circular
-     │   SETTINGS·QUIT    │ ◄──────────────────────────────────── │        │
-     └─────────┬──────────┘   설정 → SCENE SELECT / DefenseCombat 패배  └───┬────┘
-               │ SETTINGS                                                   │ SETTINGS / ESC
-               ▼                                                            ▼
-     ┌──────────────────────────────────────────────────────────────────────────┐
-     │   Settings (모달 오버레이)  ← 어느 화면 위에도 얹힘, CLOSE/ESC로 복귀              │
-     └──────────────────────────────────────────────────────────────────────────┘
+     ┌────────────────────┐   GAME / TEST SCENE 버튼   ┌────────┐  ESC  ┌───────────────────┐
+     │ Menu (로비 화면)     │ ─────────────────────────► │ InGame │ ────► │ Settings(모달)      │
+     │  (GAME/TEST SCENE)  │                            │        │ ◄──── │ CLOSE/ESC 로 복귀   │
+     └─────────▲──────────┘                             └────────┘       └─────────┬─────────┘
+               └──────────────────────────── LOBBY 버튼 / DefenseCombat 패배 ────────┘
 ```
+
+Menu(로비) 화면 자체엔 SETTINGS/QUIT 버튼이 없다 — Settings 는 InGame 중 ESC 로만 열리고, 거기서
+"LOBBY" 버튼을 눌러야 로비로 돌아간다. 종료는 창의 OS 닫기(X/Alt+F4)뿐이다(§5).
 
 `InGame` 진입 뒤의 세부 루프(전투 60초 → 정산 → 정비 60초 → 다음 웨이브, 무한 반복)는
 `GameState` 전환 없이 `InGame` 안에서 도는 게임플레이 상태 머신이다 — `WaveResults` 만 화면이
@@ -56,17 +64,15 @@ enum class GameState { Menu, InGame, WaveResults };   // Menu = 씬 선택 화�
 ## 2. `Application`이 조율하는 방식
 
 ```cpp
-void Application::EnterSceneSelect()
+void Application::EnterLobby()
 {
     m_state = GameState::Menu;
     m_window.SetPointerLocked(false);
     m_audio.StopMusic();
     m_ui.ClearOverlay();
-    m_ui.SetScreen(BuildSceneSelectScreen(
+    m_ui.SetScreen(BuildLobbyScreen(
         [this] { EnterInGame(DemoScene::Circular); },
-        /* ...다른 씬 버튼들(ENGINE_WITH_3D)... */
-        [this] { OpenSettings(); },
-        [this] { m_window.RequestClose(); }));
+        [this] { EnterInGame(DemoScene::Circular, /*circularTest=*/true); }));
 }
 
 void Application::EnterInGame()
@@ -77,7 +83,7 @@ void Application::EnterInGame()
 }
 ```
 
-`BuildSceneSelectScreen`/`BuildSettingsScreen`(과 서큘러 `BuildLevelUpScreen`)은 전부 `std::unique_ptr<ui::Widget>`를 반환하는 자유 함수(각각 `game/SceneSelectScreen.*`, `game/SettingsScreen.*`, `game/LevelUpScreen.*`)다 — `UIContext`가 "씬 선택이 뭔지 세팅 화면이 뭔지" 알 필요가 없다(렌더러가 `playerX`를 모르는 것과 같은 원칙). `Application`이 콜백(`std::function<void()>`)을 주입해 DIP를 지킨다.
+`BuildLobbyScreen`/`BuildSettingsScreen`(과 서큘러 `BuildLevelUpScreen`)은 전부 `std::unique_ptr<ui::Widget>`를 반환하는 자유 함수(각각 `game/LobbyScreen.*`, `game/SettingsScreen.*`, `game/LevelUpScreen.*`)다 — `UIContext`가 "로비가 뭔지 세팅 화면이 뭔지" 알 필요가 없다(렌더러가 `playerX`를 모르는 것과 같은 원칙). `Application`이 콜백(`std::function<void()>`)을 주입해 DIP를 지킨다.
 
 `Run()`의 스텝 게이팅:
 
@@ -93,7 +99,7 @@ if (m_state == GameState::InGame && !m_ui.HasOverlay())
 
 ## 3. ESC 키
 
-`Application::OnKey`가 `VK_ESCAPE`를 가로챈다: 오버레이가 열려 있으면 닫고, InGame이고 오버레이가 없으면 Settings를 연다. Menu(씬 선택 화면)에서 ESC는 아무 일도 안 한다(종료는 그 화면의 QUIT 버튼으로만 — 실수로 창이 닫히는 것을 막는다).
+`Application::OnKey`가 `VK_ESCAPE`를 가로챈다: 오버레이가 열려 있으면 닫고, InGame이고 오버레이가 없으면 Settings를 연다. Menu(로비 화면)에서 ESC는 아무 일도 안 한다 — 이 화면엔 QUIT 버튼도 없다(종료는 창의 OS 닫기뿐 — 실수로 창이 닫히는 것을 막는다).
 
 **예외 — 서큘러 레벨업 모달**([circular-design.md](circular-design.md) §7.4 — 기초 설계 밖 [살]): 이것도 `SetOverlay` 오버레이지만 **ESC로 닫히지
 않는다**(`m_levelUpOverlayOpen`이 true면 ESC 무시 — 선택이 필수). 옵션 버튼 클릭은 콜백 안에서 오버레이를 지우지
@@ -121,7 +127,7 @@ SettingsScreen(NEXT 버튼) → Settings.resolutionIndex 갱신
 
 ## 5. 종료 파이프라인
 
-앱을 닫는 세 경로(씬 선택 화면의 QUIT 버튼 → `Win32Window::RequestClose`, 창 X 버튼, Alt+F4) 전부 같은 Win32 시퀀스로 모인다: `WM_CLOSE` → `IWindowEventSink::OnClose`(`Application::OnClose`) → (반환 후) `DefWindowProcW`가 `DestroyWindow` → `WM_DESTROY` → `PostQuitMessage` → 다음 프레임 `PumpMessages`가 `false`를 반환 → `Application::Run`의 루프가 끝난다.
+앱을 닫는 경로(창 X 버튼, Alt+F4 — UI 안에 QUIT 버튼은 더 이상 없다, 로비 화면이 GAME/TEST SCENE 둘뿐이라) 전부 같은 Win32 시퀀스로 모인다: `WM_CLOSE` → `IWindowEventSink::OnClose`(`Application::OnClose`) → (반환 후) `DefWindowProcW`가 `DestroyWindow` → `WM_DESTROY` → `PostQuitMessage` → 다음 프레임 `PumpMessages`가 `false`를 반환 → `Application::Run`의 루프가 끝난다.
 
 무엇이, 어디서 정리되는지:
 
@@ -144,7 +150,7 @@ SettingsScreen(NEXT 버튼) → Settings.resolutionIndex 갱신
 
 ### 새 상태로 전환하는 조건 추가하기
 
-버튼 클릭 콜백 안에서 `EnterXxx()`/`OpenXxx()`를 부르면 된다 — 씬 선택 화면의 CIRCULAR 버튼(`[this] { EnterInGame(DemoScene::Circular); }`)이 예시. 키 입력 조건(ESC처럼)은 `Application::OnKey`에 추가한다.
+버튼 클릭 콜백 안에서 `EnterXxx()`/`OpenXxx()`를 부르면 된다 — 로비 화면의 GAME 버튼(`[this] { EnterInGame(DemoScene::Circular); }`)이 예시. 키 입력 조건(ESC처럼)은 `Application::OnKey`에 추가한다.
 
 ### 종료 시 저장할 것 추가하기(세이브 데이터 등)
 
@@ -152,7 +158,7 @@ SettingsScreen(NEXT 버튼) → Settings.resolutionIndex 갱신
 
 ### 하지 말 것
 
-- `UIContext`에 "이게 씬 선택 화면이다" 같은 게임 개념을 넣지 않는다 — `SetScreen`/`SetOverlay`는 어떤 위젯 트리든 받는다.
+- `UIContext`에 "이게 로비 화면이다" 같은 게임 개념을 넣지 않는다 — `SetScreen`/`SetOverlay`는 어떤 위젯 트리든 받는다.
 - 오버레이가 열려 있는데 `Simulation::Step`을 부르지 않는다(위 게이팅 조건 유지).
-- 화면 전환 함수 밖에서 `m_state`를 직접 대입하지 않는다 — `EnterSceneSelect`/`EnterInGame`이 상태와 화면 트리를 항상 같이 바꾼다는 불변식이 깨진다.
+- 화면 전환 함수 밖에서 `m_state`를 직접 대입하지 않는다 — `EnterLobby`/`EnterInGame`이 상태와 화면 트리를 항상 같이 바꾼다는 불변식이 깨진다.
 - `OnClose()`에 렌더 스레드나 D3D11을 건드리는 코드를 넣지 않는다 — 이 함수는 메인 스레드(창 프로시저)에서 돈다. GPU 정리는 이미 `Dx11Renderer::Stop()`이 렌더 스레드 안에서 한다(§5).

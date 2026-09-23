@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include "game/Card.h"
 #include "game/Stats.h"
 
 // Designer-tunable numbers for the Circular scene - mob stats, spawn pacing,
@@ -50,7 +51,28 @@ namespace engine::game
         std::string name;                    // ASCII: the HUD font has no Hangul yet
         StatId      mainStat{ StatId::Vit }; // one of the four base stats
         std::array<float, kBaseStatCount> start{};   // starting vit / int / cor / agi
-        std::uint8_t startWeapon{ 0 };       // index into kCardDefs
+        std::uint8_t startWeapon{ 0 };       // index into CircularBalance::weapons
+    };
+
+    // accessories.csv - one row = one passive accessory (docs/circular-design.md
+    // §3.3). No effect code, unlike a weapon - a pure StatModifiers contribution
+    // (add or mul, same shape as the level-up stat cards it replaces in the
+    // level-up pool once owned). `amount` applies once per level (level N = N x
+    // amount), simplest "more levels = more of it" curve.
+    struct AccessoryDef
+    {
+        std::string name;                 // shown in the level-up modal / HUD (font: A-Z 0-9 : - . %)
+        StatId      stat{ StatId::Luck };
+        bool        multiplicative{ false };
+        float       amount{ 0.0f };       // per level: flat add in the stat's unit, or a fraction if multiplicative
+        int         maxLevel{ 5 };
+    };
+
+    // One owned accessory. `defIndex` indexes CircularBalance::accessories.
+    struct AccessoryInstance
+    {
+        std::uint8_t defIndex{ 0 };
+        int          level{ 1 };
     };
 
     struct CircularBalance
@@ -72,6 +94,8 @@ namespace engine::game
         PlayerTuning player;                          // player.csv
         StatDefTable stats{ kStatDefs };              // stats.csv overlays the defaults in Stats.h
         std::vector<CharacterDef> characters;         // characters.csv (never empty after Defaults/Load)
+        std::vector<CardDef> weapons{ kCardDefs.begin(), kCardDefs.end() };   // weapons.csv (never empty)
+        std::vector<AccessoryDef> accessories;        // accessories.csv (may be empty - accessories are optional content)
 
         struct SpawnRate
         {

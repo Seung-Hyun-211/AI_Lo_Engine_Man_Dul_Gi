@@ -74,11 +74,24 @@ namespace engine::game
         std::uint32_t DamageNearest(math::Vec2 center, float range, float amount, std::uint32_t count,
                                     math::Vec2* hitOut, std::uint32_t& hitCount);
 
-        // Same search as DamageNearest but changes nothing: writes the positions
-        // of the `count` (<= 8) nearest live mobs within `range` (nearest first)
-        // to out[0..found). Used to aim projectiles. Main thread only.
-        void FindNearest(math::Vec2 center, float range, std::uint32_t count,
-                         math::Vec2* out, std::uint32_t& found) const;
+        // Applies `amount` damage to every live mob within `range` of `center`
+        // AND within `halfAngleRad` of `forward` (docs/circular-design.md §3.2
+        // "검" - fan-shaped swing). Dot-product cone test, no atan2. A mob
+        // exactly on `center` is always inside the cone. `forward` need not be
+        // normalized. Same scan/kill shape as DamageInRadius. Main thread only.
+        std::uint32_t DamageInArc(math::Vec2 center, math::Vec2 forward, float halfAngleRad,
+                                  float range, float amount);
+
+        // Applies `amount` damage to every live mob within `halfWidth` of the
+        // segment [start,end] (docs §3.2 "채찍" - a straight-line swing with
+        // width). Closest-point-on-segment distance test. Main thread only.
+        std::uint32_t DamageInCapsule(math::Vec2 start, math::Vec2 end, float halfWidth, float amount);
+
+        // Read-only: the closest live mob within `radius` of `center`, if any
+        // (no damage). Used to aim a thrown projectile (docs §3.2 스태프/단검/
+        // 트럼프 카드) without a damaging scan. Main thread only (consistent
+        // with the Damage* queries, though this one doesn't mutate).
+        [[nodiscard]] bool ClosestWithin(math::Vec2 center, float radius, math::Vec2& posOut) const;
 
         // Charge pattern, step 1 (docs/circular-design.md "돌진 패턴"): freezes
         // a deterministic subset of Seek mobs into Windup. Eligible = outside
@@ -112,9 +125,6 @@ namespace engine::game
         [[nodiscard]] const std::vector<std::uint32_t>& ActiveIndices() const { return m_active; }
 
     private:
-        // Shared scan: indices of the nearest `count` (<= 8) mobs within `range`, nearest first.
-        void CollectNearest(math::Vec2 center, float range, std::uint32_t count,
-                            std::uint32_t* idxOut, std::uint32_t& found) const;
         // O(1) swap-remove out of the active list, same idiom as
         // core::ObjectPool::Release. Index must currently be live; a stale
         // or already-dead index is a no-op (safe to call twice).
