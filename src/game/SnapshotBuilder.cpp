@@ -882,12 +882,13 @@ namespace engine::game
         {
             // Everything below is in world units and goes through `view` - the
             // fixed 1920x1080 world slice scaled to this window (kCircularView).
-            // The player's sprite stands on its hitbox (bottom edges match, player.csv);
+            // The player's sprite is centred on its hitbox, its bottom edge hitbox_lift
+            // below the hitbox bottom (player.csv);
             // the camera centres the sprite, not the hitbox, so the character reads centred.
             const PlayerTuning& body = simulation.Balance().player;
             const math::Rect hitbox = simulation.PlayerHitbox();
             const math::Vec2 playerCenter = simulation.PlayerCenter();
-            const math::Vec2 spriteCenter{ playerCenter.x, hitbox.y + hitbox.height - body.spriteHeight * 0.5f };
+            const math::Vec2 spriteCenter{ playerCenter.x, hitbox.y + hitbox.height + body.hitboxLift - body.spriteHeight * 0.5f };
             const WorldView view = MakeCircularView(spriteCenter, viewportWidth, viewportHeight);
 
             const float time = simulation.ElapsedTime();

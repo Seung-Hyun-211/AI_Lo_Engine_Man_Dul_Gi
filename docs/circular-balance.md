@@ -101,8 +101,9 @@ tools\run_balance_sim.bat --seconds 300 --interval 10
 | key | 기본 | 뜻 |
 |---|---|---|
 | `walk_speed` | 300 | 걷기 px/s (× `move_speed` 스탯) |
-| `sprite_width` / `sprite_height` | 64 / 128 | 플레이어 그림 크기(월드 단위). 그림은 히트박스 위에 선다(아래 변 일치, 가로 가운데) |
-| `hitbox_width` / `hitbox_height` | 48 / 48 | 플레이어 콜라이더 = 게임상 몸(이동 경계·충돌·공격 원점·몹이 쫓는 점) |
+| `sprite_width` / `sprite_height` | 64 / 128 | 플레이어 그림 크기(월드 단위). 히트박스와 가로 가운데 정렬 |
+| `hitbox_width` / `hitbox_height` | 48 / 72 | 플레이어 콜라이더 = 게임상 몸(이동 경계·충돌·공격 원점·몹이 쫓는 점) |
+| `hitbox_lift` | 8 | 히트박스 아래 변이 그림 아래 변보다 이만큼 위(그림 발밑 여백) |
 | `run_mul` / `run_cost_per_sec` | 1.6 / 15 | 달리기 배율 / 초당 스태미너 소모 |
 | `run_resume_stamina` | 10 | 바닥나서 잠긴 달리기가 다시 풀리는 스태미너 |
 | `dash_speed_mul` / `dash_duration` | 3.5 / 0.18 | 대쉬 속도 배율 / 지속(=무적) 시간 s |

@@ -244,6 +244,7 @@ namespace engine::game
                 { "sprite_height",        &p.spriteHeight,       0.0f, false },
                 { "hitbox_width",         &p.hitboxWidth,        0.0f, false },
                 { "hitbox_height",        &p.hitboxHeight,       0.0f, false },
+                { "hitbox_lift",          &p.hitboxLift,         0.0f, true  },
             };
             LoadKeyValueFile(loader, dir, "player.csv", entries, std::size(entries));
         }

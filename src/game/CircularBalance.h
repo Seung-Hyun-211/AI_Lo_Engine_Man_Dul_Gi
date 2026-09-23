@@ -43,12 +43,14 @@ namespace engine::game
         float staminaRegenPerSec{ 30.0f };
         float staminaRegenDelay{ 0.8f };    // s after the last spend before regen starts
         // Body (world units). The hitbox is the player in gameplay terms - movement box,
-        // collision, attack origin, what mobs chase. The sprite is only drawn, bottom edge
-        // on the hitbox's bottom edge (feet), centred horizontally (docs/circular-art-guide.md §4).
+        // collision, attack origin, what mobs chase. The sprite is only drawn, centred
+        // horizontally, its bottom edge `hitboxLift` below the hitbox's bottom edge (the
+        // collider sits that far up from the image's bottom - docs/circular-art-guide.md §4).
         float spriteWidth{ 64.0f };
         float spriteHeight{ 128.0f };
         float hitboxWidth{ 48.0f };
-        float hitboxHeight{ 48.0f };
+        float hitboxHeight{ 72.0f };
+        float hitboxLift{ 8.0f };
     };
 
     // characters.csv - one row = one playable character (docs/circular-design.md §2.3).
