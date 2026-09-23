@@ -4,6 +4,7 @@
 #include "core/NonCopyable.h"
 #include "game/Card.h"
 #include "game/CircularBalance.h"
+#include "game/CircularCombat.h"
 #include "game/CircularConfig.h"
 #include "game/MobField.h"
 #include "math/Math.h"
@@ -80,53 +81,6 @@ namespace engine::game
         float      halfSize{ 0.0f };
         float      warnLeft{ 0.0f };
         float      warnTotal{ 1.0f };
-    };
-
-    // A blinking yellow ring showing PULSE's radius at the moment it fired -
-    // render-only (no EffectPass2D glow - plain flat shapes only, docs/
-    // circular-design.md §7), ages out the same way TracerLine does further
-    // down. SnapshotBuilder draws it as a dashed ring of worldQuads.
-    struct PulseRing
-    {
-        math::Vec2 pos{};
-        float range{ 0.0f };
-        float ageLeft{ 0.0f };
-        float life{ 1.0f };   // ageLeft/life -> 1 (just spawned) .. 0 (about to vanish)
-    };
-
-    // A red square that visually travels from the caster to a BOLT hit -
-    // render-only and purely cosmetic: the hit already landed (DamageNearest)
-    // when this is queued, so it never affects gameplay timing, only how the
-    // shot reads on screen. Ages out the same way TracerLine does.
-    struct BoltShot
-    {
-        math::Vec2 start{};
-        math::Vec2 end{};
-        float ageLeft{ 0.0f };
-        float life{ 1.0f };   // ageLeft/life -> 1 (just fired) .. 0 (arrived)
-    };
-
-    // Which weapon-specific thing a live Projectile does on its first hit each
-    // step (docs/circular-design.md §3.2 무기 5종). Simulation::StepProjectiles
-    // switches on this - same "effect tag, not an if-chain" shape as CardEffect.
-    enum class ProjectileKind : std::uint8_t { Piercing, Exploding, Random };
-
-    // A real, physically-travelling shot (스태프/단검/트럼프 카드) - unlike
-    // BoltShot above, this one carries gameplay state: its own position/
-    // velocity/remaining flight distance, and it deals damage when it
-    // actually touches a mob (not on cast). Simulation owns a bounded pool
-    // (kMaxProjectiles) in a plain std::vector, swap-removed like HitFlash/
-    // BoltShot when spent.
-    struct Projectile
-    {
-        math::Vec2 pos{};
-        math::Vec2 vel{};              // px/s
-        float rangeLeft{ 0.0f };       // px budget - despawns (no hit) when this runs out
-        float damage{ 0.0f };          // Piercing/Exploding: the hit damage. Random: the roll's lower bound.
-        float damageMax{ 0.0f };       // Random only: the roll's upper bound (unused otherwise)
-        float explodeRadius{ 0.0f };   // Exploding only: AoE radius on contact
-        std::uint8_t piercesLeft{ 0 }; // Piercing only: hits left before it's spent
-        ProjectileKind kind{ ProjectileKind::Piercing };
     };
 
 #if defined(ENGINE_WITH_3D)
@@ -296,22 +250,6 @@ namespace engine::game
         static constexpr float kPlayerSize = 64.0f;
         static constexpr std::size_t kParticleCount = 20'000;
         static constexpr int kObstacleCount = 3;
-
-        static constexpr float kPulseRingLife = 0.20f;             // seconds the PULSE range ring blinks
-        static constexpr float kBoltShotSpeed = 1200.0f;           // px/s the BOLT projectile visual travels at
-        static constexpr float kBoltShotMinLife = 0.05f;           // seconds - floor so a point-blank hit still reads
-
-        // Real projectiles (스태프/단검/트럼프 카드, §3.2) - unlike BoltShot,
-        // these carry gameplay state (see Projectile's own comment).
-        static constexpr std::size_t kMaxProjectiles = 512;
-        static constexpr float kProjectileHitReach = 6.0f;   // px added to a mob's radius for the touch test
-        // A Piercing shot that lands a hit is nudged this far past the mob it
-        // just hit (along its own velocity) so the NEXT step's touch test
-        // doesn't immediately re-hit the same still-alive mob (no per-mob
-        // "already hit" tracking exists - MobField doesn't expose slot
-        // identity through DamageNearest, only positions). [살] mitigation,
-        // not exact geometry.
-        static constexpr float kPierceClearDistance = 24.0f;
 
         // Test scene (EnterCircularTestScene) - one dummy target, no swarm/charge
         // pattern, for isolating weapon damage/behaviour from spawn noise.
@@ -572,9 +510,7 @@ namespace engine::game
         // ENGINE_WITH_3D dependency ---
         [[nodiscard]] const MobField& Mobs() const { return m_mobs; }
         [[nodiscard]] int MobKillCount() const { return m_mobKillCount; }
-        [[nodiscard]] const std::vector<PulseRing>& PulseRings() const { return m_pulseRings; }
-        [[nodiscard]] const std::vector<BoltShot>& BoltShots() const { return m_boltShots; }
-        [[nodiscard]] const std::vector<Projectile>& Projectiles() const { return m_projectiles; }
+        [[nodiscard]] const CircularCombat& Combat() const { return m_combat; }   // projectiles + attack visuals
         [[nodiscard]] const ChargeZone& ChargeZoneState() const { return m_chargeZone; }
 
         // Progression / deck (docs/circular-design.md §2/§3/§10) - Circular only.
@@ -689,18 +625,10 @@ namespace engine::game
         // ages out hit flashes. Called from Step() when m_demoScene ==
         // DemoScene::Circular.
         void StepCircularScene(float fixedDelta);
-        // Ticks every card's cooldown and runs the ones that expired; returns
-        // how many mobs the whole deck killed this step (for kills/XP).
-        std::uint32_t StepCards(float fixedDelta, math::Vec2 playerCenter);
-        // Flies every live Projectile one step and applies its weapon-specific
-        // effect on the first mob it touches (§3.2 스태프/단검/트럼프 카드).
-        // Returns kills. Swap-removes spent projectiles the same way StepCards'
-        // caller ages out PulseRing/BoltShot.
-        std::uint32_t StepProjectiles(float fixedDelta);
-        // The effect switch (docs §2 "효과 태그 테이블"). Returns kills.
-        std::uint32_t ExecuteCard(const CardInstance& card, math::Vec2 playerCenter);
-        // life_steal consumer, shared by both ExecuteCard cases - see the .cpp.
-        void ApplyLifeSteal(float damage, std::uint32_t kills);
+        // Ticks every card's cooldown, fires the ones that expired and steps
+        // the live attacks (CircularCombat); applies the result (kills -> XP,
+        // life_steal -> HP).
+        void StepCombat(float fixedDelta, math::Vec2 playerCenter);
         // Converts kills into XP and, when a threshold is crossed, arms the
         // level-up (RollLevelUpChoices + m_levelUpPending).
         void AwardKills(std::uint32_t kills);
@@ -815,9 +743,7 @@ namespace engine::game
         float m_chargePatternTimer{ 0.0f };        // counts down to the next marking while no zone is active
         std::uint32_t m_chargePatternCount{ 0 };   // salt for MobField::BeginWindup's subset hash
         int m_mobKillCount{ 0 };
-        std::vector<PulseRing> m_pulseRings;
-        std::vector<BoltShot> m_boltShots;
-        std::vector<Projectile> m_projectiles;   // <= kMaxProjectiles
+        CircularCombat m_combat;                   // weapon firing, projectiles, attack visuals (docs/circular-combat.md §2.0)
         std::vector<CardInstance> m_deck;          // <= kProgression.maxDeckSlots; slot index is the identity
         std::vector<AccessoryInstance> m_accessories;   // <= kProgression.maxDeckSlots, same cap as the weapon deck
         StatBlock m_stats;                         // evaluated numbers (RecomputeStats); consumers read by StatId

@@ -56,6 +56,7 @@
     <ClCompile Include="src\game\Application.cpp" />
     <ClCompile Include="src\game\CharacterAnimationState.cpp" />
     <ClCompile Include="src\game\CircularBalance.cpp" />
+    <ClCompile Include="src\game\CircularCombat.cpp" />
     <ClCompile Include="src\game\LevelUpScreen.cpp" />
     <ClCompile Include="src\game\MobField.cpp" />
     <ClCompile Include="src\game\SettingsScreen.cpp" />
@@ -107,6 +108,7 @@
     <ClInclude Include="src\game\CharacterAnimationState.h" />
     <ClInclude Include="src\game\Card.h" />
     <ClInclude Include="src\game\CircularBalance.h" />
+    <ClInclude Include="src\game\CircularCombat.h" />
     <ClInclude Include="src\game\Stats.h" />
     <ClInclude Include="src\game\CircularConfig.h" />
     <ClInclude Include="src\game\CrowdConfig.h" />

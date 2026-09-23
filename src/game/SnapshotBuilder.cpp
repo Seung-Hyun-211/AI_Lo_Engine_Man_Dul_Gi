@@ -818,7 +818,7 @@ namespace engine::game
 
             // PULSE range -> a blinking yellow dotted ring (no glow VFX, plain
             // flat shapes - docs/circular-design.md §7 "이펙트 없음").
-            for (const PulseRing& ring : simulation.PulseRings())
+            for (const PulseRing& ring : simulation.Combat().PulseRings())
             {
                 const float t = ring.life > 0.0f ? math::Clamp(ring.ageLeft / ring.life, 0.0f, 1.0f) : 0.0f;
                 const float blink = std::sin(ring.ageLeft * 55.0f) > 0.0f ? 1.0f : 0.35f;
@@ -829,7 +829,7 @@ namespace engine::game
             // BOLT -> a red square travelling from the caster to each hit. Purely
             // cosmetic (the damage already landed) - just how the shot reads.
             constexpr float kBoltShotSize = 14.0f;
-            for (const BoltShot& shot : simulation.BoltShots())
+            for (const BoltShot& shot : simulation.Combat().BoltShots())
             {
                 const float t = shot.life > 0.0f ? math::Clamp(1.0f - shot.ageLeft / shot.life, 0.0f, 1.0f) : 1.0f;
                 const math::Vec2 pos = toScreen(shot.start + (shot.end - shot.start) * t);
@@ -843,7 +843,7 @@ namespace engine::game
             // to show). Colour by kind so the three read apart at a glance;
             // still a plain flat square, no glow.
             constexpr float kProjectileSize = 12.0f;
-            for (const Projectile& shot : simulation.Projectiles())
+            for (const Projectile& shot : simulation.Combat().Projectiles())
             {
                 math::Color color{ 0.8f, 0.8f, 0.85f, 1.0f };   // Piercing: silver
                 if (shot.kind == ProjectileKind::Exploding) color = { 1.0f, 0.55f, 0.15f, 1.0f };

@@ -302,9 +302,7 @@ namespace engine::game
         m_chargePatternTimer = kChargePattern.firstDelaySeconds;
         m_chargePatternCount = 0;
         m_mobKillCount = 0;
-        m_pulseRings.clear();
-        m_boltShots.clear();
-        m_projectiles.clear();
+        m_combat.Reset();
         // Fresh run: the chosen character's start weapon, no stat cards, level 1.
         // The RNG is reseeded so a run replays identically given identical
         // input - level-up options are the only <random> use.
@@ -488,7 +486,7 @@ namespace engine::game
         m_stamina = std::min(m_stamina, m_stats[StatId::StaminaMax]);
 
         // HP regen (§2.6) - same per-step pass as stamina since both are player
-        // vitals. hp_regen is HP/second; life_steal heals on hit instead (ExecuteCard).
+        // vitals. hp_regen is HP/second; life_steal heals on hit instead (StepCombat).
         m_playerHp = std::min(m_stats[StatId::MaxHp], m_playerHp + m_stats[StatId::HpRegen] * dt);
 
         m_player = m_player + velocityDir * (speed * dt);
@@ -549,215 +547,26 @@ namespace engine::game
         }
         m_mobs.Step(m_jobs, playerCenter, m_balance.mobSpeed, fixedDelta);
 
-        AwardKills(StepCards(fixedDelta, playerCenter) + StepProjectiles(fixedDelta));
-
-        // Swap-remove expired attack visuals (same idiom as elsewhere in this file, e.g. tracers).
-        for (std::size_t i = 0; i < m_pulseRings.size(); )
-        {
-            m_pulseRings[i].ageLeft -= fixedDelta;
-            if (m_pulseRings[i].ageLeft <= 0.0f) { m_pulseRings[i] = m_pulseRings.back(); m_pulseRings.pop_back(); }
-            else ++i;
-        }
-        for (std::size_t i = 0; i < m_boltShots.size(); )
-        {
-            m_boltShots[i].ageLeft -= fixedDelta;
-            if (m_boltShots[i].ageLeft <= 0.0f) { m_boltShots[i] = m_boltShots.back(); m_boltShots.pop_back(); }
-            else ++i;
-        }
+        StepCombat(fixedDelta, playerCenter);
     }
 
-    std::uint32_t Simulation::StepCards(float fixedDelta, math::Vec2 playerCenter)
+    void Simulation::StepCombat(float fixedDelta, math::Vec2 playerCenter)
     {
-        std::uint32_t kills = 0;
+        const CombatContext context{ m_balance, m_stats, playerCenter, m_lastMoveDir };
+        CombatResult result;
         for (CardInstance& card : m_deck)
         {
             card.cooldownLeft -= fixedDelta;
             if (card.cooldownLeft > 0.0f) continue;
             // attack_speed is a rate: 1.25 = a 20% shorter cooldown.
             card.cooldownLeft = CardCooldown(m_balance.weapons[card.defIndex], card.level) / std::max(m_stats[StatId::AttackSpeed], 0.05f);
-            kills += ExecuteCard(card, playerCenter);
+            result += m_combat.Fire(card, context, m_mobs, m_rng);
         }
-        return kills;
-    }
+        result += m_combat.Step(fixedDelta, context, m_mobs, m_rng);
 
-    std::uint32_t Simulation::StepProjectiles(float fixedDelta)
-    {
-        std::uint32_t kills = 0;
-        const float reach = m_balance.mobRadius + kProjectileHitReach;
-        for (std::size_t i = 0; i < m_projectiles.size(); )
-        {
-            Projectile& shot = m_projectiles[i];
-            const float speed = math::Length(shot.vel);
-            shot.pos = shot.pos + shot.vel * fixedDelta;
-            shot.rangeLeft -= speed * fixedDelta;
-
-            bool spent = false;
-            switch (shot.kind)
-            {
-            case ProjectileKind::Exploding:
-            {
-                // "닿으면 폭발" (§3.2 스태프) - contact only, not on range-out:
-                // read-only proximity check first, then the AoE is the hit.
-                math::Vec2 hitPos;
-                if (m_mobs.ClosestWithin(shot.pos, reach, hitPos))
-                {
-                    const std::uint32_t hitKills = m_mobs.DamageInRadius(hitPos, shot.explodeRadius, shot.damage);
-                    kills += hitKills;
-                    ApplyLifeSteal(shot.damage, hitKills);
-                    m_pulseRings.push_back({ hitPos, shot.explodeRadius, kPulseRingLife, kPulseRingLife });   // stand-in blast ring
-                    spent = true;
-                }
-                break;
-            }
-            case ProjectileKind::Piercing:
-            {
-                math::Vec2 hit;
-                std::uint32_t hitCount = 0;
-                const std::uint32_t hitKills = m_mobs.DamageNearest(shot.pos, reach, shot.damage, 1, &hit, hitCount);
-                if (hitCount > 0)
-                {
-                    kills += hitKills;
-                    ApplyLifeSteal(shot.damage, hitKills);
-                    m_boltShots.push_back({ shot.pos, hit, kBoltShotMinLife, kBoltShotMinLife });
-                    if (shot.piercesLeft > 0) --shot.piercesLeft;
-                    if (shot.piercesLeft == 0) spent = true;
-                    // Nudge past the mob just hit so next step doesn't immediately
-                    // re-hit it (see kPierceClearDistance's comment).
-                    else if (speed > 0.0f) shot.pos = shot.pos + shot.vel * (kPierceClearDistance / speed);
-                }
-                break;
-            }
-            case ProjectileKind::Random:
-            {
-                math::Vec2 nearest;
-                if (m_mobs.ClosestWithin(shot.pos, reach, nearest))
-                {
-                    // Roll only when a hit is about to happen - keeps the RNG
-                    // stream from churning on every empty in-flight step.
-                    std::uniform_real_distribution<float> roll(shot.damage, std::max(shot.damage, shot.damageMax));
-                    const float rolled = roll(m_rng);
-                    math::Vec2 hit;
-                    std::uint32_t hitCount = 0;
-                    const std::uint32_t hitKills = m_mobs.DamageNearest(shot.pos, reach, rolled, 1, &hit, hitCount);
-                    kills += hitKills;
-                    ApplyLifeSteal(rolled, hitKills);
-                    m_boltShots.push_back({ shot.pos, hit, kBoltShotMinLife, kBoltShotMinLife });
-                    spent = true;
-                }
-                break;
-            }
-            }
-
-            if (spent || shot.rangeLeft <= 0.0f) { m_projectiles[i] = m_projectiles.back(); m_projectiles.pop_back(); }
-            else ++i;
-        }
-        return kills;
-    }
-
-    std::uint32_t Simulation::ExecuteCard(const CardInstance& card, math::Vec2 playerCenter)
-    {
-        const CardDef& def = m_balance.weapons[card.defIndex];
-        // Weapons read the stat block by id (docs §2.6): damage x weapon_damage,
-        // range x attack_size, bolt targets + extra_projectiles.
-        // One crit roll per cast (the whole pulse/volley/shot crits together,
-        // not per target) - std::uniform_real_distribution over the shared
-        // level-up RNG (still deterministic given the same fixed-seed input/timing).
-        std::uniform_real_distribution<float> critRoll(0.0f, 1.0f);
-        const bool crit = critRoll(m_rng) < m_stats[StatId::CritChance];
-        const float dmgMul = m_stats[StatId::WeaponDamage] * (crit ? m_stats[StatId::CritDamage] : 1.0f);
-        const float damage = CardDamage(def, card.level) * dmgMul;
-        const float range = CardRange(def, card.level) * m_stats[StatId::AttackSize];
-
-        switch (def.effect)
-        {
-        case CardEffect::RadialPulse:
-        {
-            const std::uint32_t kills = m_mobs.DamageInRadius(playerCenter, range, damage);
-            m_pulseRings.push_back({ playerCenter, range, kPulseRingLife, kPulseRingLife });
-            ApplyLifeSteal(damage, kills);
-            return kills;
-        }
-        case CardEffect::NearestBolt:
-        {
-            math::Vec2 hits[kMaxBoltTargets];
-            std::uint32_t hitCount = 0;
-            const int targets = std::min(CardTargets(def, card.level) + static_cast<int>(m_stats[StatId::ExtraProjectiles]),
-                                         kMaxBoltTargets);
-            const std::uint32_t kills = m_mobs.DamageNearest(
-                playerCenter, range, damage, static_cast<std::uint32_t>(targets), hits, hitCount);
-            // Cosmetic only - the hit already landed above. Duration scales
-            // with distance so the square visibly "flies" instead of teleporting.
-            for (std::uint32_t i = 0; i < hitCount; ++i)
-            {
-                const float life = std::max(kBoltShotMinLife, math::Length(hits[i] - playerCenter) / kBoltShotSpeed);
-                m_boltShots.push_back({ playerCenter, hits[i], life, life });
-            }
-            ApplyLifeSteal(damage, kills);
-            return kills;
-        }
-        case CardEffect::ArcSwing:
-        {
-            const float halfAngleRad = def.coneHalfAngleDeg * (3.14159265f / 180.0f);
-            const std::uint32_t kills = m_mobs.DamageInArc(playerCenter, m_lastMoveDir, halfAngleRad, range, damage);
-            m_pulseRings.push_back({ playerCenter, range, kPulseRingLife, kPulseRingLife });   // stand-in visual until a real swing shape exists
-            ApplyLifeSteal(damage, kills);
-            return kills;
-        }
-        case CardEffect::LineSwing:
-        {
-            const float halfWidth = def.lineHalfWidth * m_stats[StatId::AttackSize];
-            const math::Vec2 lineEnd = playerCenter + m_lastMoveDir * range;
-            const std::uint32_t kills = m_mobs.DamageInCapsule(playerCenter, lineEnd, halfWidth, damage);
-            m_boltShots.push_back({ playerCenter, lineEnd, kPulseRingLife, kPulseRingLife });   // stand-in visual (line sweep)
-            ApplyLifeSteal(damage, kills);
-            return kills;
-        }
-        case CardEffect::ExplodingBolt:
-        case CardEffect::PiercingShot:
-        case CardEffect::RandomDamageShot:
-        {
-            // Damage lands later, in StepProjectiles - these three actually fly.
-            if (m_projectiles.size() >= kMaxProjectiles) return 0;   // pool full: drop, not fatal (MobField::Spawn's convention)
-            math::Vec2 aimPos;
-            const math::Vec2 aimDir = m_mobs.ClosestWithin(playerCenter, range, aimPos)
-                ? math::Normalized(aimPos - playerCenter) : m_lastMoveDir;
-            if (aimDir.x == 0.0f && aimDir.y == 0.0f) return 0;   // nothing to aim along
-
-            Projectile shot;
-            shot.pos = playerCenter;
-            shot.vel = aimDir * def.projectileSpeed;
-            shot.rangeLeft = range;
-            shot.damage = damage;
-            switch (def.effect)
-            {
-            case CardEffect::RandomDamageShot:
-                shot.damageMax = CardDamageMax(def, card.level) * dmgMul;
-                shot.kind = ProjectileKind::Random;
-                break;
-            case CardEffect::PiercingShot:
-                shot.piercesLeft = static_cast<std::uint8_t>(CardTargets(def, card.level));
-                shot.kind = ProjectileKind::Piercing;
-                break;
-            default:   // ExplodingBolt
-                shot.explodeRadius = def.explodeRadius * m_stats[StatId::AttackSize];
-                shot.kind = ProjectileKind::Exploding;
-                break;
-            }
-            m_projectiles.push_back(shot);
-            return 0;
-        }
-        }
-        return 0;
-    }
-
-    // life_steal (§2.6): heals a fraction of the killing blow's damage per kill.
-    // Kill-gated (not per point of damage dealt) since DamageInRadius/DamageNearest
-    // only report kill counts, not total damage applied to survivors.
-    void Simulation::ApplyLifeSteal(float damage, std::uint32_t kills)
-    {
-        if (kills == 0) return;
-        m_playerHp = std::min(m_stats[StatId::MaxHp],
-                              m_playerHp + damage * m_stats[StatId::LifeSteal] * static_cast<float>(kills));
+        // life_steal (§2.6) - CircularCombat reports the heal, HP stays ours.
+        if (result.heal > 0.0f) m_playerHp = std::min(m_stats[StatId::MaxHp], m_playerHp + result.heal);
+        AwardKills(result.kills);
     }
 
     float Simulation::XpNeeded() const
