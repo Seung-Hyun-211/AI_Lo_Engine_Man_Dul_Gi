@@ -171,6 +171,9 @@
 | `attack_speed` | **공격속도** | 무기 쿨다운 배율(↓) | 모든 무기 쿨다운 | [확정] |
 | `max_hp`, `hp_regen` | 최대 HP / 초당 재생 | 체력 스텟 파생 | `Simulation::m_playerHp` (`StepCircularPlayer`) | [살 추가] ✅ |
 | `damage_reduction` | 받는 피해 감소 | 체력 스텟 파생 | 몹 접촉 피해(M3 이후 — 아직 없음) | [살 추가] |
+| `defense` | **방어력** | 받는 피해를 줄이는 수치(점수). **계산식 [미정 — 나중에 추가]** | 몹 공격 피해(M3 이후) | [확정: 2026-09-23 사용자 추가] 값·표시만 ✅ |
+| `dot_damage` | **지속피해** | 도트 피해의 세기(점수). **계산식 [미정]** | 지속피해 공격(아직 없음) | [확정: 2026-09-23 사용자 추가] 값·표시만 ✅ |
+| `armor_break` | **방어력 감소** | 공격이 대상의 방어력을 깎는 양(점수). **계산식 [미정]** | 몹 방어력(M3 `mobs.csv` 이후) | [확정: 2026-09-23 사용자 추가] 값·표시만 ✅ |
 | `life_steal` | **체력 흡수** | 처치당 마지막 타격 피해의 비율만큼 HP 회복 | `CircularCombat::Hit`(킬 게이트 — 생존한 대상에게 준 피해는 집계 안 함, 회복량은 `CombatResult.heal` 로 `Simulation` 이 반영) | [살 추가] ✅ |
 | `move_speed` | 이동속도 | 걷기·달리기 배율 | `StepCircularPlayer` | [살 추가] ✅ |
 | `weapon_damage` | 무기 피해 | 모든 무기 피해 배율 | `CircularCombat::Fire` | [살 추가] |
@@ -184,7 +187,7 @@
 
 - **HUD 상태창(우상단 2-2 팝업)** 에 보여줄 능력치 = 기초 4스텟 + `max_hp`·`move_speed`·`weapon_damage`·`attack_speed`·`attack_size`·`extra_projectiles`·`luck`·`crit_chance` (+ 스크롤로 나머지). (목록 확정 요청: §12.3 A)
 - 데이터: `stats.csv` ✅ `stat_id, base_value, min, max, from_vit, from_int, from_cor, from_agi` (`name_ko`/`display_order` 는 M2 상태창 때 추가). 무기·몹 코드는 능력치를 **id 로 조회**(`m_stats[StatId::AttackSpeed]`)하고 하드코딩하지 않는다.
-- **구현 ✅ (M1)**: `game/Stats.h` — `StatId`(기초 4 + 파생), `kStatDefs`(기본값), `StatModifiers{add, mul}`, `StatBlock`, `ComputeStats`(헤더 전용). `Simulation::RecomputeStats()` 가 캐릭터 시작값 + 레벨업 스탯 카드(`m_cardMods`)로 다시 계산한다 — **런 시작 · 레벨업 선택 · F5 리로드 때만**(더티), 매 스텝 아님. 소비처 지금: `attack_speed`(쿨다운 ÷), `weapon_damage`(피해 ×), `attack_size`(반경/사거리 ×), `extra_projectiles`(BOLT 대상 +N), `move_speed`, `xp_gain`, `stamina_max/regen`, `dash_*`, **`max_hp`/`hp_regen`(플레이어 HP, 아래)·`crit_chance`/`crit_damage`(캐스트당 1회 롤)·`life_steal`(킬당 회복)**. 값만 있고 소비처 없음: `luck`(소비처는 **확정** — CardSelect 카드 티어, §3.4. 티어 판정 자체가 미구현), `damage_reduction`(접촉 피해, M3), `ultimate_charge_mul`(궁극기, §2.4), `corruption_power`(오염 계열, [미정]).
+- **구현 ✅ (M1)**: `game/Stats.h` — `StatId`(기초 4 + 파생), `kStatDefs`(기본값), `StatModifiers{add, mul}`, `StatBlock`, `ComputeStats`(헤더 전용). `Simulation::RecomputeStats()` 가 캐릭터 시작값 + 레벨업 스탯 카드(`m_cardMods`)로 다시 계산한다 — **런 시작 · 레벨업 선택 · F5 리로드 때만**(더티), 매 스텝 아님. 소비처 지금: `attack_speed`(쿨다운 ÷), `weapon_damage`(피해 ×), `attack_size`(반경/사거리 ×), `extra_projectiles`(BOLT 대상 +N), `move_speed`, `xp_gain`, `stamina_max/regen`, `dash_*`, **`max_hp`/`hp_regen`(플레이어 HP, 아래)·`crit_chance`/`crit_damage`(캐스트당 1회 롤)·`life_steal`(킬당 회복)**. 값만 있고 소비처 없음: `luck`(소비처는 **확정** — CardSelect 카드 티어, §3.4. 티어 판정 자체가 미구현), `damage_reduction`(접촉 피해, M3), `ultimate_charge_mul`(궁극기, §2.4), `corruption_power`(오염 계열, [미정]), `defense`·`dot_damage`·`armor_break`(2026-09-23 추가 — 계산식 [미정], 상태창에만 표시).
 - **플레이어 HP ✅ (신규)**: `Simulation::m_playerHp`(현재값) + `stats[MaxHp]`(최대값). 새 런/캐릭터 선택 시 풀피, `RecomputeStats` 때 최대치로 클램프(스태미너와 같은 패턴). `StepCircularPlayer` 에서 `hp_regen` 만큼 매초 회복. **몹이 아직 플레이어를 때리지 못한다**(접촉 피해는 M3) — 그래서 지금은 항상 풀피로 보인다. HUD 좌상단에 바로 표시(스태미너 바 위). 대쉬 무적(`PlayerInvulnerable()`)이 막을 대상이 이걸로 생겼다 — 접촉 피해가 생기면 그 판정이 이 값을 본다.
 - 레벨업 **스탯 카드**(`Card.h` `kStatCards`, 9종): 이동속도 +10% · XP +15% · 공격속도 +8% · 공격 크기 +10% · 무기 피해 +10% · 체력/지력/오염/민첩 +2. `StatCardDef{label, stat, multiplicative, amount}` 한 줄 = 카드 한 종. 옛 `PlayerStats`/`PlayerStat` 은 삭제됨.
 - 미구현 파생 [살 목록에 있으나 제외]: `projectile_speed, pierce, knockback, duration, pickup_range, currency_gain_mul` — 소비처(투사체 무기·젬·상점)가 생길 때 `StatId` 한 줄 + `kStatDefs` 한 줄 + `stats.csv` 한 행으로 추가한다.

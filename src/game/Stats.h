@@ -26,6 +26,8 @@ namespace engine::game
         MaxHp, HpRegen, DamageReduction, CritChance, CritDamage, LifeSteal, XpGain,
         StaminaMax, StaminaRegen, DashCostMul, DashChainPenaltyMul, DashCooldownMul,
         UltimateChargeMul, CorruptionPower,
+        // values only for now - formulas and consumers come later (docs/circular-design.md §2.6)
+        Defense, DotDamage, ArmorBreak,
         Count
     };
 
@@ -69,6 +71,9 @@ namespace engine::game
         { "dash_cooldown_mul",      "DASH CD",      1.0f, 0.2f, 3.0f,   { 0.0f,   0.0f,   0.0f,   0.0f   } },
         { "ultimate_charge_mul",    "ULT CHARGE",   1.0f, 0.1f, 5.0f,   { 0.0f,   0.02f,  0.0f,   0.0f   } },
         { "corruption_power",       "CORRUPTION",   1.0f, 0.1f, 10.0f,  { 0.0f,   0.0f,   0.03f,  0.0f   } },
+        { "defense",                "DEF",          0.0f, 0.0f, 999.0f, { 0.0f,   0.0f,   0.0f,   0.0f   } },
+        { "dot_damage",             "DOT",          0.0f, 0.0f, 999.0f, { 0.0f,   0.0f,   0.0f,   0.0f   } },
+        { "armor_break",            "DEF BREAK",    0.0f, 0.0f, 999.0f, { 0.0f,   0.0f,   0.0f,   0.0f   } },
     } };
 
     using StatDefTable = std::array<StatDef, kStatCount>;

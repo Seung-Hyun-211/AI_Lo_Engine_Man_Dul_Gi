@@ -4,8 +4,9 @@
 # then clamped to min..max. adds/muls come from the character (characters.csv) and level-up stat cards.
 # Only stat_id is required; empty cells keep the built-in value. Unknown stat_id rows are ignored with a warning.
 # Consumed today: attack_size, extra_projectiles, attack_speed, weapon_damage, move_speed, xp_gain, stamina_*, dash_*,
-# max_hp/hp_regen/crit_chance/crit_damage/life_steal (player HP + weapon crit roll, ExecuteCard).
-# The rest (luck, damage_reduction, ...) are stored and shown but wait for their systems (contact damage, ultimate, ...).
+# max_hp/hp_regen/crit_chance/crit_damage/life_steal (player HP + weapon crit roll, CircularCombat).
+# The rest (luck, damage_reduction, defense, dot_damage, armor_break, ...) are stored and shown but wait for their
+# systems and formulas (contact damage, damage-over-time, ultimate, ...).
 stat_id,base_value,min,max,from_vit,from_int,from_cor,from_agi
 vit,0,0,999,,,,
 int,0,0,999,,,,
@@ -31,3 +32,6 @@ dash_chain_penalty_mul,1.0,0,3,,,,
 dash_cooldown_mul,1.0,0.2,3,,,,
 ultimate_charge_mul,1.0,0.1,5,0,0.02,0,0
 corruption_power,1.0,0.1,10,0,0,0.03,0
+defense,0,0,999,,,,
+dot_damage,0,0,999,,,,
+armor_break,0,0,999,,,,

@@ -1466,7 +1466,7 @@ namespace engine::game
             const math::Rect statusPopup = ResolveHudRect({ 1563.0f, 83.0f, 259.0f, 505.0f }, HudAnchor::TopRight, vw, vh);
             DrawHudPanel(snapshot.uiQuads, statusPopup, kPanelFill);
             {
-                char lines[10][40];
+                char lines[12][40];
                 int n = 0;
                 std::snprintf(lines[n++], 40, "%s", simulation.Character().name.c_str());
                 std::snprintf(lines[n++], 40, "VIT %d   INT %d",
@@ -1487,6 +1487,9 @@ namespace engine::game
                               static_cast<int>(stats[StatId::CritDamage] * 100.0f + 0.5f));
                 std::snprintf(lines[n++], 40, "LIFESTEAL %d%%", static_cast<int>(stats[StatId::LifeSteal] * 100.0f + 0.5f));
                 std::snprintf(lines[n++], 40, "LUCK %d", static_cast<int>(stats[StatId::Luck] + 0.5f));
+                std::snprintf(lines[n++], 40, "DEF %d   DOT %d", static_cast<int>(stats[StatId::Defense] + 0.5f),
+                              static_cast<int>(stats[StatId::DotDamage] + 0.5f));
+                std::snprintf(lines[n++], 40, "DEF BREAK %d", static_cast<int>(stats[StatId::ArmorBreak] + 0.5f));
                 for (int i = 0; i < n; ++i)
                     ui::DrawText(snapshot.uiQuads, lines[i], { statusPopup.x + 10.0f, statusPopup.y + 10.0f + static_cast<float>(i) * 20.0f },
                                 kLabelScale, { 0.85f, 0.90f, 1.0f, 1.0f });
